@@ -1,0 +1,257 @@
+<style>
+    @media print {
+        /* Hide every element on the screen by default */
+        body * {
+            visibility: hidden !important;
+        }
+
+        /* Show only the printable transfer form container and its contents */
+        #printableArea, #printableArea * {
+            visibility: visible !important;
+        }
+
+        /* Position the form to fill the print page neatly */
+        #printableArea {
+            position: absolute !important;
+            left: 0 !important;
+            top: 0 !important;
+            width: 100% !important;
+            margin: 0 !important;
+            padding: 0 !important;
+            box-shadow: none !important;
+            border: none !important;
+        }
+
+        /* Hide non-printable interactive elements during printing */
+        #productListBtn,
+        .no-print,
+        #productListModal,
+        td.no-print,
+        th.no-print {
+            display: none !important;
+        }
+
+        /* Remove fixed height wrappers to display full list on printed paper */
+        div {
+            max-height: none !important;
+            overflow: visible !important;
+        }
+
+        /* Force accurate background color printing for table headers */
+        thead tr, th {
+            -webkit-print-color-adjust: exact !important;
+            print-color-adjust: exact !important;
+        }
+
+        tr {
+            page-break-inside: avoid;
+        }
+    }
+</style>
+
+<!-- Main Printable Wrapper Container -->
+<div id="printableArea" style="color: #000; background: #fff; padding: 12px; position: relative; box-sizing: border-box; display: flex; flex-direction: column; height: 100%; font-family: monospace;">
+
+    <!-- Header with Centered Logo & Form Title -->
+    <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; margin-bottom: 20px; margin-top: 5px;">
+        <img src="LOGO.PNG" alt="Logo" style="height: 45px; object-fit: contain; margin-bottom: 8px;">
+        <h3 style="margin: 0; color: #000; font-size: 1.1rem; letter-spacing: 2px; text-transform: uppercase;">TRANSFER FORM</h3>
+    </div>
+
+    <!-- Outlet Filter Search & Automatic Date Row -->
+    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; font-size: 0.85rem; gap: 15px; flex-wrap: wrap;">
+        
+        <!-- Outgoing & Incoming Departments Container -->
+        <div style="display: flex; align-items: center; gap: 20px; flex: 1; min-width: 500px; flex-wrap: wrap;">
+            
+            <!-- Outgoing Department Search -->
+            <div style="display: flex; align-items: center; gap: 8px; flex: 1; min-width: 240px;">
+                <span style="font-weight: bold; color: #000; text-transform: uppercase; white-space: nowrap;">OUTGOING DEPARTMENT:</span>
+                <input type="text" id="outletSearch" placeholder="Type to search outlet..." style="padding: 6px 10px; background: #fff; border: 1px solid #000; border-radius: 4px; color: #000; font-family: inherit; outline: none; flex: 1;" list="outletList">
+            </div>
+
+            <!-- Incoming Department Search -->
+            <div style="display: flex; align-items: center; gap: 8px; flex: 1; min-width: 240px;">
+                <span style="font-weight: bold; color: #000; text-transform: uppercase; white-space: nowrap;">INCOMING DEPARTMENT:</span>
+                <input type="text" id="incomingOutletSearch" placeholder="Type to search outlet..." style="padding: 6px 10px; background: #fff; border: 1px solid #000; border-radius: 4px; color: #000; font-family: inherit; outline: none; flex: 1;" list="outletList">
+            </div>
+
+            <!-- Shared Dynamic Datalist -->
+            <datalist id="outletList">
+                <!-- Dynamically populated from AREA sheet -->
+            </datalist>
+
+        </div>
+
+        <!-- Automatic Current Date Display -->
+        <div style="display: flex; align-items: center; gap: 10px;">
+            <span style="font-weight: bold; color: #000; text-transform: uppercase;">DATE:</span>
+            <input type="text" id="formattedDateDisplay" readonly style="padding: 6px 10px; background: #f4f4f4; border: 1px solid #000; border-radius: 4px; color: #000; font-family: inherit; outline: none; width: 170px; text-align: center; font-weight: bold;">
+        </div>
+
+    </div>
+
+    <!-- Unified Data Table Container -->
+    <div style="flex: 1; display: flex; flex-direction: column; gap: 10px; margin-top: 10px;">
+        
+        <!-- Header Controls Row -->
+        <div style="display: flex; justify-content: space-between; align-items: center;">
+            <div style="display: flex; gap: 15px; flex: 1;">
+                <h4 style="margin: 0; font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.5px; color: #111; font-weight: 700;">
+                    
+                </h4>
+            </div>
+            
+            <!-- Action Buttons Grouped Together -->
+            <div style="display: flex; align-items: center; gap: 10px;">
+                <button type="button" class="no-print" onclick="triggerPrintForm()" style="padding: 5px 12px; background: #28a745; color: #fff; border: none; border-radius: 4px; font-family: inherit; font-size: 0.75rem; cursor: pointer; text-transform: uppercase; font-weight: 600; letter-spacing: 0.5px; transition: background 0.2s;">
+    🖨️ PRINT FORM
+</button>
+                <button type="button" id="productListBtn" onclick="openProductListModal()" style="padding: 5px 12px; background: #111; color: #fff; border: none; border-radius: 4px; font-family: inherit; font-size: 0.75rem; cursor: pointer; text-transform: uppercase; font-weight: 600; letter-spacing: 0.5px; transition: background 0.2s;">
+                    + ADD PRODUCT
+                </button>
+            </div>
+        </div>
+
+        <!-- Table Viewport -->
+        <div style="max-height: 480px; overflow-y: auto; border: 1px solid #e0e0e0; border-radius: 6px; box-shadow: 0 2px 6px rgba(0,0,0,0.03);">
+            <table style="width: 100%; border-collapse: collapse; font-size: 0.78rem; text-align: left; background: #fff;">
+                <thead>
+                    <!-- Section Group Headers -->
+                    <tr style="background: #f8f9fa; color: #555; text-transform: uppercase; font-size: 0.7rem; letter-spacing: 0.5px; border-bottom: 1px solid #e0e0e0;">
+                        <th colspan="7" style="padding: 8px 10px; font-weight: 700; color: #111; border-right: 2px solid #111;">TRANSFER INFORMATION</th>
+                        <th colspan="4" style="padding: 8px 10px; font-weight: 700; color: #111;">RECEIVED INFORMATION</th>
+                    </tr>
+                    <!-- Main Column Headers -->
+                    <tr style="background: #111; color: #fff; position: sticky; top: 0; z-index: 2;">
+                        <!-- Transfer Cols -->
+                        <th style="padding: 10px 8px; font-weight: 600; width: 110px;">SKU CODE</th>
+                        <th style="padding: 10px 8px; font-weight: 600;">PRODUCT DESCRIPTION</th>
+                        <th style="padding: 10px 8px; font-weight: 600; text-align: center; width: 50px;">UOM</th>
+                        <th style="padding: 10px 8px; font-weight: 600; text-align: center; width: 110px;">EXP. DATE</th>
+                        <th style="padding: 10px 8px; font-weight: 600; text-align: center; width: 70px;">ON HAND</th>
+                        <th style="padding: 10px 8px; font-weight: 600; text-align: center; width: 70px;">TOTAL ON HAND</th>
+                        <th style="padding: 10px 8px; font-weight: 700; text-align: center; width: 60px;">COST</th>
+                        <th style="padding: 10px 8px; font-weight: 700; text-align: center; width: 60px;">SRP</th>
+                        <th style="padding: 10px 8px; font-weight: 600; text-align: center; width: 80px; border-right: 2px solid #fff;">TRANSFER QTY</th>
+                        
+                        <!-- Received Cols -->
+                        <th style="padding: 10px 8px; font-weight: 600; text-align: center; width: 110px;">EXP. DATE</th>
+                        <th style="padding: 10px 8px; font-weight: 600; text-align: center; width: 80px;">QTY RELEASED</th>
+                        <th style="padding: 10px 8px; font-weight: 600; text-align: center; width: 50px;">UOM</th>
+                        <th style="padding: 10px 8px; font-weight: 600;">REMARKS</th>
+                        <th style="padding: 10px 8px; font-weight: 600; text-align: center; width: 40px;" class="no-print"></th>
+                    </tr>
+                </thead>
+                <tbody id="transferTableBody">
+                    <!-- Dynamic unified rows render here -->
+                </tbody>
+            </table>
+        </div>
+
+    </div>
+
+    <!-- Signatures & Approval Footer Block -->
+    <div style="margin-top: 55px; margin-bottom: 20px; display: flex; justify-content: space-between; align-items: flex-end; width: 100%; gap: 30px;">
+        
+        <!-- Requested By -->
+        <div style="flex: 1; display: flex; flex-direction: column; align-items: center;">
+            <div style="font-weight: bold; font-size: 0.75rem; text-transform: uppercase; margin-bottom: 45px; letter-spacing: 0.5px;">
+                REQUESTED BY: / DESIGNATION
+            </div>
+            <div style="width: 100%; border-bottom: 1.5px solid #000; margin-bottom: 6px;"></div>
+            <div style="font-weight: bold; font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.5px;">
+                SIGNATURE OVER PRINTED NAME
+            </div>
+        </div>
+
+        <!-- Approved By -->
+        <div style="flex: 1; display: flex; flex-direction: column; align-items: center;">
+            <div style="font-weight: bold; font-size: 0.75rem; text-transform: uppercase; margin-bottom: 45px; letter-spacing: 0.5px;">
+                APPROVED BY
+            </div>
+            <div style="width: 100%; border-bottom: 1.5px solid #000; margin-bottom: 6px;"></div>
+            <div style="font-weight: bold; font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.5px;">
+                SIGNATURE OVER PRINTED NAME
+            </div>
+        </div>
+
+        <!-- Received By -->
+        <div style="flex: 1; display: flex; flex-direction: column; align-items: center;">
+            <div style="font-weight: bold; font-size: 0.75rem; text-transform: uppercase; margin-bottom: 45px; letter-spacing: 0.5px;">
+                RECEIVED BY: / DESIGNATION
+            </div>
+            <div style="width: 100%; border-bottom: 1.5px solid #000; margin-bottom: 6px;"></div>
+            <div style="font-weight: bold; font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.5px;">
+                SIGNATURE OVER PRINTED NAME
+            </div>
+        </div>
+
+    </div>
+
+</div>
+
+<!-- PRODUCT LIST POP-UP MODAL CONTAINER -->
+<div id="productListModal" style="display: none; position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; background: rgba(0, 0, 0, 0.7); backdrop-filter: blur(4px); z-index: 4000; justify-content: center; align-items: center; box-sizing: border-box; padding: 20px;">
+    <div style="background: #fff; width: 100%; max-width: 1000px; height: 85vh; border-radius: 8px; border: 2px solid #000; display: flex; flex-direction: column; padding: 20px; box-sizing: border-box; font-family: monospace; color: #000; position: relative; box-shadow: 0 20px 40px rgba(0,0,0,0.5);">
+        
+        <!-- Modal Header & Close Button -->
+        <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 2px solid #000; padding-bottom: 10px; margin-bottom: 15px; flex-shrink: 0;">
+            <h3 id="productListModalTitle" style="margin: 0; font-size: 1.1rem; text-transform: uppercase;">SELECT PRODUCT</h3>
+            <button type="button" onclick="closeProductListModal()" style="background: transparent; border: none; font-size: 1.5rem; font-weight: bold; cursor: pointer; color: #000; line-height: 1;" title="Close">&times;</button>
+        </div>
+
+        <!-- Filter Search Bar & Add Button -->
+        <div style="display: flex; gap: 10px; margin-bottom: 15px; flex-shrink: 0;">
+            <input type="text" id="productSearchFilter" oninput="filterProductList()" placeholder="Filter search SKU or Description..." style="flex: 1; padding: 6px 10px; border: 1px solid #000; border-radius: 4px; font-family: inherit; outline: none; box-sizing: border-box;">
+            <button type="button" onclick="addSelectedProducts()" style="padding: 6px 16px; background: #000; color: #fff; border: none; border-radius: 4px; font-family: inherit; font-weight: bold; cursor: pointer; text-transform: uppercase;">ADD</button>
+        </div>
+
+        <!-- Product List Table Area -->
+        <div style="flex: 1; overflow-y: auto; border: 1px solid #000; min-height: 0;">
+            <table style="width: 100%; border-collapse: collapse; font-size: 0.8rem;">
+                <thead>
+                    <tr style="background: #000; color: #fff; text-align: left; position: sticky; top: 0; z-index: 2;">
+                        <th style="padding: 8px; border: 1px solid #000; width: 40px; text-align: center; background: #000;">
+                            <input type="checkbox" id="selectAllProducts" onclick="toggleSelectAllProducts(this)">
+                        </th>
+                        <th style="padding: 8px; border: 1px solid #000; background: #000;">SKU CODE</th>
+                        <th style="padding: 8px; border: 1px solid #000; background: #000;">PRODUCT DESCRIPTION</th>
+                        <th style="padding: 8px; border: 1px solid #000; background: #000; text-align: center;">UOM</th>
+                        <th style="padding: 8px; border: 1px solid #000; background: #000; text-align: center;">EXPIRATION DATE</th>
+                        <th style="padding: 8px; border: 1px solid #000; background: #000; text-align: center;">QTY ONHAND</th>
+                        <th style="padding: 8px; border: 1px solid #000; background: #000; text-align: center;">TOTAL QTY ONHAND</th>
+                    </tr>
+                </thead>
+                <tbody id="productListTableBody">
+                    <!-- Dynamic rows populated from JavaScript -->
+                </tbody>
+            </table>
+        </div>
+
+    </div>
+</div>
+
+<!-- CUSTOM ALERT MODAL CONTAINER -->
+<div id="customAlertModal" class="no-print" style="display: none; position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; background: rgba(0, 0, 0, 0.7); backdrop-filter: blur(4px); z-index: 5000; justify-content: center; align-items: center; box-sizing: border-box; padding: 20px;">
+    <div style="background: #fff; width: 100%; max-width: 420px; border-radius: 8px; border: 2px solid #000; display: flex; flex-direction: column; padding: 20px; box-sizing: border-box; font-family: monospace; color: #000; box-shadow: 0 20px 40px rgba(0,0,0,0.5);">
+        
+        <!-- Header -->
+        <div style="border-bottom: 2px solid #000; padding-bottom: 8px; margin-bottom: 15px;">
+            <h3 style="margin: 0; font-size: 1rem; text-transform: uppercase; color: #d9534f; letter-spacing: 0.5px;">⚠️ ATTENTION</h3>
+        </div>
+
+        <!-- Alert Message -->
+        <div id="customAlertMessage" style="font-size: 0.85rem; font-weight: 600; line-height: 1.4; margin-bottom: 20px; color: #111;">
+            <!-- Message dynamic insert -->
+        </div>
+
+        <!-- Action Button -->
+        <div style="display: flex; justify-content: flex-end;">
+            <button type="button" onclick="closeCustomAlert()" style="padding: 6px 18px; background: #000; color: #fff; border: none; border-radius: 4px; font-family: inherit; font-size: 0.8rem; font-weight: bold; cursor: pointer; text-transform: uppercase;">
+                OK
+            </button>
+        </div>
+
+    </div>
+</div>
