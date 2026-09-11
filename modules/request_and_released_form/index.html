@@ -105,8 +105,8 @@
             <!-- Action Buttons Grouped Together -->
             <div style="display: flex; align-items: center; gap: 10px;">
                 <button type="button" class="no-print" onclick="triggerPrintForm()" style="padding: 5px 12px; background: #28a745; color: #fff; border: none; border-radius: 4px; font-family: inherit; font-size: 0.75rem; cursor: pointer; text-transform: uppercase; font-weight: 600; letter-spacing: 0.5px; transition: background 0.2s;">
-                    🖨️ PRINT FORM
-                </button>
+    🖨️ PRINT FORM
+</button>
                 <button type="button" id="productListBtn" onclick="openProductListModal()" style="padding: 5px 12px; background: #111; color: #fff; border: none; border-radius: 4px; font-family: inherit; font-size: 0.75rem; cursor: pointer; text-transform: uppercase; font-weight: 600; letter-spacing: 0.5px; transition: background 0.2s;">
                     + ADD PRODUCT
                 </button>
@@ -116,42 +116,26 @@
         <!-- Table Viewport -->
         <div style="max-height: 480px; overflow-y: auto; border: 1px solid #e0e0e0; border-radius: 6px; box-shadow: 0 2px 6px rgba(0,0,0,0.03);">
             <table style="width: 100%; border-collapse: collapse; font-size: 0.78rem; text-align: left; background: #fff;">
-                <!-- Table Section Headers & Columns Update -->
-<thead>
-    <!-- Section Group Headers -->
-    <tr style="background: #f8f9fa; color: #000; text-transform: uppercase; font-size: 0.72rem; letter-spacing: 0.5px; border-bottom: 1.5px solid #000;">
-        <th colspan="9" style="padding: 10px; font-weight: 800; border-right: 2px solid #000;">REQUEST INFORMATION</th>
-        <th colspan="4" style="padding: 10px; font-weight: 800; border-right: 2px solid #000;">RELEASED INFORMATION (APPROVED QTY)</th>
-        <th colspan="4" style="padding: 10px; font-weight: 800;">RECEIVED INFORMATION</th>
-    </tr>
-    <!-- Main Column Headers -->
-    <tr style="background: #000; color: #fff;">
-        <!-- Part 1: Request Information -->
-        <th style="padding: 10px 8px; font-weight: 700; width: 100px;">SKU CODE</th>
-        <th style="padding: 10px 8px; font-weight: 700;">PRODUCT DESCRIPTION</th>
-        <th style="padding: 10px 8px; font-weight: 700; text-align: center; width: 45px;">UOM</th>
-        <th style="padding: 10px 8px; font-weight: 700; text-align: center; width: 100px;">EXP. DATE</th>
-        <th style="padding: 10px 8px; font-weight: 700; text-align: center; width: 60px;">ON HAND</th>
-        <th style="padding: 10px 8px; font-weight: 700; text-align: center; width: 60px;">TOTAL ON HAND</th>
-        <th style="padding: 10px 8px; font-weight: 700; text-align: center; width: 60px;">COST</th>
-        <th style="padding: 10px 8px; font-weight: 700; text-align: center; width: 60px;">SRP</th>
-        <th style="padding: 10px 8px; font-weight: 700; text-align: center; width: 70px; border-right: 2px solid #fff;">TRANSFER QTY</th>
-        
-        <!-- Part 2: Released Information -->
-        <th style="padding: 10px 8px; font-weight: 700; text-align: center; width: 100px;">EXP. DATE</th>
-        <th style="padding: 10px 8px; font-weight: 700; text-align: center; width: 70px;">QTY RELEASED</th>
-        <th style="padding: 10px 8px; font-weight: 700; text-align: center; width: 45px;">UOM</th>
-        <th style="padding: 10px 8px; font-weight: 700; border-right: 2px solid #fff;">REMARKS</th>
-
-        <!-- Part 3: Received Information -->
-        <th style="padding: 10px 8px; font-weight: 700; text-align: center; width: 100px;">EXPIRATION DATE</th>
-        <th style="padding: 10px 8px; font-weight: 700; text-align: center; width: 70px;">QTY RECEIVED</th>
-        <th style="padding: 10px 8px; font-weight: 700; text-align: center; width: 45px;">UOM</th>
-        <th style="padding: 10px 8px; font-weight: 700;">REMARKS</th>
-
-        <th style="padding: 10px 8px; font-weight: 700; text-align: center; width: 35px;" class="no-print"></th>
-    </tr>
-</thead>
+                <thead>
+                    <!-- Section Group Headers -->
+                    <tr style="background: #f8f9fa; color: #555; text-transform: uppercase; font-size: 0.7rem; letter-spacing: 0.5px; border-bottom: 1px solid #e0e0e0;">
+                        <th colspan="10" style="padding: 8px 10px; font-weight: 700; color: #111;">REQUEST INFORMATION</th>
+                    </tr>
+                    <!-- Main Column Headers -->
+                    <tr style="background: #111; color: #fff; position: sticky; top: 0; z-index: 2;">
+                        <!-- Transfer Cols -->
+                        <th style="padding: 10px 8px; font-weight: 600; width: 110px;">SKU CODE</th>
+                        <th style="padding: 10px 8px; font-weight: 600;">PRODUCT DESCRIPTION</th>
+                        <th style="padding: 10px 8px; font-weight: 600; text-align: center; width: 50px;">UOM</th>
+                        <th style="padding: 10px 8px; font-weight: 600; text-align: center; width: 110px;">EXP. DATE</th>
+                        <th style="padding: 10px 8px; font-weight: 600; text-align: center; width: 70px;">ON HAND</th>
+                        <th style="padding: 10px 8px; font-weight: 600; text-align: center; width: 70px;">TOTAL ON HAND</th>
+                        <th style="padding: 10px 8px; font-weight: 700; text-align: center; width: 60px;">COST</th>
+                        <th style="padding: 10px 8px; font-weight: 700; text-align: center; width: 60px;">SRP</th>
+                        <th style="padding: 10px 8px; font-weight: 600; text-align: center; width: 80px;">TRANSFER QTY</th>
+                        <th style="padding: 10px 8px; font-weight: 600; text-align: center; width: 40px;" class="no-print"></th>
+                    </tr>
+                </thead>
                 <tbody id="transferTableBody">
                     <!-- Dynamic unified rows render here -->
                 </tbody>
@@ -161,51 +145,42 @@
     </div>
 
     <!-- Signatures & Approval Footer Block -->
-    <div style="display: flex; justify-content: space-between; align-items: flex-end; margin-top: 40px; gap: 20px; font-family: inherit;">
-  
-  <!-- 1. REQUESTED BY -->
-  <div style="flex: 1; text-align: center;">
-    <div style="font-size: 0.75rem; font-weight: bold; text-transform: uppercase; margin-bottom: 35px; color: #000;">
-      REQUESTED BY: / DESIGNATION
-    </div>
-    <div style="border-bottom: 1px solid #000; width: 100%;"></div>
-    <div style="font-size: 0.65rem; font-weight: bold; text-transform: uppercase; margin-top: 5px; color: #000;">
-      SIGNATURE OVER PRINTED NAME
-    </div>
-  </div>
+    <div style="margin-top: 55px; margin-bottom: 20px; display: flex; justify-content: space-between; align-items: flex-end; width: 100%; gap: 30px;">
+        
+        <!-- Requested By -->
+        <div style="flex: 1; display: flex; flex-direction: column; align-items: center;">
+            <div style="font-weight: bold; font-size: 0.75rem; text-transform: uppercase; margin-bottom: 45px; letter-spacing: 0.5px;">
+                REQUESTED BY: / DESIGNATION
+            </div>
+            <div style="width: 100%; border-bottom: 1.5px solid #000; margin-bottom: 6px;"></div>
+            <div style="font-weight: bold; font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.5px;">
+                SIGNATURE OVER PRINTED NAME
+            </div>
+        </div>
 
-  <!-- 2. APPROVED BY -->
-  <div style="flex: 1; text-align: center;">
-    <div style="font-size: 0.75rem; font-weight: bold; text-transform: uppercase; margin-bottom: 35px; color: #000;">
-      APPROVED BY
-    </div>
-    <div style="border-bottom: 1px solid #000; width: 100%;"></div>
-    <div style="font-size: 0.65rem; font-weight: bold; text-transform: uppercase; margin-top: 5px; color: #000;">
-      SIGNATURE OVER PRINTED NAME
-    </div>
-  </div>
+        <!-- Approved By -->
+        <div style="flex: 1; display: flex; flex-direction: column; align-items: center;">
+            <div style="font-weight: bold; font-size: 0.75rem; text-transform: uppercase; margin-bottom: 45px; letter-spacing: 0.5px;">
+                APPROVED BY
+            </div>
+            <div style="width: 100%; border-bottom: 1.5px solid #000; margin-bottom: 6px;"></div>
+            <div style="font-weight: bold; font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.5px;">
+                SIGNATURE OVER PRINTED NAME
+            </div>
+        </div>
 
-  <!-- 3. CHECKED BY (1) -->
-  <div style="flex: 1; text-align: center;">
-    <div style="font-size: 0.75rem; font-weight: bold; text-transform: uppercase; margin-bottom: 35px; color: #000;">
-      CHECKED BY: / DESIGNATION
-    </div>
-    <div style="border-bottom: 1px solid #000; width: 100%;"></div>
-    <div style="font-size: 0.65rem; font-weight: bold; text-transform: uppercase; margin-top: 5px; color: #000;">
-      SIGNATURE OVER PRINTED NAME
-    </div>
-  </div>
+        <!-- Received By -->
+        <div style="flex: 1; display: flex; flex-direction: column; align-items: center;">
+            <div style="font-weight: bold; font-size: 0.75rem; text-transform: uppercase; margin-bottom: 45px; letter-spacing: 0.5px;">
+                RECEIVED BY: / DESIGNATION
+            </div>
+            <div style="width: 100%; border-bottom: 1.5px solid #000; margin-bottom: 6px;"></div>
+            <div style="font-weight: bold; font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.5px;">
+                SIGNATURE OVER PRINTED NAME
+            </div>
+        </div>
 
-  <!-- 4. CHECKED BY (2) -->
-  <div style="flex: 1; text-align: center;">
-    <div style="font-size: 0.75rem; font-weight: bold; text-transform: uppercase; margin-bottom: 35px; color: #000;">
-      RECEIVED BY: / DESIGNATION
     </div>
-    <div style="border-bottom: 1px solid #000; width: 100%;"></div>
-    <div style="font-size: 0.65rem; font-weight: bold; text-transform: uppercase; margin-top: 5px; color: #000;">
-      SIGNATURE OVER PRINTED NAME
-    </div>
-  </div>
 
 </div>
 

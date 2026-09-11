@@ -13,22 +13,21 @@
         body { background-color: #ffffff !important; transition: background 0.3s ease; overflow: hidden; }
         body.has-video-bg { background-color: transparent !important; }
         #bg-video { position: fixed; right: 0; bottom: 0; min-width: 100%; min-height: 100%; z-index: -1; object-fit: cover; display: block; }
-        
+
         #loadingOverlay { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(2, 6, 15, 0.92); z-index: 9999; justify-content: center; align-items: center; flex-direction: column; }
         .sci-fi-loader { position: relative; width: 160px; height: 160px; display: flex; justify-content: center; align-items: center; }
         .hud-ring-outer { position: absolute; width: 100%; height: 100%; border: 2px dashed rgba(0, 219, 255, 0.4); border-radius: 50%; animation: hudSpinCW 8s linear infinite; }
         .hud-ring-middle { position: absolute; width: 75%; height: 75%; border: 3px solid transparent; border-top: 3px solid #00dbff; border-bottom: 3px solid #00dbff; border-radius: 50%; box-shadow: 0 0 15px rgba(0, 219, 255, 0.5); animation: hudSpinCCW 2.5s linear infinite; }
         .hud-ring-inner { position: absolute; width: 45%; height: 45%; border: 2px solid rgba(2, 145, 255, 0.5); border-left: 2px solid #ffffff; border-right: 2px solid #ffffff; border-radius: 50%; animation: hudSpinCW 1.2s linear infinite; }
         .hud-core { position: absolute; width: 18px; height: 18px; background: #ffffff; border-radius: 50%; box-shadow: 0 0 15px #ffffff, 0 0 30px #00dbff, 0 0 50px #0291ff; animation: corePulse 1s ease-in-out infinite alternate; }
-        
+
         #loadingText { margin-top: 30px; color: #00dbff; font-family: 'Roboto Mono', monospace; font-size: 0.9rem; font-weight: 700; letter-spacing: 4px; text-shadow: 0 0 10px rgba(0, 219, 255, 0.8); animation: textGlitch 2s infinite; }
-        
+
         @keyframes hudSpinCW { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
         @keyframes hudSpinCCW { 0% { transform: rotate(360deg); } 100% { transform: rotate(0deg); } }
         @keyframes corePulse { 0% { transform: scale(0.7); opacity: 0.5; } 100% { transform: scale(1.3); opacity: 1; } }
         @keyframes textGlitch { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
 
-        /* Full screen layout adjustments for dashboard & glass sheet container */
         #dashboard {
             display: flex;
             flex-direction: column;
@@ -67,6 +66,142 @@
             height: 100%;
             box-sizing: border-box;
         }
+
+        /* ==========================================
+           ELEGANT 3D BUTTON & MODAL SYSTEM
+           Applies globally — including to buttons/modals injected
+           dynamically by script.js, since they land in this same DOM.
+           ========================================== */
+
+        /* --- Buttons: consistent size + glossy layered 3D lift --- */
+        button,
+        .nav-icon-btn,
+        .logout-pill,
+        .modal-btn {
+            border-radius: 10px !important;
+            min-height: 40px;
+            padding-top: 10px !important;
+            padding-bottom: 10px !important;
+            position: relative;
+            overflow: hidden;
+            box-shadow:
+                0 1px 0 rgba(255, 255, 255, 0.25) inset,
+                0 -2px 4px rgba(0, 0, 0, 0.15) inset,
+                0 5px 0 rgba(0, 0, 0, 0.22),
+                0 9px 16px rgba(0, 0, 0, 0.28) !important;
+            transition: transform 0.14s cubic-bezier(0.2, 0.8, 0.3, 1),
+                        box-shadow 0.14s cubic-bezier(0.2, 0.8, 0.3, 1),
+                        filter 0.14s ease !important;
+            transform: translateY(0);
+        }
+
+        .nav-icon-btn {
+            min-height: 95px !important;
+        }
+
+        button:hover,
+        .nav-icon-btn:hover,
+        .logout-pill:hover,
+        .modal-btn:hover {
+            transform: translateY(-3px);
+            filter: brightness(1.06);
+            box-shadow:
+                0 1px 0 rgba(255, 255, 255, 0.3) inset,
+                0 -2px 4px rgba(0, 0, 0, 0.15) inset,
+                0 8px 0 rgba(0, 0, 0, 0.22),
+                0 16px 26px rgba(0, 0, 0, 0.32) !important;
+        }
+
+        button:active,
+        .nav-icon-btn:active,
+        .logout-pill:active,
+        .modal-btn:active {
+            transform: translateY(2px);
+            filter: brightness(0.97);
+            box-shadow:
+                0 1px 0 rgba(255, 255, 255, 0.2) inset,
+                0 -2px 4px rgba(0, 0, 0, 0.15) inset,
+                0 2px 0 rgba(0, 0, 0, 0.22),
+                0 4px 10px rgba(0, 0, 0, 0.25) !important;
+        }
+
+        button:disabled,
+        .nav-icon-btn:disabled {
+            transform: none !important;
+            filter: grayscale(0.3) brightness(0.85) !important;
+            box-shadow: 0 2px 0 rgba(0, 0, 0, 0.15), 0 3px 6px rgba(0, 0, 0, 0.15) !important;
+            cursor: not-allowed;
+        }
+
+        /* Subtle glossy top highlight sheen on every button */
+        button::before,
+        .nav-icon-btn::before,
+        .logout-pill::before,
+        .modal-btn::before {
+            content: "";
+            position: absolute;
+            top: 0; left: 0; right: 0;
+            height: 46%;
+            background: linear-gradient(180deg, rgba(255,255,255,0.20), rgba(255,255,255,0) 100%);
+            pointer-events: none;
+            border-radius: 10px 10px 40% 40% / 10px 10px 100% 100%;
+        }
+
+        /* --- Modals: consistent radius/elevation + entrance pop --- */
+        .glass-card,
+        #itemDrawer,
+        #productListModal > div,
+        #customAlertModal > div,
+        .modal-overlay .glass-card {
+            border-radius: 18px !important;
+            box-shadow:
+                0 1px 0 rgba(255, 255, 255, 0.06) inset,
+                0 25px 60px rgba(0, 0, 0, 0.55),
+                0 8px 20px rgba(0, 0, 0, 0.35) !important;
+        }
+
+        .modal-overlay,
+        #productListModal,
+        #customAlertModal {
+            animation: mwOverlayFade 0.22s ease;
+        }
+
+        .modal-overlay .glass-card,
+        #productListModal > div,
+        #customAlertModal > div {
+            animation: mwModalPop 0.28s cubic-bezier(0.2, 0.9, 0.3, 1.15);
+        }
+
+        @keyframes mwOverlayFade {
+            from { opacity: 0; }
+            to   { opacity: 1; }
+        }
+
+        @keyframes mwModalPop {
+            from { opacity: 0; transform: scale(0.94) translateY(8px); }
+            to   { opacity: 1; transform: scale(1) translateY(0); }
+        }
+
+        /* Flat icon-only close/X buttons (transparent background) opt out
+           of the 3D treatment — they're meant to sit flush, not "lift". */
+        button[style*="background: transparent"],
+        button[style*="background:transparent"] {
+            box-shadow: none !important;
+            min-height: unset !important;
+            padding-top: initial !important;
+            padding-bottom: initial !important;
+        }
+        button[style*="background: transparent"]::before,
+        button[style*="background:transparent"]::before {
+            display: none !important;
+        }
+        button[style*="background: transparent"]:hover,
+        button[style*="background:transparent"]:hover,
+        button[style*="background: transparent"]:active,
+        button[style*="background:transparent"]:active {
+            box-shadow: none !important;
+            filter: none !important;
+        }
     </style>
 </head>
 <body class="has-video-bg">
@@ -86,7 +221,7 @@
     <!-- Login & Password Update Flip Container -->
     <div class="flip-container" id="authContainer">
         <div class="card-inner" id="cardInner">
-            
+
             <!-- Login Face -->
             <div class="glass-card login-face">
                 <div class="logo-container"><img src="logo.png" alt="C.E.R.I.S"></div>
@@ -110,7 +245,7 @@
                 <div class="logo-container"><img src="logo.png" alt="C.E.R.I.S"></div>
                 <h2>SECURE ACCOUNT</h2>
                 <p style="font-size: 0.8rem; text-align: center; opacity: 0.7; margin-bottom: 10px;">Default account detected. Update details.</p>
-                
+
                 <div class="input-group">
                     <p class="field-header">New Username</p>
                     <input type="text" id="newUserInput" placeholder="New Identity Code">
@@ -155,14 +290,14 @@
         <main class="glass-sheet">
             <section class="main-body">
                 <div id="moduleContentArea" class="module-content-container">
-                    
+
                     <!-- Dashboard Card Layout Shifted Higher up -->
                     <div id="defaultWelcomeView" style="display: flex; flex-direction: column; justify-content: flex-start; align-items: center; height: 100%; width: 100%; padding-top: 120px; padding-bottom: 10px; text-align: center; box-sizing: border-box;">
                         <h2 style="margin-top: 0px; margin-bottom: 12px; font-size: 30px; letter-spacing: 2px; color: #456805; -webkit-text-stroke: 1px #030303;">WELCOME TO MOTHER'S WONDERLAND FORM DASHBOARD</h2>
-                        
-                        <!-- 2x2 Grid Layout Container -->
+
+                        <!-- 2x2 (+1 full-width) Grid Layout Container -->
                         <div class="icon-nav" id="mainNav" style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px; align-items: center; width: 100%; max-width: 650px; margin: 0 auto;">
-                            
+
                             <button class="nav-icon-btn" onclick="openModule('REPORT')" style="display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; padding: 12px 10px; min-height: 95px; border-radius: 12px; cursor: pointer; background: rgba(144, 168, 168, 0.35); border: 1.5px solid rgba(0, 0, 0, 0.4); color: #111; backdrop-filter: blur(10px); transition: all 0.3s ease;">
                                 <i class="fa-solid fa-chart-line" style="font-size: 1.6rem; color: #111;"></i>
                                 <span style="font-family: 'Roboto Mono', monospace; font-size: 0.75rem; font-weight: 700; text-align: center; letter-spacing: 1px;">REPORT AND HISTORY</span>
@@ -183,6 +318,12 @@
                                 <span style="font-family: 'Roboto Mono', monospace; font-size: 0.75rem; font-weight: 700; text-align: center; letter-spacing: 1px;">PULLOUT FORM</span>
                             </button>
 
+                            <!-- NEW: INCOMING nav button (spans both columns, icon added) -->
+                            <button class="nav-icon-btn" onclick="openModule('INCOMING')" style="grid-column: span 2; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; padding: 12px 10px; min-height: 95px; border-radius: 12px; cursor: pointer; background: rgba(144, 168, 168, 0.35); border: 1.5px solid rgba(0, 0, 0, 0.4); color: #111; backdrop-filter: blur(10px); transition: all 0.3s ease;">
+                                <i class="fa-solid fa-truck-ramp-box" style="font-size: 1.6rem; color: #111;"></i>
+                                <span style="font-family: 'Roboto Mono', monospace; font-size: 0.75rem; font-weight: 700; text-align: center; letter-spacing: 1px;">INCOMING</span>
+                            </button>
+
                         </div>
                     </div>
 
@@ -191,6 +332,7 @@
                     <div id="mod-REQUEST_AND_RELEASED_FORM" class="module-view" style="display:none;"></div>
                     <div id="mod-TRANSFER_FORM" class="module-view" style="display:none;"></div>
                     <div id="mod-PULLOUT_FORM" class="module-view" style="display:none;"></div>
+                    <div id="mod-INCOMING" class="module-view" style="display:none;"></div>
                 </div>
             </section>
         </main>

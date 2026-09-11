@@ -130,6 +130,29 @@ function showModal(title, message, type) {
 }
 
 function logoutSystem() {
+    // Record the logout in LOGIN_LOGS before wiping the session. We use
+    // sendBeacon (falls back to a fire-and-forget fetch with keepalive)
+    // so the request is still delivered even though we reload/navigate
+    // away immediately afterward.
+    const user = window.sessionUser || loggedInUser || localStorage.getItem("activeUser") || "";
+    if (user && window.API) {
+        const payload = JSON.stringify({
+            action: "logout",
+            user: user,
+            client: window.sessionClient || "",
+            token: window.API_TOKEN
+        });
+        try {
+            if (navigator.sendBeacon) {
+                navigator.sendBeacon(window.API, new Blob([payload], { type: 'text/plain;charset=UTF-8' }));
+            } else {
+                fetch(window.API, { method: "POST", body: payload, keepalive: true });
+            }
+        } catch (err) {
+            console.error("[LOGIN_LOGS] Failed to log logout:", err);
+        }
+    }
+
     localStorage.removeItem('activeUser');
     localStorage.removeItem('sessionClient');
     localStorage.removeItem('sessionIsAdmin');
@@ -169,12 +192,6 @@ function openModule(moduleName) {
         case 'REPORT':
             loadReportModuleCode(targetView);
             break;
-        case 'OUTGOING':
-            loadOutgoingModuleCode(targetView);
-            break;
-        case 'INCOMING':
-            loadIncomingModuleCode(targetView);
-            break;
         case 'REQUEST_AND_RELEASED_FORM':
             loadRequestAndReleasedFormModuleCode(targetView);
             break;
@@ -183,6 +200,9 @@ function openModule(moduleName) {
             break;
         case 'PULLOUT_FORM':
             loadPulloutFormModuleCode(targetView);
+            break;
+        case 'INCOMING':
+            loadIncomingModuleCode(targetView);
             break;
         default:
             console.warn("Unknown module identifier:", moduleName);
@@ -370,7 +390,7 @@ async function triggerPrintTransferForm() {
     const rowsToSave = [];
     rows.forEach(row => {
         const cells = row.querySelectorAll('td');
-        if (cells.length < 13) return; 
+        if (cells.length < 10) return;
 
         const getCellText = (idx) => cells[idx] ? cells[idx].innerText.trim() : '';
         const getInputValue = (idx) => {
@@ -378,15 +398,24 @@ async function triggerPrintTransferForm() {
             return input ? input.value.trim() : '';
         };
 
-        // Columns 6 (COST) and 7 (SRP) were inserted between TOTAL ONHAND and
-        // TRANSFER QTY, so every index from the old TRANSFER QTY column onward
-        // is shifted by 2 compared to the previous layout.
+        // The RECEIVED INFORMATION block (K:N — EXP DATE, QTY RELEASED, UOM,
+        // REMARKS) is no longer collected on this form; it now gets filled in
+        // later from the INCOMING > TRANSFER FORM screen. We still write 4
+        // blank placeholders for those columns so INCOMING DEPARTMENT (O),
+        // DATE (P) and the RECEIVED status flag (Q) keep landing in the same
+        // sheet columns the rest of the app already expects.
         rowsToSave.push([
-            outgoingValue, getCellText(0), getCellText(1), getCellText(2),
-            getCellText(3), getCellText(4), getCellText(5),
-            getCellText(6), getCellText(7),
-            getInputValue(8), getCellText(9), getInputValue(10), getCellText(11), getInputValue(12),
-            incomingValue, formDate
+            outgoingValue,                                   // A - outgoing dept
+            getCellText(0), getCellText(1), getCellText(2),  // B,C,D - SKU/DESC/UOM
+            getCellText(3),                                  // E - EXP DATE
+            getCellText(4), getCellText(5),                  // F,G - ON HAND / TOTAL ON HAND
+            getCellText(6), getCellText(7),                  // H,I - COST / SRP
+            getInputValue(8),                                // J - TRANSFER QTY
+            '', '', '', '',                                  // K,L,M,N - (filled later on receipt)
+            incomingValue,                                    // O - incoming dept
+            formDate                                          // P - date
+            // Q is intentionally left untouched/blank — the INCOMING >
+            // TRANSFER FORM "RECEIVED" button marks it once fulfilled.
         ]);
     });
 
@@ -443,7 +472,7 @@ async function triggerPrintPulloutForm() {
     const rowsToSave = [];
     rows.forEach(row => {
         const cells = row.querySelectorAll('td');
-        if (cells.length < 17) return; 
+        if (cells.length < 10) return;
 
         const getCellText = (idx) => cells[idx] ? cells[idx].innerText.trim() : '';
         const getInputValue = (idx) => {
@@ -451,20 +480,24 @@ async function triggerPrintPulloutForm() {
             return input ? input.value.trim() : '';
         };
 
-        // Columns 6 (COST) and 7 (SRP) were inserted between TOTAL ONHAND and
-        // TRANSFER QTY, so every index from the old TRANSFER QTY column onward
-        // is shifted by 2 compared to the previous layout.
-        //
-        // Cell 12 (REMARKS/N), 14 (QTY RECEIVED/P) and 16 (REMARKS/R) are
-        // <input> fields, and cell 13 (EXPIRATION DATE/O) and 15 (UOM/Q) are
-        // plain text cells — this was previously inverted, which silently
-        // saved N/O/P/Q/R as blank on every save.
+        // OUT/EXIT INFORMATION (K:N) and RETURN INFORMATION (O:R) are no
+        // longer collected on this form — they're filled in later from the
+        // INCOMING > PULL OUT / GATE PASS FORM screen. Blank placeholders
+        // keep INCOMING DEPARTMENT (S), DATE (T) and the RECEIVED status
+        // flag (U) landing in the same sheet columns as before.
         rowsToSave.push([
-            outgoingValue, getCellText(0), getCellText(1), getCellText(2), getCellText(3),
-            getCellText(4), getCellText(5), getCellText(6), getCellText(7),
-            getInputValue(8), getCellText(9), getInputValue(10), getCellText(11), getInputValue(12),
-            getCellText(13), getInputValue(14), getCellText(15), getInputValue(16),
-            incomingValue, formDate
+            outgoingValue,                                   // A - outgoing dept
+            getCellText(0), getCellText(1), getCellText(2),  // B,C,D - SKU/DESC/UOM
+            getCellText(3),                                  // E - EXP DATE
+            getCellText(4), getCellText(5),                  // F,G - ON HAND / TOTAL ON HAND
+            getCellText(6), getCellText(7),                  // H,I - COST / SRP
+            getInputValue(8),                                // J - TRANSFER QTY
+            '', '', '', '',                                  // K,L,M,N - OUT/EXIT info (filled later)
+            '', '', '', '',                                  // O,P,Q,R - RETURN info (filled later)
+            incomingValue,                                    // S - incoming dept
+            formDate                                          // T - date
+            // U is intentionally left untouched/blank — the INCOMING >
+            // PULL OUT / GATE PASS FORM "RECEIVED" button marks it once fulfilled.
         ]);
     });
 
@@ -517,7 +550,7 @@ async function triggerPrintRequestAndReleasedForm() {
     const rowsToSave = [];
     rows.forEach(row => {
         const cells = row.querySelectorAll('td');
-        if (cells.length < 17) return; 
+        if (cells.length < 10) return;
 
         const getCellText = (idx) => cells[idx] ? cells[idx].innerText.trim() : '';
         const getInputValue = (idx) => {
@@ -525,20 +558,24 @@ async function triggerPrintRequestAndReleasedForm() {
             return input ? input.value.trim() : '';
         };
 
-        // Columns 6 (COST) and 7 (SRP) were inserted between TOTAL ONHAND and
-        // TRANSFER QTY, so every index from the old TRANSFER QTY column onward
-        // is shifted by 2 compared to the previous layout.
-        //
-        // Cell 12 (REMARKS/N), 14 (QTY RECEIVED/P) and 16 (REMARKS/R) are
-        // <input> fields, and cell 13 (EXPIRATION DATE/O) and 15 (UOM/Q) are
-        // plain text cells — this was previously inverted, which silently
-        // saved N/O/P/Q/R as blank on every save.
+        // RELEASED INFORMATION (K:N) and RECEIVED INFORMATION (O:R) are no
+        // longer collected on this form — they're filled in later from the
+        // INCOMING > REQUEST AND RELEASED FORM screen. Blank placeholders
+        // keep INCOMING DEPARTMENT (S), DATE (T) and the RECEIVED status
+        // flag (U) landing in the same sheet columns as before.
         rowsToSave.push([
-            outgoingValue, getCellText(0), getCellText(1), getCellText(2), getCellText(3),
-            getCellText(4), getCellText(5), getCellText(6), getCellText(7),
-            getInputValue(8), getCellText(9), getInputValue(10), getCellText(11), getInputValue(12),
-            getCellText(13), getInputValue(14), getCellText(15), getInputValue(16),
-            incomingValue, formDate
+            outgoingValue,                                   // A - outgoing/requesting dept
+            getCellText(0), getCellText(1), getCellText(2),  // B,C,D - SKU/DESC/UOM
+            getCellText(3),                                  // E - EXP DATE
+            getCellText(4), getCellText(5),                  // F,G - ON HAND / TOTAL ON HAND
+            getCellText(6), getCellText(7),                  // H,I - COST / SRP
+            getInputValue(8),                                // J - REQUESTED/TRANSFER QTY
+            '', '', '', '',                                  // K,L,M,N - RELEASED info (filled later)
+            '', '', '', '',                                  // O,P,Q,R - RECEIVED info (filled later)
+            incomingValue,                                    // S - incoming dept
+            formDate                                          // T - date
+            // U is intentionally left untouched/blank — the INCOMING >
+            // REQUEST AND RELEASED FORM "RECEIVED" button marks it once fulfilled.
         ]);
     });
 
@@ -607,13 +644,6 @@ async function loadReportModuleCode(container) {
                             <span style="font-family: 'Roboto Mono', monospace; font-size: 0.8rem; font-weight: 700; text-align: center; letter-spacing: 1px;">PULL OUT HISTORY</span>
                         </button>
                     </div>
-
-                    <div style="display: flex; justify-content: center; gap: 20px; width: 100%; max-width: 800px;">
-                        <button class="nav-icon-btn" onclick="selectReportCategory('LOGS_HISTORY')" style="flex: 1 1 0px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; padding: 15px 10px; min-height: 110px; border-radius: 12px; cursor: pointer; background: rgba(144, 168, 168, 0.35); border: 1.5px solid rgba(0, 0, 0, 0.4); color: #111; backdrop-filter: blur(10px); transition: all 0.3s ease;">
-                            <i class="fa-solid fa-clock-rotate-left" style="font-size: 1.8rem; color: #111;"></i>
-                            <span style="font-family: 'Roboto Mono', monospace; font-size: 0.8rem; font-weight: 700; text-align: center; letter-spacing: 1px;"> USER LOGS HISTORY</span>
-                        </button>
-                    </div>
                 </div>
             </div>
         `;
@@ -631,119 +661,10 @@ function closeReportModal() {
     if (welcomeView) welcomeView.style.display = 'flex';
 }
 
-// ==========================================
-// OUTGOING / INCOMING SUBMENUS
-// ==========================================
-// Both submenus currently route to the same three form modules
-// (Request & Released, Transfer, Pullout) — the Incoming side is a
-// placeholder for now until its own dedicated forms exist, per request.
-function loadOutgoingModuleCode(container) {
-    if (!container) return;
-    try {
-        container.innerHTML = `
-            <div style="width: 100%; height: 100%; padding: 25px; box-sizing: border-box; display: flex; flex-direction: column; align-items: stretch;">
-                <div style="margin-bottom: 35px; border-bottom: 1px solid rgba(0, 0, 0, 0.2); padding-bottom: 15px; position: relative;">
-                    <h2 style="color: #111; margin: 0; font-family: 'Roboto Mono', monospace; font-size: 1.3rem; letter-spacing: 2px; font-weight: 700;">
-                        <i class="fa-solid fa-arrow-up-from-bracket" style="margin-right: 10px; color: #111;"></i>OUTGOING
-                    </h2>
-                    <div style="position: absolute; top: -5px; right: 0; z-index: 10;">
-                        <button onclick="closeOutgoingModal()" style="background: transparent; border: none; color: #ff4d4d; font-size: 1.8rem; cursor: pointer; padding: 5px; line-height: 1; display: flex; align-items: center; justify-content: center;" title="Close">
-                            <a href="#" class="menu-item" style="font-size: 1rem;"><i class="fa-solid fa-house"></i> Home</a>
-                        </button>
-                    </div>
-                </div>
-
-                <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; width: 100%; gap: 20px; margin: auto 0;">
-                    <div style="display: flex; justify-content: center; gap: 20px; width: 100%; max-width: 800px; flex-wrap: wrap;">
-                        <button class="nav-icon-btn" onclick="openModule('REQUEST_AND_RELEASED_FORM')" style="flex: 1 1 0px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; padding: 15px 10px; min-height: 110px; border-radius: 12px; cursor: pointer; background: rgba(144, 168, 168, 0.35); border: 1.5px solid rgba(0, 0, 0, 0.4); color: #111; backdrop-filter: blur(10px); transition: all 0.3s ease;">
-                            <i class="fa-solid fa-file-invoice" style="font-size: 1.8rem; color: #111;"></i>
-                            <span style="font-family: 'Roboto Mono', monospace; font-size: 0.8rem; font-weight: 700; text-align: center; letter-spacing: 1px;">REQUEST & RELEASED FORM</span>
-                        </button>
-
-                        <button class="nav-icon-btn" onclick="openModule('TRANSFER_FORM')" style="flex: 1 1 0px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; padding: 15px 10px; min-height: 110px; border-radius: 12px; cursor: pointer; background: rgba(144, 168, 168, 0.35); border: 1.5px solid rgba(0, 0, 0, 0.4); color: #111; backdrop-filter: blur(10px); transition: all 0.3s ease;">
-                            <i class="fa-solid fa-right-left" style="font-size: 1.8rem; color: #111;"></i>
-                            <span style="font-family: 'Roboto Mono', monospace; font-size: 0.8rem; font-weight: 700; text-align: center; letter-spacing: 1px;">TRANSFER FORM</span>
-                        </button>
-
-                        <button class="nav-icon-btn" onclick="openModule('PULLOUT_FORM')" style="flex: 1 1 0px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; padding: 15px 10px; min-height: 110px; border-radius: 12px; cursor: pointer; background: rgba(144, 168, 168, 0.35); border: 1.5px solid rgba(0, 0, 0, 0.4); color: #111; backdrop-filter: blur(10px); transition: all 0.3s ease;">
-                            <i class="fa-solid fa-file-arrow-down" style="font-size: 1.8rem; color: #111;"></i>
-                            <span style="font-family: 'Roboto Mono', monospace; font-size: 0.8rem; font-weight: 700; text-align: center; letter-spacing: 1px;">PULLOUT / GATE PASS FORM</span>
-                        </button>
-                    </div>
-                </div>
-            </div>
-        `;
-    } catch (error) {
-        console.error(error);
-        container.innerHTML = `<p style="padding: 20px; color: red;">Error loading Outgoing module.</p>`;
-    }
-}
-
-function closeOutgoingModal() {
-    const view = document.getElementById('mod-OUTGOING');
-    const welcomeView = document.getElementById('defaultWelcomeView');
-    if (view) view.style.display = 'none';
-    if (welcomeView) welcomeView.style.display = 'flex';
-}
-
-function loadIncomingModuleCode(container) {
-    if (!container) return;
-    try {
-        // Placeholder: reuses the same three outgoing forms for now until
-        // dedicated incoming forms are built.
-        container.innerHTML = `
-            <div style="width: 100%; height: 100%; padding: 25px; box-sizing: border-box; display: flex; flex-direction: column; align-items: stretch;">
-                <div style="margin-bottom: 35px; border-bottom: 1px solid rgba(0, 0, 0, 0.2); padding-bottom: 15px; position: relative;">
-                    <h2 style="color: #111; margin: 0; font-family: 'Roboto Mono', monospace; font-size: 1.3rem; letter-spacing: 2px; font-weight: 700;">
-                        <i class="fa-solid fa-arrow-down-to-bracket" style="margin-right: 10px; color: #111;"></i>INCOMING
-                    </h2>
-                    <div style="position: absolute; top: -5px; right: 0; z-index: 10;">
-                        <button onclick="closeIncomingModal()" style="background: transparent; border: none; color: #ff4d4d; font-size: 1.8rem; cursor: pointer; padding: 5px; line-height: 1; display: flex; align-items: center; justify-content: center;" title="Close">
-                            <a href="#" class="menu-item" style="font-size: 1rem;"><i class="fa-solid fa-house"></i> Home</a>
-                        </button>
-                    </div>
-                </div>
-
-                <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; width: 100%; gap: 20px; margin: auto 0;">
-                    <div style="display: flex; justify-content: center; gap: 20px; width: 100%; max-width: 800px; flex-wrap: wrap;">
-                        <button class="nav-icon-btn" onclick="openModule('REQUEST_AND_RELEASED_FORM')" style="flex: 1 1 0px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; padding: 15px 10px; min-height: 110px; border-radius: 12px; cursor: pointer; background: rgba(144, 168, 168, 0.35); border: 1.5px solid rgba(0, 0, 0, 0.4); color: #111; backdrop-filter: blur(10px); transition: all 0.3s ease;">
-                            <i class="fa-solid fa-file-invoice" style="font-size: 1.8rem; color: #111;"></i>
-                            <span style="font-family: 'Roboto Mono', monospace; font-size: 0.8rem; font-weight: 700; text-align: center; letter-spacing: 1px;">REQUEST & RELEASED FORM</span>
-                        </button>
-
-                        <button class="nav-icon-btn" onclick="openModule('TRANSFER_FORM')" style="flex: 1 1 0px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; padding: 15px 10px; min-height: 110px; border-radius: 12px; cursor: pointer; background: rgba(144, 168, 168, 0.35); border: 1.5px solid rgba(0, 0, 0, 0.4); color: #111; backdrop-filter: blur(10px); transition: all 0.3s ease;">
-                            <i class="fa-solid fa-right-left" style="font-size: 1.8rem; color: #111;"></i>
-                            <span style="font-family: 'Roboto Mono', monospace; font-size: 0.8rem; font-weight: 700; text-align: center; letter-spacing: 1px;">TRANSFER FORM</span>
-                        </button>
-
-                        <button class="nav-icon-btn" onclick="openModule('PULLOUT_FORM')" style="flex: 1 1 0px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; padding: 15px 10px; min-height: 110px; border-radius: 12px; cursor: pointer; background: rgba(144, 168, 168, 0.35); border: 1.5px solid rgba(0, 0, 0, 0.4); color: #111; backdrop-filter: blur(10px); transition: all 0.3s ease;">
-                            <i class="fa-solid fa-file-arrow-down" style="font-size: 1.8rem; color: #111;"></i>
-                            <span style="font-family: 'Roboto Mono', monospace; font-size: 0.8rem; font-weight: 700; text-align: center; letter-spacing: 1px;">PULLOUT / GATE PASS FORM</span>
-                        </button>
-                    </div>
-                </div>
-            </div>
-        `;
-    } catch (error) {
-        console.error(error);
-        container.innerHTML = `<p style="padding: 20px; color: red;">Error loading Incoming module.</p>`;
-    }
-}
-
-function closeIncomingModal() {
-    const view = document.getElementById('mod-INCOMING');
-    const welcomeView = document.getElementById('defaultWelcomeView');
-    if (view) view.style.display = 'none';
-    if (welcomeView) welcomeView.style.display = 'flex';
-}
-
 function selectReportCategory(category) {
     if (category === 'INVENTORY') {
         logButtonClick('INVENTORY_BUTTON_CLICKED');
         openInventoryModal();
-    } else if (category === 'LOGS_HISTORY') {
-        logButtonClick('LOGS_HISTORY_BUTTON_CLICKED');
-        openLogsHistoryModal();
     } else if (HISTORY_CONFIGS[category]) {
         const logLabel = (HISTORY_CONFIGS[category].title || category).toUpperCase().replace(/\s+/g, '_') + '_BUTTON_CLICKED';
         logButtonClick(logLabel);
@@ -828,14 +749,14 @@ async function fetchInventoryByDepartment() {
 
         let rawData = result.data || [];
 
-        // LOCATION (col Y / index 24) is what the department filter dropdown
+        // LOCATION (col Z / index 25) is what the department filter dropdown
         // above is matched against. The server already scopes the sheet by
         // department name; this further restricts rows to the ones whose
         // LOCATION cell matches the selected department text.
         const deptFilterValue = selectedDept.trim().toLowerCase();
         if (deptFilterValue) {
             rawData = rawData.filter(row => {
-                const location = row[24] ? String(row[24]).trim().toLowerCase() : '';
+                const location = row[25] ? String(row[25]).trim().toLowerCase() : '';
                 return !location || location === deptFilterValue;
             });
         }
@@ -844,20 +765,13 @@ async function fetchInventoryByDepartment() {
 
         // Automatic near-expiry checker — silently scans the newly loaded
         // department data and only pops the modal if something qualifies.
-        // Guarded on the Inventory modal still being open: fetchInventoryByDepartment
-        // is async, so if the user already closed the modal before this
-        // resolved (e.g. a slow request, or they typed a department and
-        // exited quickly), these popups used to appear "floating" on
-        // whatever screen the user had moved on to instead of staying
-        // inside the report.
-        const inventoryModalStillOpen = document.getElementById('inventoryModal')?.style.display === 'flex';
-
-        if (inventoryModalStillOpen && typeof checkAndShowNearExpiryModal === 'function') {
+        if (typeof checkAndShowNearExpiryModal === 'function') {
             checkAndShowNearExpiryModal();
         }
+window.currentFetchedRows = rawData;
 
         // Check for expired items and trigger popup alert
-        if (inventoryModalStillOpen && typeof checkAndShowExpiredAlert === 'function') {
+        if (typeof checkAndShowExpiredAlert === 'function') {
             checkAndShowExpiredAlert(rawData);
         }
         if (!rawData || rawData.length === 0) {
@@ -872,18 +786,20 @@ async function fetchInventoryByDepartment() {
 
         tableBody.innerHTML = '';
         rawData.forEach((row, index) => {
-            // Column mapping (0-indexed from column A of the department sheet):
-            // B=SKU CODE, D=PRODUCT DESCRIPTION, E=UOM, F=COST, G=SRP,
-            // W=EXPIRATION DATE, X=QTY ONHAND, T=TOTAL ONHAND, Y=LOCATION
+            // Column mapping (0-indexed from column A of the department sheet).
+            // Updated after a column was deleted from the sheet, which shifted
+            // DESCRIPTION one left and everything from TOTAL ONHAND onward one right:
+            // B=SKU CODE, C=PRODUCT DESCRIPTION, E=UOM, F=COST, G=SRP,
+            // X=EXPIRATION DATE, Y=QTY ONHAND, U=TOTAL ONHAND, Z=LOCATION
             const sku = row[1] || '';
-            const desc = row[3] || '';
+            const desc = row[2] || '';
             const uom = row[4] || '-';
             const cost = row[5] !== undefined ? row[5] : '-';
             const srp = row[6] !== undefined ? row[6] : '-';
-            const expDate = formatExpirationDate(row[22]) || '-';
-            const qtyOnHand = row[23] !== undefined ? row[23] : 0;
-            const totalOnHand = row[19] !== undefined ? row[19] : 0;
-            const location = row[24] || '-';
+            const expDate = formatExpirationDate(row[23]) || '-';
+            const qtyOnHand = row[24] !== undefined ? row[24] : 0;
+            const totalOnHand = row[20] !== undefined ? row[20] : 0;
+            const location = row[25] || '-';
 
             const tr = document.createElement('tr');
             tr.style.borderBottom = '1px solid rgba(255, 255, 255, 0.05)';
@@ -962,13 +878,9 @@ window.openInventoryModal = function() {
                     </div>
 
                     <div style="display: flex; gap: 15px; margin-bottom: 20px; flex-wrap: wrap; align-items: flex-end;">
-                        <div style="flex: 1; min-width: 250px; position: relative;">
+                        <div style="flex: 1; min-width: 250px;">
                             <label style="display: block; font-size: 0.8rem; color: #00dbff; margin-bottom: 8px; font-weight: bold;">SELECT DEPARTMENT</label>
-                            <div style="position: relative; width: 100%;">
-                                <input type="text" id="inventoryDepartmentSearch" placeholder="Type or select department..." autocomplete="off" style="width: 100%; padding: 12px 35px 12px 12px; border-radius: 6px; border: 1px solid rgba(0, 219, 255, 0.4); background: rgba(0, 0, 0, 0.5); color: #fff; font-family: inherit; font-size: 0.9rem; box-sizing: border-box; outline: none;">
-                                <span id="inventoryDeptArrow" style="position: absolute; right: 12px; top: 50%; transform: translateY(-50%); color: #00dbff; cursor: pointer; font-size: 0.7rem; pointer-events: auto;">▼</span>
-                            </div>
-                            <div id="inventoryDeptMenu" style="display: none; position: absolute; top: 100%; left: 0; width: 100%; max-height: 250px; overflow-y: auto; background: #121826; border: 1px solid #00dbff; border-radius: 4px; box-shadow: 0 8px 16px rgba(0,0,0,0.8); z-index: 10000; margin-top: 4px;"></div>
+                            <input type="text" id="inventoryDepartmentSearch" list="outletList" placeholder="Type or select department..." style="width: 100%; padding: 12px; border-radius: 6px; border: 1px solid rgba(0, 219, 255, 0.4); background: rgba(0, 0, 0, 0.5); color: #fff; font-family: inherit; font-size: 0.9rem; box-sizing: border-box; outline: none;">
                             <datalist id="outletList"></datalist>
                         </div>
 
@@ -1038,11 +950,6 @@ window.openInventoryModal = function() {
         modal.style.display = 'flex';
     }
 
-    // Clear the SKU/description search every time the modal is (re)opened,
-    // so a leftover filter from last time doesn't silently hide rows.
-    const skuSearchEl = document.getElementById('skuSearchInput');
-    if (skuSearchEl) skuSearchEl.value = '';
-
     if (typeof loadOutletFilterFromConfig === 'function') {
         loadOutletFilterFromConfig();
     }
@@ -1052,74 +959,26 @@ window.openInventoryModal = function() {
     // the real restriction regardless of what this field contains.
     const scope = getSessionScope();
     const deptInputEl = document.getElementById('inventoryDepartmentSearch');
-    const deptMenuEl = document.getElementById('inventoryDeptMenu');
-    const deptArrowEl = document.getElementById('inventoryDeptArrow');
-
     if (deptInputEl) {
         if (scope.isAdmin) {
             deptInputEl.readOnly = false;
             deptInputEl.placeholder = "Type or select department...";
-            deptInputEl.style.cursor = 'text';
-            deptInputEl.style.opacity = '1';
-
-            // Clicking (focusing) the field always reopens the list —
-            // this replaces the native <input list> datalist, which some
-            // browsers won't reopen on click once a value has been picked.
-            deptInputEl.onfocus = () => renderGenericDropdownMenu('inventoryDeptMenu', window.cachedOutlets || [], deptInputEl.value, (val) => {
-                deptInputEl.value = val;
-                fetchInventoryByDepartment();
-            });
-            deptInputEl.oninput = () => {
-                renderGenericDropdownMenu('inventoryDeptMenu', window.cachedOutlets || [], deptInputEl.value, (val) => {
-                    deptInputEl.value = val;
-                    fetchInventoryByDepartment();
-                });
-            };
-            if (deptArrowEl) {
-                deptArrowEl.style.display = '';
-                deptArrowEl.onclick = (e) => {
-                    e.stopPropagation();
-                    if (deptMenuEl && deptMenuEl.style.display === 'block') {
-                        deptMenuEl.style.display = 'none';
-                    } else {
-                        deptInputEl.focus();
-                        renderGenericDropdownMenu('inventoryDeptMenu', window.cachedOutlets || [], deptInputEl.value, (val) => {
-                            deptInputEl.value = val;
-                            fetchInventoryByDepartment();
-                        });
-                    }
-                };
-            }
         } else {
             deptInputEl.value = scope.client || '';
             deptInputEl.readOnly = true;
             deptInputEl.placeholder = scope.client ? '' : 'No client on this account';
             deptInputEl.style.cursor = 'not-allowed';
             deptInputEl.style.opacity = '0.8';
-            deptInputEl.onfocus = null;
-            deptInputEl.oninput = null;
-            if (deptArrowEl) deptArrowEl.style.display = 'none';
         }
         if (deptInputEl.value.trim()) {
             fetchInventoryByDepartment();
         }
     }
-
-    document.onclick = (e) => {
-        if (!e.target.closest('#inventoryDepartmentSearch') && !e.target.closest('#inventoryDeptMenu') && !e.target.closest('#inventoryDeptArrow')) {
-            if (deptMenuEl) deptMenuEl.style.display = 'none';
-        }
-    };
 };
 
 async function refreshInventoryTable() {
     const deptInput = document.getElementById('inventoryDepartmentSearch');
     const selectedDept = deptInput ? deptInput.value.trim() : '';
-
-    // Clear any leftover SKU/description filter so the refreshed data
-    // isn't silently hidden behind a stale search term.
-    const skuSearchEl = document.getElementById('skuSearchInput');
-    if (skuSearchEl) skuSearchEl.value = '';
 
     if (!selectedDept) {
         if (typeof showModal === 'function') showModal("NOTICE", "Please select a department first.", "lock");
@@ -1227,6 +1086,18 @@ function viewItemDetails(skuCode, rowIdx) {
             #itemDrawer .dw-input[readonly]:hover { border-color: rgba(255, 255, 255, 0.08); }
             #itemDrawer textarea.dw-input { resize: none; line-height: 1.4; }
 
+            /* Category dropdown: force both the closed box and the open
+               options list to render as black background / white text. */
+            #itemDrawer select#drawerAdjCategory {
+                color-scheme: dark;
+                background: #000000 !important;
+                color: #ffffff !important;
+            }
+            #itemDrawer select#drawerAdjCategory option {
+                background: #000000;
+                color: #ffffff;
+            }
+
             #itemDrawer .dw-label {
                 display: flex; align-items: center; gap: 6px;
                 font-size: 0.68rem; letter-spacing: 0.6px; color: #7d8ba0;
@@ -1284,6 +1155,7 @@ function viewItemDetails(skuCode, rowIdx) {
 
                 <form id="drawerUpdateForm" class="dw-form" style="flex: 1; overflow-y: auto; padding-right: 6px;">
                     <input type="hidden" id="drawerSheetRowIndex">
+                    <input type="hidden" id="drawerUom">
 
                     <div class="dw-section">
                         <div class="dw-grid">
@@ -1375,13 +1247,19 @@ function viewItemDetails(skuCode, rowIdx) {
                             <span class="dw-section-title">Adjustments</span>
                         </div>
                         <div class="dw-grid">
-                            <div>
-                                <label class="dw-label">Issued / Sold / Transfered</label>
-                                <input type="number" id="drawerIssuedSold" min="0" placeholder="Enter qty to update..." class="dw-input">
+                            <div class="dw-span2">
+                                <label class="dw-label">Category</label>
+                                <select id="drawerAdjCategory" class="dw-input">
+                                    <option value="">Select category...</option>
+                                </select>
                             </div>
                             <div>
-                                <label class="dw-label">Wastage / Damaged / RTV</label>
-                                <input type="number" id="drawerWastageDamaged" min="0" placeholder="Enter qty to update..." class="dw-input">
+                                <label class="dw-label">Qty</label>
+                                <input type="number" id="drawerAdjQty" min="0" placeholder="Enter qty..." class="dw-input">
+                            </div>
+                            <div class="dw-span2">
+                                <label class="dw-label">Remarks</label>
+                                <textarea id="drawerAdjRemarks" rows="2" placeholder="Optional remarks..." class="dw-input"></textarea>
                             </div>
                         </div>
                     </div>
@@ -1425,7 +1303,8 @@ function viewItemDetails(skuCode, rowIdx) {
 
     document.getElementById('drawerSheetRowIndex').value = rowIdx + 8;
     document.getElementById('drawerSkuCode').value = itemData[1] || skuCode || '';
-    document.getElementById('drawerItemDesc').value = itemData[3] || '';
+    document.getElementById('drawerItemDesc').value = itemData[2] || '';
+    document.getElementById('drawerUom').value = itemData[4] || '';
 
     // Expiration date / qty batch tracking (cols H-M): 3 pairs, added before SRP.
     document.getElementById('drawerExpDate1').value = parseToDateInputValue(itemData[7]);
@@ -1439,14 +1318,72 @@ function viewItemDetails(skuCode, rowIdx) {
     document.getElementById('drawerCost').value = itemData[5] !== undefined ? itemData[5] : '';
     document.getElementById('drawerStockReceived').value = itemData[14] !== undefined ? itemData[14] : '';
     document.getElementById('drawerReceivedDate').value = parseToDateInputValue(itemData[15]);
-    document.getElementById('drawerTotalAvail').value = itemData[19] !== undefined ? itemData[19] : 0;
-    document.getElementById('drawerIssuedSold').value = '';
-    document.getElementById('drawerWastageDamaged').value = '';
+    document.getElementById('drawerTotalAvail').value = itemData[20] !== undefined ? itemData[20] : 0;
+    document.getElementById('drawerAdjCategory').value = '';
+    document.getElementById('drawerAdjQty').value = '';
+    document.getElementById('drawerAdjRemarks').value = '';
+    loadAdjustmentCategoryOptions();
 
     overlay.style.display = 'block';
     setTimeout(() => {
         drawer.style.right = '0px';
     }, 10);
+}
+
+let cachedAdjustmentCategories = null;
+
+async function loadAdjustmentCategoryOptions() {
+    const select = document.getElementById('drawerAdjCategory');
+    if (!select) return;
+
+    // Only trust the cache if it's a real, non-empty result — an empty
+    // array here almost always means a previous fetch failed silently
+    // (wrong sheet name, not-yet-redeployed backend, network hiccup), and
+    // we don't want to lock the dropdown empty forever because of that.
+    if (!cachedAdjustmentCategories || cachedAdjustmentCategories.length === 0) {
+        try {
+            if (!window.API) return;
+            const url = `${window.API}?sheet=DD&range=A1:A&token=${encodeURIComponent(window.API_TOKEN)}`;
+            const response = await fetch(url);
+            const result = await response.json();
+
+            if (result.success === false) {
+                console.error("DD category fetch failed:", result.error || result);
+                cachedAdjustmentCategories = null; // don't cache the failure — retry next time
+                select.innerHTML = '<option value="">Could not load categories — try reopening</option>';
+                return;
+            }
+
+            let rawData = Array.isArray(result) ? result : (result.values || result.data || []);
+
+            const seen = new Set();
+            const categories = [];
+            rawData.forEach(row => {
+                const val = Array.isArray(row) ? row[0] : row;
+                const stringVal = val !== null && val !== undefined ? String(val).trim() : '';
+                if (!stringVal) return;
+                if (stringVal.toUpperCase() === 'DD' || stringVal.toUpperCase() === 'CATEGORY') return; // skip a stray header cell
+                const key = stringVal.toUpperCase();
+                if (seen.has(key)) return; // dedupe
+                seen.add(key);
+                categories.push(stringVal);
+            });
+            cachedAdjustmentCategories = categories;
+        } catch (error) {
+            console.error("Failed to load DD category list:", error);
+            cachedAdjustmentCategories = null; // don't cache the failure — retry next time
+            select.innerHTML = '<option value="">Could not load categories — try reopening</option>';
+            return;
+        }
+    }
+
+    select.innerHTML = '<option value="">Select category...</option>';
+    cachedAdjustmentCategories.forEach(category => {
+        const option = document.createElement('option');
+        option.value = category;
+        option.textContent = category;
+        select.appendChild(option);
+    });
 }
 
 function closeItemDrawer() {
@@ -1472,8 +1409,9 @@ async function submitItemUpdate() {
     const cost = document.getElementById('drawerCost').value;
     const stockReceived = document.getElementById('drawerStockReceived').value;
     const receivedDate = document.getElementById('drawerReceivedDate').value;
-    const issuedSold = document.getElementById('drawerIssuedSold').value;
-    const wastageDamaged = document.getElementById('drawerWastageDamaged').value;
+    const adjCategory = document.getElementById('drawerAdjCategory').value;
+    const adjQty = document.getElementById('drawerAdjQty').value;
+    const adjRemarks = document.getElementById('drawerAdjRemarks').value;
 
     const deptInput = document.getElementById('inventoryDepartmentSearch');
     const sheetName = deptInput ? deptInput.value.trim() : '';
@@ -1514,8 +1452,13 @@ async function submitItemUpdate() {
         cost: cost,
         stockReceived: stockReceived,
         receivedDate: receivedDate,
-        issuedSold: issuedSold,
-        wastageDamaged: wastageDamaged,
+        adjCategory: adjCategory,
+        adjQty: adjQty,
+        adjRemarks: adjRemarks,
+        // Sent along so the backend can log a "MINUS TO INV" audit row
+        // without needing another sheet lookup.
+        itemDescription: document.getElementById('drawerItemDesc').value,
+        itemUom: document.getElementById('drawerUom') ? document.getElementById('drawerUom').value : '',
         token: window.API_TOKEN
     };
 
@@ -1584,85 +1527,6 @@ function escapeHtml(str) {
         .replace(/>/g, "&gt;")
         .replace(/"/g, "&quot;")
         .replace(/'/g, "&#039;");
-}
-
-// ==========================================
-// GLOBAL PRINT FIX
-// ==========================================
-// Both the History modal and the physical forms (Pullout/Transfer/
-// Request-and-Released) live inside fixed-height, overflow:auto
-// containers. Printing without isolating them means the browser only
-// captures whatever is currently visible on screen (one "page" of a
-// long table gets cut off) and prints the whole underlying page
-// (dashboard chrome, backdrop, etc.) alongside it.
-//
-// Injected once, this hides everything except whichever printable
-// container is marked, and forces every element inside it back to
-// natural (unclipped) height so long tables print in full across
-// as many physical pages as needed.
-function ensurePrintStylesInjected() {
-    if (document.getElementById('globalPrintStyles')) return;
-    const style = document.createElement('style');
-    style.id = 'globalPrintStyles';
-    style.textContent = `
-        @media print {
-            body * { visibility: hidden !important; }
-
-            .form-print-area, .form-print-area *,
-            #historyPrintableArea, #historyPrintableArea *,
-            #logsPrintableArea, #logsPrintableArea * {
-                visibility: visible !important;
-            }
-
-            .print-modal-overlay {
-                position: static !important;
-                background: none !important;
-                backdrop-filter: none !important;
-                width: auto !important;
-                height: auto !important;
-                padding: 0 !important;
-                display: block !important;
-            }
-            .form-print-area {
-                position: static !important;
-                width: 100% !important;
-                height: auto !important;
-                max-height: none !important;
-                overflow: visible !important;
-                box-shadow: none !important;
-                border: none !important;
-            }
-            .form-print-area * {
-                overflow: visible !important;
-                max-height: none !important;
-                height: auto !important;
-            }
-
-            #historyModal, #logsHistoryModal {
-                position: static !important;
-                background: none !important;
-                backdrop-filter: none !important;
-                width: auto !important;
-                height: auto !important;
-            }
-            #historyPrintableArea, #logsPrintableArea {
-                position: static !important;
-                width: 100% !important;
-                height: auto !important;
-                max-height: none !important;
-                overflow: visible !important;
-                box-shadow: none !important;
-            }
-            #historyPrintableArea *, #logsPrintableArea * {
-                overflow: visible !important;
-                max-height: none !important;
-                height: auto !important;
-            }
-
-            .no-print, .no-print * { display: none !important; }
-        }
-    `;
-    document.head.appendChild(style);
 }
 
 async function openProductListModal() {
@@ -1844,12 +1708,6 @@ function addSelectedProducts() {
         return;
     }
 
-    const pulloutMod = document.getElementById('mod-PULLOUT_FORM');
-    const reqRelMod = document.getElementById('mod-REQUEST_AND_RELEASED_FORM');
-    
-    const is15ColModule = (pulloutMod && pulloutMod.style.display !== 'none') || 
-                          (reqRelMod && reqRelMod.style.display !== 'none');
-
     const activeModule = document.querySelector('.module-view[style*="display: block"]');
     let tableBody = activeModule?.querySelector('#transferTableBody, #pulloutTableBody') || 
                     document.getElementById('transferTableBody') || 
@@ -1876,41 +1734,26 @@ function addSelectedProducts() {
         tr.setAttribute('data-sku', item.sku);
         tr.style.height = "38px";
 
-        if (is15ColModule) {
-            tr.innerHTML = `
-                <td style="${tdStyle} font-weight: 600; color: #212529;">${escapeHtml(item.sku)}</td>
-                <td style="${tdStyle}">${escapeHtml(item.description)}</td>
-                <td style="${tdStyle} text-align: center; color: #495057;">${escapeHtml(item.uom)}</td>
-                <td style="${tdStyle} text-align: center; color: #495057;">${escapeHtml(item.expDate || '-')}</td>
-                <td style="${tdStyle} text-align: center;">${escapeHtml(item.qtyOnhand)}</td>
-                <td style="${tdStyle} text-align: center;">${escapeHtml(item.totalOnhand)}</td>
-                <td style="${tdStyle} text-align: center; color: #495057;">${escapeHtml(item.cost || '-')}</td>
-                <td style="${tdStyle} text-align: center; color: #495057;">${escapeHtml(item.srp || '-')}</td>
-                <td style="${tdStyle} text-align: center; border-right: 2px solid #000;">
-                    <input type="number" min="1" value="1" style="${inputStyle} text-align: center; font-weight: 600;">
-                </td>
-                <td style="${tdStyle} text-align: center;" class="no-print">
-                    <button type="button" onclick="removeTransferRow('${rowId}')" title="Remove Row" style="background: transparent; border: none; color: #ff4d4d; cursor: pointer; font-size: 1.2rem; font-weight: bold; line-height: 1; padding: 2px 5px;">✕</button>
-                </td>
-            `;
-        } else {
-            tr.innerHTML = `
-                <td style="${tdStyle} font-weight: 600; color: #212529;">${escapeHtml(item.sku)}</td>
-                <td style="${tdStyle}">${escapeHtml(item.description)}</td>
-                <td style="${tdStyle} text-align: center; color: #495057;">${escapeHtml(item.uom)}</td>
-                <td style="${tdStyle} text-align: center; color: #495057;">${escapeHtml(item.expDate || '-')}</td>
-                <td style="${tdStyle} text-align: center;">${escapeHtml(item.qtyOnhand)}</td>
-                <td style="${tdStyle} text-align: center;">${escapeHtml(item.totalOnhand)}</td>
-                <td style="${tdStyle} text-align: center; color: #495057;">${escapeHtml(item.cost || '-')}</td>
-                <td style="${tdStyle} text-align: center; color: #495057;">${escapeHtml(item.srp || '-')}</td>
-                <td style="${tdStyle} text-align: center; border-right: 2px solid #000;">
-                    <input type="number" min="1" value="1" style="${inputStyle} text-align: center; font-weight: 600;">
-                </td>
-                <td style="${tdStyle} text-align: center;" class="no-print">
-                    <button type="button" onclick="removeTransferRow('${rowId}')" title="Remove Row" style="background: transparent; border: none; color: #ff4d4d; cursor: pointer; font-size: 1.2rem; font-weight: bold; line-height: 1; padding: 2px 5px;">✕</button>
-                </td>
-            `;
-        }
+        // All three outgoing forms (REQUEST_AND_RELEASED_FORM, TRANSFER_FORM,
+        // PULLOUT_FORM) now only collect the base product/qty info — the
+        // former RELEASED / RECEIVED / OUT-EXIT / RETURN column groups were
+        // removed and are filled in later from the matching INCOMING form.
+        tr.innerHTML = `
+            <td style="${tdStyle} font-weight: 600; color: #212529;">${escapeHtml(item.sku)}</td>
+            <td style="${tdStyle}">${escapeHtml(item.description)}</td>
+            <td style="${tdStyle} text-align: center; color: #495057;">${escapeHtml(item.uom)}</td>
+            <td style="${tdStyle} text-align: center; color: #495057;">${escapeHtml(item.expDate || '-')}</td>
+            <td style="${tdStyle} text-align: center;">${escapeHtml(item.qtyOnhand)}</td>
+            <td style="${tdStyle} text-align: center;">${escapeHtml(item.totalOnhand)}</td>
+            <td style="${tdStyle} text-align: center; color: #495057;">${escapeHtml(item.cost || '-')}</td>
+            <td style="${tdStyle} text-align: center; color: #495057;">${escapeHtml(item.srp || '-')}</td>
+            <td style="${tdStyle} text-align: center;">
+                <input type="number" min="1" value="1" style="${inputStyle} text-align: center; font-weight: 600;">
+            </td>
+            <td style="${tdStyle} text-align: center;" class="no-print">
+                <button type="button" onclick="removeTransferRow('${rowId}')" title="Remove Row" style="background: transparent; border: none; color: #ff4d4d; cursor: pointer; font-size: 1.2rem; font-weight: bold; line-height: 1; padding: 2px 5px;">✕</button>
+            </td>
+        `;
 
         tableBody.appendChild(tr);
     });
@@ -2015,8 +1858,8 @@ async function loadRequestAndReleasedFormModuleCode(container) {
         const htmlContent = await response.text();
         
         container.innerHTML = `
-            <div class="print-modal-overlay" style="position: fixed; top: 0; left: 0; width: 100vw; height: 98%; background: rgba(0, 0, 0, 0.75); backdrop-filter: blur(8px); display: flex; justify-content: center; align-items: center; z-index: 3000; box-sizing: border-box; padding: 20px 50px 20px 20px;">
-                <div class="glass-card form-print-area" style="position: relative; width: 100%; height:100%; max-width: none; max-height: none; overflow-y: auto; background: rgba(20, 20, 25, 0.95); border: 1px solid rgba(255, 255, 255, 0.2); border-radius: 16px; padding: 60px; box-sizing: border-box; display: flex; flex-direction: column; align-items: stretch; box-shadow: 0 30px 60px rgba(0,0,0,0.7);">
+            <div style="position: fixed; top: 0; left: 0; width: 100vw; height: 98%; background: rgba(0, 0, 0, 0.75); backdrop-filter: blur(8px); display: flex; justify-content: center; align-items: center; z-index: 3000; box-sizing: border-box; padding: 20px 50px 20px 20px;">
+                <div class="glass-card" style="position: relative; width: 100%; height:100%; max-width: none; max-height: none; overflow-y: auto; background: rgba(20, 20, 25, 0.95); border: 1px solid rgba(255, 255, 255, 0.2); border-radius: 16px; padding: 60px; box-sizing: border-box; display: flex; flex-direction: column; align-items: stretch; box-shadow: 0 30px 60px rgba(0,0,0,0.7);">
                     <div style="position: absolute; top: 18px; right: 25px; z-index: 10; display: flex; gap: 12px; align-items: center;">
                         <button onclick="closeRequestAndReleasedFormModal()" style="background: transparent; border: none; color: #ff4d4d; font-size: 1.8rem; cursor: pointer; padding: 5px; line-height: 1; display: flex; align-items: center; justify-content: center;" title="Close">
                             <i class="fa-solid fa-xmark"></i>
@@ -2031,7 +1874,6 @@ async function loadRequestAndReleasedFormModuleCode(container) {
 
         if (typeof loadOutletFilterFromConfig === 'function') loadOutletFilterFromConfig();
         if (typeof setTransferDate === 'function') setTransferDate();
-        ensurePrintStylesInjected();
 
     } catch (error) {
         console.error("Module Load Error:", error);
@@ -2061,8 +1903,8 @@ async function loadTransferFormModuleCode(container) {
         const htmlContent = await response.text();
         
         container.innerHTML = `
-            <div class="print-modal-overlay" style="position: fixed; top: 0; left: 0; width: 100vw; height: 98%; background: rgba(0, 0, 0, 0.75); backdrop-filter: blur(8px); display: flex; justify-content: center; align-items: center; z-index: 3000; box-sizing: border-box; padding: 20px 50px 20px 20px;">
-                <div class="glass-card form-print-area" style="position: relative; width: 100%; height:100%; max-width: none; max-height: none; overflow-y: auto; background: rgba(20, 20, 25, 0.95); border: 1px solid rgba(255, 255, 255, 0.2); border-radius: 16px; padding: 60px; box-sizing: border-box; display: flex; flex-direction: column; align-items: stretch; box-shadow: 0 30px 60px rgba(0,0,0,0.7);">
+            <div style="position: fixed; top: 0; left: 0; width: 100vw; height: 98%; background: rgba(0, 0, 0, 0.75); backdrop-filter: blur(8px); display: flex; justify-content: center; align-items: center; z-index: 3000; box-sizing: border-box; padding: 20px 50px 20px 20px;">
+                <div class="glass-card" style="position: relative; width: 100%; height:100%; max-width: none; max-height: none; overflow-y: auto; background: rgba(20, 20, 25, 0.95); border: 1px solid rgba(255, 255, 255, 0.2); border-radius: 16px; padding: 60px; box-sizing: border-box; display: flex; flex-direction: column; align-items: stretch; box-shadow: 0 30px 60px rgba(0,0,0,0.7);">
                     <div style="position: absolute; top: 18px; right: 25px; z-index: 10; display: flex; gap: 12px; align-items: center;">
                         <button onclick="closeTransferModal()" style="background: transparent; border: none; color: #ff4d4d; font-size: 1.8rem; cursor: pointer; padding: 5px; line-height: 1; display: flex; align-items: center; justify-content: center;" title="Close">
                             <i class="fa-solid fa-xmark"></i>
@@ -2077,7 +1919,6 @@ async function loadTransferFormModuleCode(container) {
 
         if (typeof loadOutletFilterFromConfig === 'function') loadOutletFilterFromConfig();
         if (typeof setTransferDate === 'function') setTransferDate();
-        ensurePrintStylesInjected();
 
     } catch (error) {
         console.error(error);
@@ -2107,8 +1948,8 @@ async function loadPulloutFormModuleCode(container) {
         const htmlContent = await response.text();
         
         container.innerHTML = `
-            <div class="print-modal-overlay" style="position: fixed; top: 0; left: 0; width: 100vw; height: 98%; background: rgba(0, 0, 0, 0.75); backdrop-filter: blur(8px); display: flex; justify-content: center; align-items: center; z-index: 3000; box-sizing: border-box; padding: 20px 50px 20px 20px;">
-                <div class="glass-card form-print-area" style="position: relative; width: 100%; height:100%; max-width: none; max-height: none; overflow-y: auto; background: rgba(20, 20, 25, 0.95); border: 1px solid rgba(255, 255, 255, 0.2); border-radius: 16px; padding: 60px; box-sizing: border-box; display: flex; flex-direction: column; align-items: stretch; box-shadow: 0 30px 60px rgba(0,0,0,0.7);">
+            <div style="position: fixed; top: 0; left: 0; width: 100vw; height: 98%; background: rgba(0, 0, 0, 0.75); backdrop-filter: blur(8px); display: flex; justify-content: center; align-items: center; z-index: 3000; box-sizing: border-box; padding: 20px 50px 20px 20px;">
+                <div class="glass-card" style="position: relative; width: 100%; height:100%; max-width: none; max-height: none; overflow-y: auto; background: rgba(20, 20, 25, 0.95); border: 1px solid rgba(255, 255, 255, 0.2); border-radius: 16px; padding: 60px; box-sizing: border-box; display: flex; flex-direction: column; align-items: stretch; box-shadow: 0 30px 60px rgba(0,0,0,0.7);">
                     <div style="position: absolute; top: 18px; right: 25px; z-index: 10; display: flex; gap: 12px; align-items: center;">
                         <button onclick="closePulloutModal()" style="background: transparent; border: none; color: #ff4d4d; font-size: 1.8rem; cursor: pointer; padding: 5px; line-height: 1; display: flex; align-items: center; justify-content: center;" title="Close">
                             <i class="fa-solid fa-xmark"></i>
@@ -2123,7 +1964,6 @@ async function loadPulloutFormModuleCode(container) {
 
         if (typeof loadOutletFilterFromConfig === 'function') loadOutletFilterFromConfig();
         if (typeof setTransferDate === 'function') setTransferDate();
-        ensurePrintStylesInjected();
 
     } catch (error) {
         console.error(error);
@@ -2319,7 +2159,13 @@ function openHistoryModal(categoryKey) {
       deptInput.placeholder = 'Type or select department...';
       deptInput.style.cursor = 'text';
       deptInput.style.opacity = '1';
-      deptInput.onfocus = () => renderDropdownMenu(deptInput.value);
+      deptInput.onfocus = () => {
+        // Clear the field on focus so the admin can search fresh — instead
+        // of having to manually delete the previously selected department
+        // before picking a different one.
+        deptInput.value = '';
+        renderDropdownMenu('');
+      };
       deptInput.oninput = () => {
         renderDropdownMenu(deptInput.value);
         filterHistoryByInput();
@@ -2345,7 +2191,8 @@ function openHistoryModal(categoryKey) {
         deptMenu.style.display = 'none';
       } else {
         deptInput.focus();
-        renderDropdownMenu(deptInput.value);
+        deptInput.value = '';
+        renderDropdownMenu('');
       }
     };
   }
@@ -2366,44 +2213,9 @@ function openHistoryModal(categoryKey) {
   }
 
   modal.style.display = 'flex';
-  ensurePrintStylesInjected();
   
   fetchAreaList();
   fetchHistoryData(true);
-}
-
-// Generic version of renderDropdownMenu, usable by any text-input + arrow +
-// menu trio (Inventory Report's department field, Logs History's username
-// field, etc). Takes the target menu's element id, the full list of
-// options, the current filter text, and a callback invoked with whichever
-// option gets clicked.
-function renderGenericDropdownMenu(menuId, list, filterText, onSelect) {
-    const menu = document.getElementById(menuId);
-    if (!menu) return;
-
-    const searchTerm = (filterText || '').trim().toLowerCase();
-    const filtered = (list || []).filter(item => String(item).toLowerCase().includes(searchTerm));
-
-    if (filtered.length === 0) {
-        menu.innerHTML = `<div style="padding: 10px 14px; color: #ff4d4d; font-size: 0.8rem;">No matches</div>`;
-    } else {
-        menu.innerHTML = filtered.map(item => `
-            <div class="dd-generic-item" data-value="${escapeHtml(item)}" style="padding: 10px 14px; color: #fff; font-size: 0.8rem; cursor: pointer; border-bottom: 1px solid rgba(255,255,255,0.05);">
-                ${escapeHtml(item)}
-            </div>
-        `).join('');
-
-        menu.querySelectorAll('.dd-generic-item').forEach(el => {
-            el.onmouseenter = () => el.style.background = 'rgba(0, 219, 255, 0.2)';
-            el.onmouseleave = () => el.style.background = 'transparent';
-            el.onclick = () => {
-                menu.style.display = 'none';
-                onSelect(el.getAttribute('data-value'));
-            };
-        });
-    }
-
-    menu.style.display = 'block';
 }
 
 function renderDropdownMenu(filterText = '') {
@@ -2436,181 +2248,6 @@ function renderDropdownMenu(filterText = '') {
   }
 
   menu.style.display = 'block';
-}
-
-// ==========================================
-// LOGS HISTORY (USERDB usernames + LOGIN_LOGS)
-// ==========================================
-let cachedLogsUsernameList = [];
-
-async function fetchLogsUsernameList() {
-    try {
-        if (!window.API) return;
-        const currentUser = window.sessionUser || localStorage.getItem('activeUser') || '';
-        const url = `${window.API}?action=getLogsUsernameList&user=${encodeURIComponent(currentUser)}&token=${encodeURIComponent(window.API_TOKEN)}`;
-        const response = await fetch(url);
-        const result = await response.json();
-        cachedLogsUsernameList = (result.success && Array.isArray(result.data)) ? result.data : [];
-    } catch (err) {
-        console.error("Error fetching logs username list:", err);
-        cachedLogsUsernameList = [];
-    }
-}
-
-function openLogsHistoryModal() {
-    let modal = document.getElementById('logsHistoryModal');
-
-    if (!modal) {
-        const modalHTML = `
-          <div id="logsHistoryModal" style="display: flex; position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; background: rgba(0, 0, 0, 0.85); backdrop-filter: blur(8px); z-index: 9999; justify-content: center; align-items: center;">
-            <div id="logsPrintableArea" style="background: rgba(18, 24, 38, 0.98); border: 1.5px solid rgba(0, 219, 255, 0.4); box-shadow: 0 0 25px rgba(0, 219, 255, 0.2); padding: 25px; width: 95vw; height: 90vh; color: #fff; font-family: 'Roboto Mono', monospace; display: flex; flex-direction: column; box-sizing: border-box; position: relative;">
-
-              <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid rgba(0, 219, 255, 0.3); padding-bottom: 12px; margin-bottom: 15px;">
-                <h2 style="color: #00dbff; margin: 0; font-size: 1.3rem; letter-spacing: 1px;">LOGS HISTORY</h2>
-                <button class="no-print" onclick="document.getElementById('logsHistoryModal').style.display='none'" style="background: transparent; border: none; color: #ff4d4d; font-size: 1.8rem; cursor: pointer;">&times;</button>
-              </div>
-
-              <div class="no-print" style="display: flex; gap: 15px; margin-bottom: 15px; align-items: flex-end;">
-
-                <div style="display: flex; flex-direction: column; flex: 1; gap: 6px; position: relative;">
-                  <label for="logsUsernameInput" style="color: #00dbff; font-size: 0.75rem; font-weight: bold; letter-spacing: 1px; text-transform: uppercase;">
-                    FILTER BY USERNAME
-                  </label>
-                  <div style="position: relative; width: 100%;">
-                    <input type="text" id="logsUsernameInput" placeholder="Type or select username..." autocomplete="off" style="width: 100%; padding: 10px 35px 10px 14px; border-radius: 4px; border: 1px solid rgba(0, 219, 255, 0.4); background: #0c101a; color: #fff; outline: none; box-sizing: border-box; font-family: inherit; font-size: 0.85rem;">
-                    <span id="logsUsernameArrow" style="position: absolute; right: 12px; top: 50%; transform: translateY(-50%); color: #00dbff; cursor: pointer; font-size: 0.7rem; pointer-events: auto;">▼</span>
-                  </div>
-                  <div id="logsUsernameMenu" style="display: none; position: absolute; top: 100%; left: 0; width: 100%; max-height: 250px; overflow-y: auto; background: #121826; border: 1px solid #00dbff; border-radius: 4px; box-shadow: 0 8px 16px rgba(0,0,0,0.8); z-index: 10000; margin-top: 4px;"></div>
-                </div>
-
-                <button id="logsRefreshBtn" style="padding: 10px 20px; background: rgba(0, 219, 255, 0.15); border: 1px solid #00dbff; color: #00dbff; font-weight: bold; border-radius: 4px; cursor: pointer; display: flex; align-items: center; gap: 6px; height: 40px;">
-                  <i class="fa-solid fa-rotate-right"></i> REFRESH
-                </button>
-
-                <button id="logsPrintBtn" onclick="window.print()" style="padding: 10px 20px; background: rgba(0, 255, 136, 0.2); border: 1px solid #00ff88; color: #00ff88; font-weight: bold; border-radius: 4px; cursor: pointer; display: flex; align-items: center; gap: 6px; height: 40px;">
-                  <i class="fa-solid fa-print"></i> PRINT
-                </button>
-              </div>
-
-              <div style="flex: 1; overflow: auto; border: 1px solid rgba(255, 255, 255, 0.1); background: rgba(0, 0, 0, 0.4);">
-                <table style="width: 100%; border-collapse: collapse; font-size: 0.8rem; white-space: nowrap;">
-                  <thead style="position: sticky; top: 0; background: rgba(18, 24, 38, 1); color: #00dbff;">
-                    <tr>
-                      <th style="padding: 10px; border: 1px solid rgba(0,219,255,0.2); text-align: left;">USERNAME</th>
-                      <th style="padding: 10px; border: 1px solid rgba(0,219,255,0.2); text-align: left;">DEPARTMENT</th>
-                      <th style="padding: 10px; border: 1px solid rgba(0,219,255,0.2); text-align: left;">ACTION TAKEN</th>
-                      <th style="padding: 10px; border: 1px solid rgba(0,219,255,0.2); text-align: center;">TIMESTAMP</th>
-                      <th style="padding: 10px; border: 1px solid rgba(0,219,255,0.2); text-align: center;">STATUS</th>
-                    </tr>
-                  </thead>
-                  <tbody id="logsHistoryTableBody"></tbody>
-                </table>
-              </div>
-
-            </div>
-          </div>`;
-        document.body.insertAdjacentHTML('beforeend', modalHTML);
-        modal = document.getElementById('logsHistoryModal');
-    }
-
-    const usernameInput = document.getElementById('logsUsernameInput');
-    const usernameMenu = document.getElementById('logsUsernameMenu');
-    const usernameArrow = document.getElementById('logsUsernameArrow');
-
-    // Cleared every time the modal (re)opens, same as the other report
-    // filters — a leftover filter from last time shouldn't silently
-    // narrow this session's view.
-    if (usernameInput) {
-        usernameInput.value = '';
-        usernameInput.onfocus = () => renderGenericDropdownMenu('logsUsernameMenu', cachedLogsUsernameList, usernameInput.value, (val) => {
-            usernameInput.value = val;
-            fetchLogsHistoryData();
-        });
-        usernameInput.oninput = () => {
-            renderGenericDropdownMenu('logsUsernameMenu', cachedLogsUsernameList, usernameInput.value, (val) => {
-                usernameInput.value = val;
-                fetchLogsHistoryData();
-            });
-        };
-    }
-
-    if (usernameArrow) {
-        usernameArrow.onclick = (e) => {
-            e.stopPropagation();
-            if (usernameMenu && usernameMenu.style.display === 'block') {
-                usernameMenu.style.display = 'none';
-            } else {
-                usernameInput.focus();
-                renderGenericDropdownMenu('logsUsernameMenu', cachedLogsUsernameList, usernameInput.value, (val) => {
-                    usernameInput.value = val;
-                    fetchLogsHistoryData();
-                });
-            }
-        };
-    }
-
-    document.onclick = (e) => {
-        if (!e.target.closest('#logsUsernameInput') && !e.target.closest('#logsUsernameMenu') && !e.target.closest('#logsUsernameArrow')) {
-            if (usernameMenu) usernameMenu.style.display = 'none';
-        }
-    };
-
-    const refreshBtn = document.getElementById('logsRefreshBtn');
-    if (refreshBtn) {
-        refreshBtn.onclick = () => {
-            if (usernameInput) usernameInput.value = '';
-            fetchLogsUsernameList();
-            fetchLogsHistoryData();
-        };
-    }
-
-    modal.style.display = 'flex';
-    ensurePrintStylesInjected();
-
-    fetchLogsUsernameList();
-    fetchLogsHistoryData();
-}
-
-async function fetchLogsHistoryData() {
-    const tableBody = document.getElementById('logsHistoryTableBody');
-    if (!tableBody) return;
-
-    const usernameInput = document.getElementById('logsUsernameInput');
-    const usernameFilter = usernameInput ? usernameInput.value.trim() : '';
-
-    tableBody.innerHTML = `<tr><td colspan="5" style="text-align: center; padding: 30px; color: #00dbff;">Loading records...</td></tr>`;
-
-    try {
-        if (!window.API) throw new Error("window.API is undefined.");
-        const currentUser = window.sessionUser || localStorage.getItem('activeUser') || '';
-        const url = `${window.API}?action=getLoginLogsFiltered&user=${encodeURIComponent(currentUser)}&username=${encodeURIComponent(usernameFilter)}&token=${encodeURIComponent(window.API_TOKEN)}`;
-        const response = await fetch(url);
-        const result = await response.json();
-
-        if (!result.success) {
-            tableBody.innerHTML = `<tr><td colspan="5" style="text-align: center; padding: 30px; color: #ff4d4d;">${escapeHtml(result.error || 'Failed to load logs.')}</td></tr>`;
-            return;
-        }
-
-        const rows = result.data || [];
-        if (rows.length === 0) {
-            tableBody.innerHTML = `<tr><td colspan="5" style="text-align: center; padding: 30px; color: #ff4d4d;">No log records found.</td></tr>`;
-            return;
-        }
-
-        tableBody.innerHTML = rows.map(row => `
-            <tr style="border-bottom: 1px solid rgba(255,255,255,0.05);">
-                <td style="padding: 8px 10px; border: 1px solid rgba(255,255,255,0.05);">${escapeHtml(row[0])}</td>
-                <td style="padding: 8px 10px; border: 1px solid rgba(255,255,255,0.05);">${escapeHtml(row[1])}</td>
-                <td style="padding: 8px 10px; border: 1px solid rgba(255,255,255,0.05);">${escapeHtml(row[2])}</td>
-                <td style="padding: 8px 10px; border: 1px solid rgba(255,255,255,0.05); text-align: center;">${escapeHtml(row[3])}</td>
-                <td style="padding: 8px 10px; border: 1px solid rgba(255,255,255,0.05); text-align: center;">${escapeHtml(row[4])}</td>
-            </tr>
-        `).join('');
-    } catch (err) {
-        console.error("Error fetching logs history:", err);
-        tableBody.innerHTML = `<tr><td colspan="5" style="text-align: center; padding: 30px; color: #ff4d4d;">Failed to load logs.</td></tr>`;
-    }
 }
 
 async function fetchHistoryData(forceRefresh = false) {
@@ -2784,7 +2421,7 @@ function checkAndShowNearExpiryModal() {
                             <h3 class="blink-alert" style="color: #ff4444; margin: 0; font-size: 1.1rem; letter-spacing: 1px;">
                                 <i class="fa-solid fa-triangle-exclamation" style="margin-right: 10px;"></i>NEAR EXPIRY ALERT
                             </h3>
-                            <p id="nearExpiryModalSubtitle" style="margin: 6px 0 0; font-size: 0.72rem; color: #b89a9a;">Items in this department meeting the near-expiry condition (col Z &le; 90)</p>
+                            <p id="nearExpiryModalSubtitle" style="margin: 6px 0 0; font-size: 0.72rem; color: #b89a9a;">Items in this department meeting the near-expiry condition (col AA &le; 90)</p>
                         </div>
                         <button type="button" onclick="closeNearExpiryModal()" style="background: transparent; border: none; color: #ff8888; font-size: 1.6rem; cursor: pointer; line-height: 1; padding: 0 4px;">&times;</button>
                     </div>
@@ -2815,11 +2452,12 @@ function checkAndShowNearExpiryModal() {
     const rows = window.currentFetchedRows || [];
     let matchCount = 0;
 
-    console.log(`[Near Expiry Check] Scanning ${rows.length} row(s). Sample col Z values:`, rows.slice(0, 5).map(r => r[25]));
+    console.log(`[Near Expiry Check] Scanning ${rows.length} row(s). Sample col AA values:`, rows.slice(0, 5).map(r => r[26]));
 
     rows.forEach(row => {
-        // Column Z is index 25
-        const rawZ = row[25];
+        // Column AA is index 26 (was Z/25 before a column was deleted from
+        // the department sheet, which shifted this formula column right by one)
+        const rawZ = row[26];
 
         // Skip blank/empty/whitespace-only values
         if (rawZ === undefined || rawZ === null || String(rawZ).trim() === '') {
@@ -2832,9 +2470,9 @@ function checkAndShowNearExpiryModal() {
         if (!isNaN(colZVal) && colZVal <= 90) {
             matchCount++;
             const sku = row[1] || ''; // Col B
-            const desc = row[3] || ''; // Col D
-            const expDate = formatExpirationDate(row[22]) || row[22] || '-'; // Col W
-            const qty = row[23] !== undefined ? row[23] : '0'; // Col X (Qty onhand)
+            const desc = row[2] || ''; // Col C
+            const expDate = formatExpirationDate(row[23]) || row[23] || '-'; // Col X
+            const qty = row[24] !== undefined ? row[24] : '0'; // Col Y (Qty onhand)
 
             const tr = document.createElement('tr');
             tr.style.borderBottom = '1px solid rgba(255, 255, 255, 0.05)';
@@ -2946,8 +2584,9 @@ function checkAndShowStockAvailabilityModal() {
     const buckets = { critical: [], low: [], out: [] };
 
     rows.forEach(row => {
-        // Column AA is index 26
-        const status = row[26] ? String(row[26]).trim().toUpperCase() : '';
+        // Column AB is index 27 (was AA/26 before a column was deleted from
+        // the department sheet, which shifted this formula column right by one)
+        const status = row[27] ? String(row[27]).trim().toUpperCase() : '';
         if (status === 'CRITICAL') buckets.critical.push(row);
         else if (status === 'LOW IN STOCK') buckets.low.push(row);
         else if (status === 'OUT OF STOCK') buckets.out.push(row);
@@ -2968,7 +2607,7 @@ function checkAndShowStockAvailabilityModal() {
         tbody.innerHTML = items.map(row => {
             const sku = row[1] || ''; // Col B
             const desc = row[2] || ''; // Col C
-            const qty = row[19] !== undefined ? row[19] : 0; // Col T
+            const qty = row[20] !== undefined ? row[20] : 0; // Col U
             return `<tr>
                 <td style="padding: 8px; border: 1px solid rgba(255,255,255,0.08); font-weight: bold;">${escapeHtml(sku)}</td>
                 <td style="padding: 8px; border: 1px solid rgba(255,255,255,0.08);">${escapeHtml(desc)}</td>
@@ -3013,10 +2652,10 @@ function checkAndShowExpiredAlert(rows) {
 
     data.forEach(row => {
         const sku = row[1] || 'N/A';
-        const desc = row[3] || 'N/A';
-        const qty = row[23] !== undefined && row[23] !== '' ? row[23] : 0; // Col X
-        const expDateStr = row[22] || '';
-        const status = row[25] ? String(row[25]).toUpperCase() : '';
+        const desc = row[2] || 'N/A';
+        const qty = row[24] !== undefined && row[24] !== '' ? row[24] : 0; // Col Y
+        const expDateStr = row[23] || ''; // Col X
+        const status = row[26] ? String(row[26]).toUpperCase() : ''; // Col AA
 
         let isExpired = false;
 
@@ -3123,4 +2762,310 @@ function showExpiredPopup(expiredItems) {
 function closeExpiredAlertModal() {
     const modal = document.getElementById('expiredAlertModal');
     if (modal) modal.style.display = 'none';
+}
+// ==========================================
+// INCOMING MODULE — receiving side of REQUEST/TRANSFER/PULLOUT
+// Reads pending (not-yet-received) rows straight out of the REQUEST,
+// TRANSFER and RTV sheets and lets the receiving department confirm
+// them, writing the exp. date + qty back into the sheet and flagging
+// the row RECEIVED so it drops out of future fetches.
+// ==========================================
+
+const INCOMING_CONFIGS = {
+    REQUEST: {
+        sheet: 'REQUEST',
+        title: 'INCOMING REQUEST AND RELEASED FORM',
+        qtyLabel: 'TRANSFER QTY',
+        // Column letters below refer to the REQUEST sheet layout:
+        // A dept | B-I product/cost/srp | J transfer qty |
+        // K-N released info | O-R received info | S incoming dept | T date | U status
+        incomingCol: 'S',
+        dateCol: 'T',
+        statusCol: 'U',
+        writeBackStartCol: 'O',   // RECEIVED INFORMATION block
+        writeBackLabel: 'QTY RECEIVED'
+    },
+    TRANSFER: {
+        sheet: 'TRANSFER',
+        title: 'INCOMING TRANSFER FORM',
+        qtyLabel: 'TRANSFER QTY',
+        // A dept | B-I product/cost/srp | J transfer qty |
+        // K-N received info | O incoming dept | P date | Q status
+        incomingCol: 'O',
+        dateCol: 'P',
+        statusCol: 'Q',
+        writeBackStartCol: 'K',   // RECEIVED INFORMATION block (only block on TRANSFER)
+        writeBackLabel: 'QTY RELEASED'
+    },
+    PULLOUT: {
+        sheet: 'RTV',
+        title: 'INCOMING PULL OUT / GATE PASS FORM',
+        qtyLabel: 'TRANSFER QTY',
+        // A dept | B-I product/cost/srp | J transfer qty |
+        // K-N out/exit info | O-R return info | S incoming dept | T date | U status
+        incomingCol: 'S',
+        dateCol: 'T',
+        statusCol: 'U',
+        writeBackStartCol: 'O',   // RETURN INFORMATION block
+        writeBackLabel: 'QTY RETURNED'
+    }
+};
+
+let activeIncomingKey = '';
+let incomingFetchedRows = [];
+
+async function loadIncomingModuleCode(container) {
+    if (!container) return;
+    try {
+        container.innerHTML = `
+            <div style="width: 100%; height: 100%; padding: 25px; box-sizing: border-box; display: flex; flex-direction: column; align-items: stretch;">
+                <div style="margin-bottom: 35px; border-bottom: 1px solid rgba(0, 0, 0, 0.2); padding-bottom: 15px; position: relative;">
+                    <h2 style="color: #111; margin: 0; font-family: 'Roboto Mono', monospace; font-size: 1.3rem; letter-spacing: 2px; font-weight: 700;">
+                        <i class="fa-solid fa-truck-ramp-box" style="margin-right: 10px; color: #111;"></i>INCOMING FORMS
+                    </h2>
+                    <div style="position: absolute; top: -5px; right: 0; z-index: 10;">
+                        <button onclick="closeIncomingModal()" style="background: transparent; border: none; color: #ff4d4d; font-size: 1.8rem; cursor: pointer; padding: 5px; line-height: 1; display: flex; align-items: center; justify-content: center;" title="Close">
+                            <i class="fa-solid fa-circle-xmark"></i>
+                        </button>
+                    </div>
+                </div>
+
+                <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; width: 100%; gap: 20px; margin: auto 0;">
+                    <div style="display: flex; justify-content: center; gap: 20px; width: 100%; max-width: 900px; flex-wrap: wrap;">
+                        <button class="nav-icon-btn" onclick="selectIncomingCategory('REQUEST')" style="flex: 1 1 0px; min-width: 220px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; padding: 15px 10px; min-height: 110px; border-radius: 12px; cursor: pointer; background: rgba(144, 168, 168, 0.35); border: 1.5px solid rgba(0, 0, 0, 0.4); color: #111; backdrop-filter: blur(10px); transition: all 0.3s ease;">
+                            <i class="fa-solid fa-file-invoice" style="font-size: 1.8rem; color: #111;"></i>
+                            <span style="font-family: 'Roboto Mono', monospace; font-size: 0.8rem; font-weight: 700; text-align: center; letter-spacing: 1px;">INCOMING REQUEST &amp; RELEASED FORM</span>
+                        </button>
+
+                        <button class="nav-icon-btn" onclick="selectIncomingCategory('TRANSFER')" style="flex: 1 1 0px; min-width: 220px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; padding: 15px 10px; min-height: 110px; border-radius: 12px; cursor: pointer; background: rgba(144, 168, 168, 0.35); border: 1.5px solid rgba(0, 0, 0, 0.4); color: #111; backdrop-filter: blur(10px); transition: all 0.3s ease;">
+                            <i class="fa-solid fa-right-left" style="font-size: 1.8rem; color: #111;"></i>
+                            <span style="font-family: 'Roboto Mono', monospace; font-size: 0.8rem; font-weight: 700; text-align: center; letter-spacing: 1px;">INCOMING TRANSFER FORM</span>
+                        </button>
+
+                        <button class="nav-icon-btn" onclick="selectIncomingCategory('PULLOUT')" style="flex: 1 1 0px; min-width: 220px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; padding: 15px 10px; min-height: 110px; border-radius: 12px; cursor: pointer; background: rgba(144, 168, 168, 0.35); border: 1.5px solid rgba(0, 0, 0, 0.4); color: #111; backdrop-filter: blur(10px); transition: all 0.3s ease;">
+                            <i class="fa-solid fa-file-arrow-down" style="font-size: 1.8rem; color: #111;"></i>
+                            <span style="font-family: 'Roboto Mono', monospace; font-size: 0.8rem; font-weight: 700; text-align: center; letter-spacing: 1px;">INCOMING PULL OUT / GATE PASS FORM</span>
+                        </button>
+                    </div>
+                </div>
+            </div>
+        `;
+    } catch (error) {
+        console.error(error);
+        container.innerHTML = `<p style="padding: 20px; color: red;">Error loading incoming module.</p>`;
+    }
+}
+
+function closeIncomingModal() {
+    const incomingView = document.getElementById('mod-INCOMING');
+    const welcomeView = document.getElementById('defaultWelcomeView');
+    if (incomingView) incomingView.style.display = 'none';
+    if (welcomeView) welcomeView.style.display = 'flex';
+    activeIncomingKey = '';
+    incomingFetchedRows = [];
+}
+
+function selectIncomingCategory(categoryKey) {
+    const cfg = INCOMING_CONFIGS[categoryKey];
+    if (!cfg) return;
+
+    logButtonClick('INCOMING_' + categoryKey + '_BUTTON_CLICKED');
+    activeIncomingKey = categoryKey;
+    incomingFetchedRows = [];
+
+    const container = document.getElementById('mod-INCOMING');
+    if (!container) return;
+
+    container.innerHTML = `
+        <div style="width: 100%; height: 100%; padding: 25px; box-sizing: border-box; display: flex; flex-direction: column; align-items: stretch;">
+
+            <div style="margin-bottom: 25px; border-bottom: 1px solid rgba(0, 0, 0, 0.2); padding-bottom: 15px; position: relative;">
+                <h2 style="color: #111; margin: 0; font-family: 'Roboto Mono', monospace; font-size: 1.2rem; letter-spacing: 2px; font-weight: 700;">
+                    <i class="fa-solid fa-truck-ramp-box" style="margin-right: 10px; color: #111;"></i>${escapeHtml(cfg.title)}
+                </h2>
+                <div style="position: absolute; top: -5px; right: 0; z-index: 10;">
+                    <button onclick="loadIncomingModuleCode(document.getElementById('mod-INCOMING'))" style="background: transparent; border: none; color: #ff4d4d; font-size: 1.8rem; cursor: pointer; padding: 5px; line-height: 1; display: flex; align-items: center; justify-content: center;" title="Back">
+                        <i class="fa-solid fa-circle-xmark"></i>
+                    </button>
+                </div>
+            </div>
+
+            <!-- Filter Row -->
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; font-size: 0.85rem; gap: 15px; flex-wrap: wrap;">
+                <div style="display: flex; align-items: center; gap: 20px; flex: 1; min-width: 500px; flex-wrap: wrap;">
+                    <div style="display: flex; align-items: center; gap: 8px; flex: 1; min-width: 240px;">
+                        <span style="font-weight: bold; color: #111; text-transform: uppercase; white-space: nowrap;">SELECT DEPARTMENT:</span>
+                        <input type="text" id="incSelectDept" placeholder="Type to search outlet..." style="padding: 6px 10px; background: #fff; border: 1px solid #000; border-radius: 4px; color: #000; font-family: inherit; outline: none; flex: 1;" list="outletList">
+                    </div>
+                    <div style="display: flex; align-items: center; gap: 8px; flex: 1; min-width: 240px;">
+                        <span style="font-weight: bold; color: #111; text-transform: uppercase; white-space: nowrap;">INCOMING DEPARTMENT:</span>
+                        <input type="text" id="incIncomingDept" placeholder="Type to search outlet..." value="${escapeHtml(window.sessionClient || '')}" style="padding: 6px 10px; background: #fff; border: 1px solid #000; border-radius: 4px; color: #000; font-family: inherit; outline: none; flex: 1;" list="outletList">
+                    </div>
+                    <datalist id="outletList"></datalist>
+                </div>
+                <div style="display: flex; align-items: center; gap: 10px;">
+                    <span style="font-weight: bold; color: #111; text-transform: uppercase;">DATE:</span>
+                    <input type="text" id="formattedDateDisplay" readonly style="padding: 6px 10px; background: #f4f4f4; border: 1px solid #000; border-radius: 4px; color: #000; font-family: inherit; outline: none; width: 170px; text-align: center; font-weight: bold;">
+                </div>
+                <button type="button" onclick="fetchIncomingRows()" style="padding: 8px 16px; background: #111; color: #fff; border: none; border-radius: 4px; font-family: inherit; font-size: 0.75rem; cursor: pointer; text-transform: uppercase; font-weight: 600; letter-spacing: 0.5px;">
+                    <i class="fa-solid fa-magnifying-glass"></i> FETCH
+                </button>
+            </div>
+
+            <!-- Results Table -->
+            <div style="flex: 1; display: flex; flex-direction: column; gap: 10px; margin-top: 10px; min-height: 0;">
+                <div style="max-height: 480px; overflow-y: auto; border: 1px solid #e0e0e0; border-radius: 6px; box-shadow: 0 2px 6px rgba(0,0,0,0.03);">
+                    <table style="width: 100%; border-collapse: collapse; font-size: 0.78rem; text-align: left; background: #fff;">
+                        <thead>
+                            <tr style="background: #111; color: #fff; position: sticky; top: 0; z-index: 2;">
+                                <th style="padding: 10px 8px; width: 40px; text-align: center;">
+                                    <input type="checkbox" id="incSelectAll" onclick="toggleSelectAllIncoming(this)">
+                                </th>
+                                <th style="padding: 10px 8px; font-weight: 600; width: 110px;">SKU CODE</th>
+                                <th style="padding: 10px 8px; font-weight: 600;">PRODUCT DESCRIPTION</th>
+                                <th style="padding: 10px 8px; font-weight: 600; text-align: center; width: 60px;">UOM</th>
+                                <th style="padding: 10px 8px; font-weight: 600; text-align: center; width: 160px;">EXP. DATE</th>
+                                <th style="padding: 10px 8px; font-weight: 600; text-align: center; width: 100px;">${escapeHtml(cfg.qtyLabel)}</th>
+                            </tr>
+                        </thead>
+                        <tbody id="incomingTableBody">
+                            <tr><td colspan="6" style="padding: 20px; text-align: center; color: #888;">Select departments and click FETCH to load pending items.</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+
+                <div style="display: flex; justify-content: flex-end; margin-top: 10px;">
+                    <button type="button" onclick="submitIncomingReceived()" style="padding: 8px 20px; background: #28a745; color: #fff; border: none; border-radius: 4px; font-family: inherit; font-size: 0.8rem; cursor: pointer; text-transform: uppercase; font-weight: 700; letter-spacing: 0.5px;">
+                        <i class="fa-solid fa-check"></i> RECEIVED
+                    </button>
+                </div>
+            </div>
+        </div>
+    `;
+
+    if (typeof loadOutletFilterFromConfig === 'function') loadOutletFilterFromConfig();
+    if (typeof setTransferDate === 'function') setTransferDate();
+}
+
+function toggleSelectAllIncoming(checkbox) {
+    document.querySelectorAll('.incoming-row-checkbox').forEach(cb => { cb.checked = checkbox.checked; });
+}
+
+async function fetchIncomingRows() {
+    const cfg = INCOMING_CONFIGS[activeIncomingKey];
+    if (!cfg) return;
+
+    const container = document.getElementById('mod-INCOMING');
+    const selectDept = container?.querySelector('#incSelectDept')?.value.trim() || '';
+    const incomingDept = container?.querySelector('#incIncomingDept')?.value.trim() || '';
+    const formDate = container?.querySelector('#formattedDateDisplay')?.value.trim() || '';
+    const tableBody = document.getElementById('incomingTableBody');
+
+    if (!selectDept) return showCustomAlert('Please select a SELECT DEPARTMENT.');
+    if (!incomingDept) return showCustomAlert('Please select an INCOMING DEPARTMENT.');
+
+    if (tableBody) tableBody.innerHTML = `<tr><td colspan="6" style="padding: 20px; text-align: center; color: #888;">Loading...</td></tr>`;
+    if (typeof showSeaWaveLoader === 'function') showSeaWaveLoader("FETCHING...");
+
+    try {
+        const url = `${window.API}?action=getIncomingPending&sheet=${encodeURIComponent(cfg.sheet)}`
+            + `&selectDept=${encodeURIComponent(selectDept)}`
+            + `&incomingDept=${encodeURIComponent(incomingDept)}`
+            + `&date=${encodeURIComponent(formDate)}`
+            + `&user=${encodeURIComponent(window.sessionUser || '')}`
+            + `&token=${encodeURIComponent(window.API_TOKEN)}`;
+
+        const response = await fetch(url);
+        const result = await response.json();
+
+        if (!result.success) throw new Error(result.error || "Failed to fetch pending items.");
+
+        incomingFetchedRows = Array.isArray(result.data) ? result.data : [];
+        renderIncomingRows(incomingFetchedRows, cfg);
+    } catch (error) {
+        console.error("Fetch Incoming Error:", error);
+        if (tableBody) tableBody.innerHTML = `<tr><td colspan="6" style="padding: 20px; text-align: center; color: #d9534f;">Error: ${escapeHtml(error.message)}</td></tr>`;
+    } finally {
+        if (typeof hideSeaWaveLoader === 'function') hideSeaWaveLoader();
+    }
+}
+
+function renderIncomingRows(rows, cfg) {
+    const tableBody = document.getElementById('incomingTableBody');
+    if (!tableBody) return;
+
+    if (!rows || rows.length === 0) {
+        tableBody.innerHTML = `<tr><td colspan="6" style="padding: 20px; text-align: center; color: #888;">No pending items found for that selection.</td></tr>`;
+        return;
+    }
+
+    tableBody.innerHTML = '';
+    rows.forEach((item, idx) => {
+        const tr = document.createElement('tr');
+        tr.style.height = "38px";
+        tr.innerHTML = `
+            <td style="padding: 6px 8px; border-bottom: 1px solid #e9ecef; text-align: center;">
+                <input type="checkbox" class="incoming-row-checkbox" data-index="${idx}">
+            </td>
+            <td style="padding: 6px 8px; border-bottom: 1px solid #e9ecef; font-weight: 600; color: #212529;">${escapeHtml(item.sku)}</td>
+            <td style="padding: 6px 8px; border-bottom: 1px solid #e9ecef;">${escapeHtml(item.description)}</td>
+            <td style="padding: 6px 8px; border-bottom: 1px solid #e9ecef; text-align: center; color: #495057;">${escapeHtml(item.uom)}</td>
+            <td style="padding: 6px 8px; border-bottom: 1px solid #e9ecef; text-align: center;">
+                <input type="date" class="incoming-exp-date" style="width: 100%; border: 1px solid #ccc; border-radius: 6px; padding: 4px 6px; font-family: inherit; font-size: 0.78rem; outline: none; box-sizing: border-box;">
+            </td>
+            <td style="padding: 6px 8px; border-bottom: 1px solid #e9ecef; text-align: center; font-weight: 600;">${escapeHtml(item.qty)}</td>
+        `;
+        tableBody.appendChild(tr);
+    });
+}
+
+async function submitIncomingReceived() {
+    const cfg = INCOMING_CONFIGS[activeIncomingKey];
+    if (!cfg) return;
+
+    const rowsEls = Array.from(document.querySelectorAll('#incomingTableBody tr'));
+    const checked = Array.from(document.querySelectorAll('.incoming-row-checkbox:checked'));
+
+    if (checked.length === 0) return showCustomAlert('Please select at least one item to mark as RECEIVED.');
+
+    if (typeof showSeaWaveLoader === 'function') showSeaWaveLoader("SAVING...");
+
+    try {
+        const requests = checked.map(cb => {
+            const idx = Number(cb.getAttribute('data-index'));
+            const item = incomingFetchedRows[idx];
+            const tr = cb.closest('tr');
+            const expDateInput = tr ? tr.querySelector('.incoming-exp-date') : null;
+            const expDate = expDateInput ? expDateInput.value : '';
+
+            return fetch(window.API, {
+                method: "POST",
+                body: JSON.stringify({
+                    action: "markIncomingReceived",
+                    sheetName: cfg.sheet,
+                    rowIndex: item.rowIndex,
+                    expDate: expDate,
+                    qty: item.qty,
+                    uom: item.uom,
+                    user: window.sessionUser || '',
+                    token: window.API_TOKEN
+                })
+            }).then(r => r.json());
+        });
+
+        const results = await Promise.all(requests);
+        const failed = results.filter(r => !r.success);
+
+        if (failed.length > 0) {
+            throw new Error(failed[0].error || failed[0].message || "Some items failed to save.");
+        }
+
+        showModal("RECEIVED", "Selected items were marked as received.", "success");
+        fetchIncomingRows();
+    } catch (error) {
+        console.error("Mark Received Error:", error);
+        showCustomAlert("Error saving record: " + error.message);
+    } finally {
+        if (typeof hideSeaWaveLoader === 'function') hideSeaWaveLoader();
+    }
 }
