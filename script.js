@@ -1,6 +1,187 @@
 const API_URL = window.API;
 
 // ==========================================
+// GLOBAL AUTO-UPPERCASE FOR TEXT INPUTS
+// ==========================================
+// Forces every free-text <input>/<textarea> to uppercase as the user
+// types (and on paste, since paste fires an 'input' event too). This is
+// delegated on document so it also covers fields added later/dynamically
+// (e.g. the QTY/remarks inputs generated for the INCOMING table rows).
+// Because the field's own .value is uppercased live, any code that later
+// reads el.value to build the payload sent to the spreadsheet already
+// gets the uppercase version — no per-form changes needed.
+//
+// Excluded by input type (these shouldn't be forced to uppercase):
+const NO_UPPERCASE_TYPES = ['number', 'date', 'time', 'datetime-local', 'password', 'email', 'url', 'file', 'checkbox', 'radio', 'range', 'color', 'hidden', 'submit', 'button', 'reset'];
+// Opt any specific field out with data-no-uppercase="true" in its markup.
+document.addEventListener('input', function (e) {
+    const el = e.target;
+    if (!el) return;
+    const tag = el.tagName;
+    if (tag !== 'INPUT' && tag !== 'TEXTAREA') return;
+    if (tag === 'INPUT' && NO_UPPERCASE_TYPES.includes((el.type || 'text').toLowerCase())) return;
+    if (el.dataset && el.dataset.noUppercase === 'true') return;
+
+    const upper = el.value.toUpperCase();
+    if (el.value === upper) return;
+
+    const start = el.selectionStart;
+    const end = el.selectionEnd;
+    el.value = upper;
+    // Uppercasing (for standard Latin text) doesn't change string length,
+    // so the caret position can be safely restored.
+    if (start !== null && end !== null && typeof el.setSelectionRange === 'function') {
+        el.setSelectionRange(start, end);
+    }
+}, true);
+
+// ==========================================
+// GLOBAL ICON COLORING + 3D EFFECT
+// ==========================================
+// Every fa-solid icon in this app was flat, single-color (mostly #111)
+// with no depth. This section:
+//   (a) injects one reusable style that gives ANY fa-solid/fa-regular
+//       icon a raised, "popped" 3D look via layered drop-shadows, and
+//   (b) auto-assigns each icon a semantic color from ICON_COLOR_MAP
+//       based on its fa-* class, so icons read at a glance instead of
+//       all looking identical.
+// It runs once on load AND watches for icons added later — nearly
+// every section/modal in this file is (re)built with innerHTML at
+// runtime — so no individual render function needs to be touched, and
+// icons added by future code get styled automatically too.
+// Icons that already carry an intentional inline color (e.g. the
+// success/error/lock modal icons below) are left alone; only
+// colorless icons or ones still on the old placeholder #111 get
+// recolored.
+
+const ICON_COLOR_MAP = {
+    'fa-house': '#2e7d32',
+    'fa-chart-line': '#1e88e5',
+    'fa-boxes-stacked': '#8d6e63',
+    'fa-file-invoice': '#7c4dff',
+    'fa-right-left': '#00897b',
+    'fa-file-arrow-down': '#f4511e',
+    'fa-spinner': '#1e88e5',
+    'fa-eye': '#00acc1',
+    'fa-rotate-right': '#1e88e5',
+    'fa-box-open': '#8d6e63',
+    'fa-xmark': '#e53935',
+    'fa-layer-group': '#5e35b1',
+    'fa-tag': '#d81b60',
+    'fa-truck-ramp-box': '#1e88e5',
+    'fa-floppy-disk': '#2e7d32',
+    'fa-dolly': '#fb8c00',
+    'fa-circle-xmark': '#e53935',
+    'fa-triangle-exclamation': '#ffb300',
+    'fa-ban': '#c62828',
+    'fa-print': '#546e7a',
+    'fa-magnifying-glass': '#1e88e5',
+    'fa-check': '#2e7d32',
+    'fa-truck-fast': '#fb8c00',
+    'fa-circle-info': '#00bcd4',
+    'fa-lock': '#ffbb33',
+    'fa-circle-check': '#00c851',
+    'fa-user-clock': '#3949ab'
+};
+
+// Inline colors that count as "not intentionally colored yet" and are
+// safe to override. Covers both the raw #111 written in markup and the
+// normalized rgb() form the browser reports back via el.style.color.
+const RECOLORABLE_INLINE_COLORS = ['', '#111', '#111111', 'rgb(17, 17, 17)'];
+
+function injectIcon3dStyles() {
+    if (document.getElementById('icon3dGlobalStyles')) return;
+    const style = document.createElement('style');
+    style.id = 'icon3dGlobalStyles';
+    style.textContent = `
+        i.fa-solid, i.fa-regular {
+            text-shadow:
+                1px 1px 0 rgba(0, 0, 0, 0.15),
+                2px 2px 3px rgba(0, 0, 0, 0.18);
+            filter: drop-shadow(1px 2px 1px rgba(0, 0, 0, 0.30)) drop-shadow(0 -1px 0 rgba(255, 255, 255, 0.35));
+            transition: transform 0.18s ease, filter 0.18s ease;
+            display: inline-block;
+        }
+        i.fa-solid:hover, i.fa-regular:hover {
+            transform: translateY(-1px) scale(1.06);
+            filter: drop-shadow(2px 4px 2px rgba(0, 0, 0, 0.35)) drop-shadow(0 -1px 0 rgba(255, 255, 255, 0.4));
+        }
+
+        /* Uniform close (X) button — matches the item drawer's close
+           button (same shape/behavior), sized a little smaller so it
+           works consistently across modals of different scale. */
+        .app-close-btn {
+            width: 28px;
+            height: 28px;
+            border-radius: 7px;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            background: transparent;
+            border: none;
+            padding: 0;
+            cursor: pointer;
+            line-height: 1;
+            transition: background 0.15s ease, transform 0.15s ease;
+        }
+        .app-close-btn:hover {
+            background: rgba(255, 77, 77, 0.12);
+            transform: rotate(90deg);
+        }
+        .app-close-btn i {
+            color: #ff6b6b;
+            font-size: 0.95rem;
+        }
+    `;
+    document.head.appendChild(style);
+}
+
+function colorizeIcon(el) {
+    if (!el || !el.classList || el.dataset.icon3dDone === 'true') return;
+    if (el.closest && el.closest('.app-close-btn')) {
+        // Close-button icons are colored by the shared .app-close-btn CSS
+        // class; an inline color here would out-specificity that class.
+        el.dataset.icon3dDone = 'true';
+        return;
+    }
+    const matchedClass = Array.from(el.classList).find(cls => ICON_COLOR_MAP[cls]);
+    if (matchedClass && RECOLORABLE_INLINE_COLORS.includes(el.style.color || '')) {
+        el.style.color = ICON_COLOR_MAP[matchedClass];
+    }
+    el.dataset.icon3dDone = 'true';
+}
+
+function colorizeAllIcons(root) {
+    (root || document).querySelectorAll('i.fa-solid, i.fa-regular').forEach(colorizeIcon);
+}
+
+function initIcon3dSystem() {
+    injectIcon3dStyles();
+    colorizeAllIcons(document);
+
+    const observer = new MutationObserver(mutations => {
+        mutations.forEach(mutation => {
+            mutation.addedNodes.forEach(node => {
+                if (node.nodeType !== 1) return; // element nodes only
+                if (node.matches && node.matches('i.fa-solid, i.fa-regular')) {
+                    colorizeIcon(node);
+                }
+                if (node.querySelectorAll) {
+                    colorizeAllIcons(node);
+                }
+            });
+        });
+    });
+    observer.observe(document.body, { childList: true, subtree: true });
+}
+
+if (document.body) {
+    initIcon3dSystem();
+} else {
+    document.addEventListener('DOMContentLoaded', initIcon3dSystem);
+}
+
+// ==========================================
 // AUTHENTICATION & NAVIGATION LOGIC
 // ==========================================
 
@@ -161,6 +342,32 @@ function logoutSystem() {
 }
 
 // ==========================================
+// SESSION PERSISTENCE ACROSS PAGE RELOAD
+// ==========================================
+// Login only ever writes activeUser/sessionClient/sessionIsAdmin into
+// localStorage — nothing previously read them back on a fresh page load,
+// so hitting reload/F5 always dropped the user back to the LOGIN screen
+// even though their session was still technically valid. This restores
+// the dashboard straight away when a saved session is found, instead of
+// ever showing the login screen in that case. logoutSystem() (above)
+// already clears these same keys, so a logged-out reload is unaffected
+// and still lands on the login screen as normal.
+function restoreSessionOnReload() {
+    const savedUser = localStorage.getItem('activeUser');
+    if (!savedUser) return; // no saved session — normal login flow
+
+    const savedClient = localStorage.getItem('sessionClient') || '';
+    const savedIsAdmin = localStorage.getItem('sessionIsAdmin') === '1';
+
+    window.sessionUser = savedUser;
+    window.sessionClient = savedClient;
+    window.sessionIsAdmin = savedIsAdmin;
+    loggedInUser = savedUser;
+
+    showDashboard(savedClient, savedUser);
+}
+
+// ==========================================
 // MODAL CONTROLS & MODULE ROUTING
 // ==========================================
 
@@ -191,6 +398,9 @@ function openModule(moduleName) {
     switch(moduleName) {
         case 'REPORT':
             loadReportModuleCode(targetView);
+            break;
+        case 'OUTGOING':
+            loadOutgoingModuleCode(targetView);
             break;
         case 'REQUEST_AND_RELEASED_FORM':
             loadRequestAndReleasedFormModuleCode(targetView);
@@ -226,6 +436,11 @@ function printTransferForm() {
  * Global variable or session tracker for the logged-in user
  */
 let loggedInUser = "";
+
+// Now that loggedInUser exists, it's safe to run the reload-session
+// restore (script.js is loaded at the very end of <body>, so the
+// dashboard/login elements already exist in the DOM by this point).
+restoreSessionOnReload();
 
 /**
  * Opens the target modal and sends the timestamp log to LOGIN_LOGS.
@@ -346,6 +561,9 @@ function clearTableData() {
     if (activeModule) {
         const tableBody = activeModule.querySelector('#transferTableBody, #pulloutTableBody');
         if (tableBody) tableBody.innerHTML = '';
+
+        const remarksInput = activeModule.querySelector('#outgoingRemarks');
+        if (remarksInput) remarksInput.value = '';
     }
 }
 
@@ -378,6 +596,12 @@ async function triggerPrintTransferForm() {
     const outgoingValue = outgoingInput ? outgoingInput.value.trim() : '';
     const incomingValue = incomingInput ? incomingInput.value.trim() : '';
     const formDate = dateInput ? dateInput.value.trim() : '';
+    // OUTGOING REMARKS — optional note entered on this (outgoing) side of
+    // the form, saved to column S on the TRANSFER sheet. Separate from the
+    // existing column N REMARKS, which is filled in later from the
+    // INCOMING > TRANSFER FORM screen.
+    const remarksInput = container?.querySelector('#outgoingRemarks');
+    const remarksValue = remarksInput ? remarksInput.value.trim() : '';
 
     if (!outgoingValue) return showCustomAlert('Please select or type an OUTGOING DEPARTMENT before printing.', outgoingInput);
     if (!incomingValue) return showCustomAlert('Please select or type an INCOMING DEPARTMENT before printing.', incomingInput);
@@ -390,13 +614,18 @@ async function triggerPrintTransferForm() {
     const rowsToSave = [];
     rows.forEach(row => {
         const cells = row.querySelectorAll('td');
-        if (cells.length < 10) return;
+        if (cells.length < 11) return;
 
         const getCellText = (idx) => cells[idx] ? cells[idx].innerText.trim() : '';
         const getInputValue = (idx) => {
             const input = cells[idx] ? cells[idx].querySelector('input') : null;
             return input ? input.value.trim() : '';
         };
+
+        // Per-item remarks entered next to TRANSFER QTY on this (outgoing)
+        // side of the form — distinct from the single form-level
+        // OUTGOING REMARKS field below, which applies to the whole form.
+        const itemRemarks = getInputValue(9);
 
         // The RECEIVED INFORMATION block (K:N — EXP DATE, QTY RELEASED, UOM,
         // REMARKS) is no longer collected on this form; it now gets filled in
@@ -413,9 +642,12 @@ async function triggerPrintTransferForm() {
             getInputValue(8),                                // J - TRANSFER QTY
             '', '', '', '',                                  // K,L,M,N - (filled later on receipt)
             incomingValue,                                    // O - incoming dept
-            formDate                                          // P - date
-            // Q is intentionally left untouched/blank — the INCOMING >
-            // TRANSFER FORM "RECEIVED" button marks it once fulfilled.
+            formDate,                                         // P - date
+            '',                                               // Q - RECEIVED status flag (set later on receipt)
+            '',                                               // R - serial number (stamped separately by the backend)
+            remarksValue,                                     // S - OUTGOING REMARKS
+            itemRemarks                                       // T - PER-ITEM REMARKS (new — confirm your backend
+                                                                //     TRANSFER sheet write range covers column T)
         ]);
     });
 
@@ -424,14 +656,18 @@ async function triggerPrintTransferForm() {
     try {
         const response = await fetch(window.API, {
             method: "POST",
-            body: JSON.stringify({ action: "saveTransferData", sheetName: "TRANSFER", rows: rowsToSave, token: window.API_TOKEN })
+            body: JSON.stringify({ action: "saveTransferData", sheetName: "TRANSFER", formKey: "TRANSFER", rows: rowsToSave, token: window.API_TOKEN })
         });
 
         const result = await response.json();
         if (!result.success) throw new Error(result.error || result.message || "Failed to save data.");
 
+        const serialField = container?.querySelector('#serialNoDisplay');
+        if (serialField && result.serial) serialField.value = result.serial;
+
         window.print();
         clearTableData();
+        loadNextSerialPreview('mod-TRANSFER_FORM', 'TRANSFER');
     } catch (error) {
         console.error("Save Error:", error);
         showCustomAlert("Error saving record: " + error.message);
@@ -449,6 +685,10 @@ async function triggerPrintPulloutForm() {
     const outgoingValue = outgoingInput ? outgoingInput.value.trim() : '';
     const incomingValue = incomingInput ? incomingInput.value.trim() : '';
     const formDate = dateInput ? dateInput.value.trim() : '';
+    // OUTGOING REMARKS — optional note entered on this (outgoing) side of
+    // the form, saved to column W on the RTV sheet.
+    const remarksInput = container?.querySelector('#outgoingRemarks');
+    const remarksValue = remarksInput ? remarksInput.value.trim() : '';
 
     if (!outgoingValue) return showCustomAlert('Please select or type an OUTGOING DEPARTMENT before printing.', outgoingInput);
     if (!incomingValue) return showCustomAlert('Please select or type an INCOMING DEPARTMENT before printing.', incomingInput);
@@ -472,13 +712,18 @@ async function triggerPrintPulloutForm() {
     const rowsToSave = [];
     rows.forEach(row => {
         const cells = row.querySelectorAll('td');
-        if (cells.length < 10) return;
+        if (cells.length < 11) return;
 
         const getCellText = (idx) => cells[idx] ? cells[idx].innerText.trim() : '';
         const getInputValue = (idx) => {
             const input = cells[idx] ? cells[idx].querySelector('input') : null;
             return input ? input.value.trim() : '';
         };
+
+        // Per-item remarks entered next to TRANSFER QTY on this (outgoing)
+        // side of the form — distinct from the single form-level
+        // OUTGOING REMARKS field below, which applies to the whole form.
+        const itemRemarks = getInputValue(9);
 
         // OUT/EXIT INFORMATION (K:N) and RETURN INFORMATION (O:R) are no
         // longer collected on this form — they're filled in later from the
@@ -495,9 +740,12 @@ async function triggerPrintPulloutForm() {
             '', '', '', '',                                  // K,L,M,N - OUT/EXIT info (filled later)
             '', '', '', '',                                  // O,P,Q,R - RETURN info (filled later)
             incomingValue,                                    // S - incoming dept
-            formDate                                          // T - date
-            // U is intentionally left untouched/blank — the INCOMING >
-            // PULL OUT / GATE PASS FORM "RECEIVED" button marks it once fulfilled.
+            formDate,                                         // T - date
+            '',                                               // U - RECEIVED status flag (set later on receipt)
+            '',                                               // V - serial number (stamped separately by the backend)
+            remarksValue,                                     // W - OUTGOING REMARKS
+            itemRemarks                                       // X - PER-ITEM REMARKS (new — confirm your backend
+                                                                //     RTV sheet write range covers column X)
         ]);
     });
 
@@ -509,6 +757,7 @@ async function triggerPrintPulloutForm() {
             body: JSON.stringify({
                 action: "savePulloutData",
                 sheetName: "RTV",
+                formKey: "PULLOUT",
                 username: activeUsername || "N/A",
                 clientAccount: activeClientName || "N/A",
                 rows: rowsToSave,
@@ -519,8 +768,12 @@ async function triggerPrintPulloutForm() {
         const result = await response.json();
         if (!result.success) throw new Error(result.message || "Failed to save data.");
 
+        const serialField = container?.querySelector('#serialNoDisplay');
+        if (serialField && result.serial) serialField.value = result.serial;
+
         window.print();
         clearTableData();
+        loadNextSerialPreview('mod-PULLOUT_FORM', 'PULLOUT');
     } catch (error) {
         console.error("Save Error:", error);
         showCustomAlert("Error saving record: " + error.message);
@@ -538,6 +791,10 @@ async function triggerPrintRequestAndReleasedForm() {
     const outgoingValue = outgoingInput ? outgoingInput.value.trim() : '';
     const incomingValue = incomingInput ? incomingInput.value.trim() : '';
     const formDate = dateInput ? dateInput.value.trim() : '';
+    // OUTGOING REMARKS — optional note entered on this (outgoing) side of
+    // the form, saved to column W on the REQUEST sheet.
+    const remarksInput = container?.querySelector('#outgoingRemarks');
+    const remarksValue = remarksInput ? remarksInput.value.trim() : '';
 
     if (!outgoingValue) return showCustomAlert('Please select or type an OUTGOING DEPARTMENT before printing.', outgoingInput);
     if (!incomingValue) return showCustomAlert('Please select or type an INCOMING DEPARTMENT before printing.', incomingInput);
@@ -550,13 +807,18 @@ async function triggerPrintRequestAndReleasedForm() {
     const rowsToSave = [];
     rows.forEach(row => {
         const cells = row.querySelectorAll('td');
-        if (cells.length < 10) return;
+        if (cells.length < 11) return;
 
         const getCellText = (idx) => cells[idx] ? cells[idx].innerText.trim() : '';
         const getInputValue = (idx) => {
             const input = cells[idx] ? cells[idx].querySelector('input') : null;
             return input ? input.value.trim() : '';
         };
+
+        // Per-item remarks entered next to the QTY field on this (outgoing)
+        // side of the form — distinct from the single form-level
+        // OUTGOING REMARKS field below, which applies to the whole form.
+        const itemRemarks = getInputValue(9);
 
         // RELEASED INFORMATION (K:N) and RECEIVED INFORMATION (O:R) are no
         // longer collected on this form — they're filled in later from the
@@ -573,9 +835,12 @@ async function triggerPrintRequestAndReleasedForm() {
             '', '', '', '',                                  // K,L,M,N - RELEASED info (filled later)
             '', '', '', '',                                  // O,P,Q,R - RECEIVED info (filled later)
             incomingValue,                                    // S - incoming dept
-            formDate                                          // T - date
-            // U is intentionally left untouched/blank — the INCOMING >
-            // REQUEST AND RELEASED FORM "RECEIVED" button marks it once fulfilled.
+            formDate,                                         // T - date
+            '',                                               // U - RECEIVED status flag (set later on receipt)
+            '',                                               // V - serial number (stamped separately by the backend)
+            remarksValue,                                     // W - OUTGOING REMARKS
+            itemRemarks                                       // X - PER-ITEM REMARKS (new — confirm your backend
+                                                                //     REQUEST sheet write range covers column X)
         ]);
     });
 
@@ -584,14 +849,18 @@ async function triggerPrintRequestAndReleasedForm() {
     try {
         const response = await fetch(window.API, {
             method: "POST",
-            body: JSON.stringify({ action: "saveRequestData", sheetName: "REQUEST", rows: rowsToSave, token: window.API_TOKEN })
+            body: JSON.stringify({ action: "saveRequestData", sheetName: "REQUEST", formKey: "REQUEST_RELEASED", rows: rowsToSave, token: window.API_TOKEN })
         });
 
         const result = await response.json();
         if (!result.success) throw new Error(result.message || "Failed to save data.");
 
+        const serialField = container?.querySelector('#serialNoDisplay');
+        if (serialField && result.serial) serialField.value = result.serial;
+
         window.print();
         clearTableData();
+        loadNextSerialPreview('mod-REQUEST_AND_RELEASED_FORM', 'REQUEST_RELEASED');
     } catch (error) {
         console.error("Save Error:", error);
         showCustomAlert("Error saving record: " + error.message);
@@ -622,26 +891,31 @@ async function loadReportModuleCode(container) {
 
                 <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; width: 100%; gap: 20px; margin: auto 0;">
                     <div style="display: flex; justify-content: center; gap: 20px; width: 100%; max-width: 800px;">
-                        <button class="nav-icon-btn" onclick="selectReportCategory('INVENTORY')" style="flex: 1 1 0px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; padding: 15px 10px; min-height: 110px; border-radius: 12px; cursor: pointer; background: rgba(144, 168, 168, 0.35); border: 1.5px solid rgba(0, 0, 0, 0.4); color: #111; backdrop-filter: blur(10px); transition: all 0.3s ease;">
+                        <button class="nav-icon-btn" onclick="selectReportCategory('INVENTORY')" style="flex: 0 0 240px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; padding: 15px 10px; min-height: 110px; border-radius: 12px; cursor: pointer; background: rgba(144, 168, 168, 0.35); border: 1.5px solid rgba(0, 0, 0, 0.4); color: #111; backdrop-filter: blur(10px); transition: all 0.3s ease;">
                             <i class="fa-solid fa-boxes-stacked" style="font-size: 1.8rem; color: #111;"></i>
                             <span style="font-family: 'Roboto Mono', monospace; font-size: 0.8rem; font-weight: 700; text-align: center; letter-spacing: 1px;">INVENTORY</span>
                         </button>
 
-                        <button class="nav-icon-btn" onclick="selectReportCategory('REQUEST_RELEASED')" style="flex: 1 1 0px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; padding: 15px 10px; min-height: 110px; border-radius: 12px; cursor: pointer; background: rgba(144, 168, 168, 0.35); border: 1.5px solid rgba(0, 0, 0, 0.4); color: #111; backdrop-filter: blur(10px); transition: all 0.3s ease;">
+                        <button class="nav-icon-btn" onclick="selectReportCategory('REQUEST_RELEASED')" style="flex: 0 0 240px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; padding: 15px 10px; min-height: 110px; border-radius: 12px; cursor: pointer; background: rgba(144, 168, 168, 0.35); border: 1.5px solid rgba(0, 0, 0, 0.4); color: #111; backdrop-filter: blur(10px); transition: all 0.3s ease;">
                             <i class="fa-solid fa-file-invoice" style="font-size: 1.8rem; color: #111;"></i>
                             <span style="font-family: 'Roboto Mono', monospace; font-size: 0.8rem; font-weight: 700; text-align: center; letter-spacing: 1px;">REQUEST & RELEASED HISTORY</span>
+                        </button>
+
+                        <button class="nav-icon-btn" onclick="selectReportCategory('TRANSFER')" style="flex: 0 0 240px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; padding: 15px 10px; min-height: 110px; border-radius: 12px; cursor: pointer; background: rgba(144, 168, 168, 0.35); border: 1.5px solid rgba(0, 0, 0, 0.4); color: #111; backdrop-filter: blur(10px); transition: all 0.3s ease;">
+                            <i class="fa-solid fa-right-left" style="font-size: 1.8rem; color: #111;"></i>
+                            <span style="font-family: 'Roboto Mono', monospace; font-size: 0.8rem; font-weight: 700; text-align: center; letter-spacing: 1px;">TRANSFER HISTORY</span>
                         </button>
                     </div>
 
                     <div style="display: flex; justify-content: center; gap: 20px; width: 100%; max-width: 800px;">
-                        <button class="nav-icon-btn" onclick="selectReportCategory('TRANSFER')" style="flex: 1 1 0px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; padding: 15px 10px; min-height: 110px; border-radius: 12px; cursor: pointer; background: rgba(144, 168, 168, 0.35); border: 1.5px solid rgba(0, 0, 0, 0.4); color: #111; backdrop-filter: blur(10px); transition: all 0.3s ease;">
-                            <i class="fa-solid fa-right-left" style="font-size: 1.8rem; color: #111;"></i>
-                            <span style="font-family: 'Roboto Mono', monospace; font-size: 0.8rem; font-weight: 700; text-align: center; letter-spacing: 1px;">TRANSFER HISTORY</span>
-                        </button>
-
-                        <button class="nav-icon-btn" onclick="selectReportCategory('PULL_OUT')" style="flex: 1 1 0px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; padding: 15px 10px; min-height: 110px; border-radius: 12px; cursor: pointer; background: rgba(144, 168, 168, 0.35); border: 1.5px solid rgba(0, 0, 0, 0.4); color: #111; backdrop-filter: blur(10px); transition: all 0.3s ease;">
+                        <button class="nav-icon-btn" onclick="selectReportCategory('PULL_OUT')" style="flex: 0 0 240px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; padding: 15px 10px; min-height: 110px; border-radius: 12px; cursor: pointer; background: rgba(144, 168, 168, 0.35); border: 1.5px solid rgba(0, 0, 0, 0.4); color: #111; backdrop-filter: blur(10px); transition: all 0.3s ease;">
                             <i class="fa-solid fa-file-arrow-down" style="font-size: 1.8rem; color: #111;"></i>
                             <span style="font-family: 'Roboto Mono', monospace; font-size: 0.8rem; font-weight: 700; text-align: center; letter-spacing: 1px;">PULL OUT HISTORY</span>
+                        </button>
+
+                        <button class="nav-icon-btn" onclick="selectReportCategory('USER_LOGS')" style="flex: 0 0 240px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; padding: 15px 10px; min-height: 110px; border-radius: 12px; cursor: pointer; background: rgba(144, 168, 168, 0.35); border: 1.5px solid rgba(0, 0, 0, 0.4); color: #111; backdrop-filter: blur(10px); transition: all 0.3s ease;">
+                            <i class="fa-solid fa-user-clock" style="font-size: 1.8rem; color: #111;"></i>
+                            <span style="font-family: 'Roboto Mono', monospace; font-size: 0.8rem; font-weight: 700; text-align: center; letter-spacing: 1px;">USER LOGS HISTORY</span>
                         </button>
                     </div>
                 </div>
@@ -665,6 +939,9 @@ function selectReportCategory(category) {
     if (category === 'INVENTORY') {
         logButtonClick('INVENTORY_BUTTON_CLICKED');
         openInventoryModal();
+    } else if (category === 'USER_LOGS') {
+        logButtonClick('USER_LOGS_HISTORY_BUTTON_CLICKED');
+        openUserLogsModal();
     } else if (HISTORY_CONFIGS[category]) {
         const logLabel = (HISTORY_CONFIGS[category].title || category).toUpperCase().replace(/\s+/g, '_') + '_BUTTON_CLICKED';
         logButtonClick(logLabel);
@@ -684,6 +961,88 @@ function getSessionScope() {
         : (localStorage.getItem('sessionIsAdmin') === '1');
     const isAdmin = rawAdmin === true || rawAdmin === 'true' || rawAdmin === 1 || rawAdmin === '1';
     return { client, isAdmin };
+}
+
+// Non-admins get the OUTGOING forms' INCOMING DEPARTMENT field pre-filled
+// with their own client/department instead of starting blank — most of
+// the time a non-admin's outgoing transactions go to their own department,
+// so this saves them re-typing it every form. It's a starting value only
+// (not locked/read-only), so it can still be changed if the actual
+// incoming department is different. Admins are left blank as before,
+// since they route to many different departments.
+function applyIncomingDeptDefaultForNonAdmin(container) {
+    if (!container) return;
+    const scope = getSessionScope();
+    if (scope.isAdmin || !scope.client) return;
+
+    const incomingInput = container.querySelector('#incomingOutletSearch');
+    if (incomingInput && !incomingInput.value.trim()) {
+        incomingInput.value = scope.client;
+    }
+}
+
+// TRANSFER FORM and REQUEST & RELEASED FORM only: a non-admin's INCOMING
+// DEPARTMENT here must be strictly their own department — always
+// defaulted to it AND fully locked (read-only, no datalist), with no way
+// to type or pick anything else. This replaces
+// applyIncomingDeptDefaultForNonAdmin (a starting value they could still
+// edit) for these 2 forms specifically. PULL OUT FORM is handled
+// separately by applyPulloutIncomingLockForNonAdmin below, since it also
+// needs the "PULL OUT" option. Admins are left alone since they route to
+// many different departments.
+function applyIncomingDeptLockForNonAdmin(container) {
+    if (!container) return;
+    const scope = getSessionScope();
+    const incomingInput = container.querySelector('#incomingOutletSearch');
+    if (!incomingInput || scope.isAdmin) return;
+
+    incomingInput.value = scope.client || '';
+    incomingInput.readOnly = true;
+    incomingInput.removeAttribute('list');
+    incomingInput.style.cursor = 'not-allowed';
+    incomingInput.style.opacity = '0.85';
+    incomingInput.style.background = '#f0f0f0';
+    incomingInput.placeholder = scope.client ? '' : 'No department on this account';
+}
+
+// PULL OUT form only: a non-admin's OUTGOING DEPARTMENT here must always
+// be their own department, locked read-only with no datalist — matching
+// applyIncomingDeptLockForNonAdmin's treatment of INCOMING DEPARTMENT on
+// the other forms. Admins are left on the normal free-text + department
+// list, since they route pull-outs out of many different departments.
+function applyPulloutOutgoingLockForNonAdmin(container) {
+    if (!container) return;
+    const scope = getSessionScope();
+    const outgoingInput = container.querySelector('#outletSearch');
+    if (!outgoingInput || scope.isAdmin) return;
+
+    outgoingInput.value = scope.client || '';
+    outgoingInput.readOnly = true;
+    outgoingInput.removeAttribute('list');
+    outgoingInput.style.cursor = 'not-allowed';
+    outgoingInput.style.opacity = '0.85';
+    outgoingInput.style.background = '#f0f0f0';
+    outgoingInput.placeholder = scope.client ? '' : 'No department on this account';
+}
+
+// PULL OUT form only: a non-admin's INCOMING DEPARTMENT here must always
+// be the literal "PULL OUT" tag — locked read-only with no datalist and
+// no dropdown, so there's no way to set it to anything else. Admins are
+// left on the normal free-text + full department list (including the
+// "PULL OUT" option), since they route pull-outs to many different
+// places.
+function applyPulloutIncomingLockForNonAdmin(container) {
+    if (!container) return;
+    const scope = getSessionScope();
+    const incomingInput = container.querySelector('#incomingOutletSearch');
+    if (!incomingInput || scope.isAdmin) return;
+
+    incomingInput.value = 'PULL OUT';
+    incomingInput.readOnly = true;
+    incomingInput.removeAttribute('list');
+    incomingInput.style.cursor = 'not-allowed';
+    incomingInput.style.opacity = '0.85';
+    incomingInput.style.background = '#f0f0f0';
 }
 
 async function fetchInventoryByDepartment() {
@@ -872,8 +1231,8 @@ window.openInventoryModal = function() {
                         <h2 style="color: #00dbff; margin: 0; letter-spacing: 2px; font-size: 1.5rem;">
                             <i class="fa-solid fa-boxes-stacked" style="margin-right: 12px;"></i>INVENTORY REPORT
                         </h2>
-                        <button onclick="window.closeInventoryModal()" style="background: transparent; border: none; color: #ff4d4d; font-size: 1.8rem; cursor: pointer; padding: 5px; line-height: 1; display: flex; align-items: center; justify-content: center;" title="Close">
-                            &times;
+                        <button class="app-close-btn" onclick="window.closeInventoryModal()" title="Close">
+                            <i class="fa-solid fa-xmark"></i>
                         </button>
                     </div>
 
@@ -1124,12 +1483,7 @@ function viewItemDetails(skuCode, rowIdx) {
             }
             #itemDrawer .dw-span2 { grid-column: 1 / -1; }
 
-            #itemDrawer #closeDrawerBtn {
-                width: 34px; height: 34px; border-radius: 8px;
-                display: flex; align-items: center; justify-content: center;
-                background: transparent; transition: background 0.15s ease, transform 0.15s ease;
-            }
-            #itemDrawer #closeDrawerBtn:hover { background: rgba(255, 77, 77, 0.12); transform: rotate(90deg); }
+
 
             #itemDrawer #submitUpdateBtn { transition: transform 0.15s ease, box-shadow 0.15s ease, background 0.15s ease; }
             #itemDrawer #submitUpdateBtn:hover { transform: translateY(-1px); box-shadow: 0 6px 18px rgba(0, 219, 255, 0.3); background: #29e4ff; }
@@ -1147,8 +1501,8 @@ function viewItemDetails(skuCode, rowIdx) {
                         </h3>
                         <p style="margin: 6px 0 0; font-size: 0.7rem; color: #6f7a8a; letter-spacing: 0.3px;">Review and update this SKU's live inventory record</p>
                     </div>
-                    <button type="button" id="closeDrawerBtn" title="Close">
-                        <i class="fa-solid fa-xmark" style="color: #ff6b6b; font-size: 1.05rem;"></i>
+                    <button type="button" id="closeDrawerBtn" class="app-close-btn" title="Close">
+                        <i class="fa-solid fa-xmark"></i>
                     </button>
                     <div style="position: absolute; left: 0; right: 0; bottom: -1px; height: 1px; background: linear-gradient(90deg, rgba(0,219,255,0.5), rgba(0,219,255,0));"></div>
                 </div>
@@ -1227,12 +1581,12 @@ function viewItemDetails(skuCode, rowIdx) {
                         </div>
                         <div class="dw-grid">
                             <div>
-                                <label class="dw-label">Stock Received</label>
-                                <input type="number" id="drawerStockReceived" min="0" class="dw-input">
+                                <label class="dw-label" style="color: #5b6678;">Stock Received</label>
+                                <input type="number" id="drawerStockReceived" min="0" class="dw-input" readonly>
                             </div>
                             <div>
-                                <label class="dw-label">Received Date</label>
-                                <input type="date" id="drawerReceivedDate" class="dw-input">
+                                <label class="dw-label" style="color: #5b6678;">Received Date</label>
+                                <input type="date" id="drawerReceivedDate" class="dw-input" readonly style="pointer-events: none;">
                             </div>
                             <div class="dw-span2">
                                 <label class="dw-label" style="color: #5b6678;">Total Available Qty</label>
@@ -1627,30 +1981,58 @@ function formatExpirationDate(dateVal) {
         return '';
     }
 
-    let parsedDate;
     const strVal = String(dateVal).trim();
+    let year, month, day;
 
-    if (strVal.includes('-')) {
-        const parts = strVal.split('-');
-        if (parts.length === 3) {
-            parsedDate = new Date(parts[0], parts[1] - 1, parts[2]);
-        }
+    // ISO date, or the full ISO datetime the Sheets API sends for a real
+    // Date cell (e.g. "2026-01-05T00:00:00.000Z"). The old code did a
+    // plain split('-'), which on a datetime string left the day part as
+    // "05T00:00:00.000Z" — new Date(y, m, "05T00:00:00.000Z") is Invalid
+    // Date, so the field silently came back blank. Matching only the
+    // date prefix with a regex fixes that regardless of any trailing
+    // time/timezone component.
+    const isoMatch = strVal.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/);
+    if (isoMatch) {
+        year = Number(isoMatch[1]);
+        month = Number(isoMatch[2]);
+        day = Number(isoMatch[3]);
     } else if (strVal.includes('/')) {
+        // MM/DD/YYYY
         const parts = strVal.split('/');
         if (parts.length === 3) {
-            parsedDate = new Date(parts[2], parts[0] - 1, parts[1]);
+            month = Number(parts[0]);
+            day = Number(parts[1]);
+            year = Number(parts[2]);
         }
+    } else if (/^\d+(\.\d+)?$/.test(strVal)) {
+        // Bare number — this is a Google Sheets/Excel date SERIAL number
+        // (days since Dec 30, 1899), returned as plain display text when
+        // the cell isn't formatted as a date. Without this branch it fell
+        // through to `new Date("46183")`, which JS misreads as the literal
+        // YEAR 46183 instead of converting the serial to a real date.
+        const serial = parseFloat(strVal);
+        const SHEETS_EPOCH_UTC = Date.UTC(1899, 11, 30);
+        const asUtcMs = SHEETS_EPOCH_UTC + Math.round(serial) * 86400000;
+        const utcDate = new Date(asUtcMs);
+        year = utcDate.getUTCFullYear();
+        month = utcDate.getUTCMonth() + 1;
+        day = utcDate.getUTCDate();
+    }
+
+    let parsedDate;
+    if (year && month && day) {
+        parsedDate = new Date(year, month - 1, day);
     } else {
         parsedDate = new Date(strVal);
     }
 
     if (!parsedDate || isNaN(parsedDate.getTime())) return '';
 
-    const month = parsedDate.toLocaleString('en-US', { month: 'long' }).toUpperCase();
-    const day = String(parsedDate.getDate()).padStart(2, '0');
-    const year = parsedDate.getFullYear();
+    const monthName = parsedDate.toLocaleString('en-US', { month: 'long' }).toUpperCase();
+    const dayStr = String(parsedDate.getDate()).padStart(2, '0');
+    const yearStr = parsedDate.getFullYear();
 
-    return `${month} ${day}, ${year}`;
+    return `${monthName} ${dayStr}, ${yearStr}`;
 }
 
 function renderProductTable(products) {
@@ -1750,6 +2132,9 @@ function addSelectedProducts() {
             <td style="${tdStyle} text-align: center;">
                 <input type="number" min="1" value="1" style="${inputStyle} text-align: center; font-weight: 600;">
             </td>
+            <td style="${tdStyle}">
+                <input type="text" class="row-remarks" placeholder="Remarks" style="${inputStyle}">
+            </td>
             <td style="${tdStyle} text-align: center;" class="no-print">
                 <button type="button" onclick="removeTransferRow('${rowId}')" title="Remove Row" style="background: transparent; border: none; color: #ff4d4d; cursor: pointer; font-size: 1.2rem; font-weight: bold; line-height: 1; padding: 2px 5px;">✕</button>
             </td>
@@ -1771,6 +2156,36 @@ function closeProductListModal() {
     if (modal) modal.style.display = 'none';
 }
 
+// ==========================================
+// AUTOMATIC SEQUENTIAL SERIAL / REFERENCE NUMBERS
+// ==========================================
+//
+// formKey must match a key in SERIAL_CONFIG on the backend (Code.gs):
+//   REQUEST_RELEASED -> REQUEST sheet, prefix MWRRF-, saved in column V
+//   TRANSFER          -> TRANSFER sheet, prefix MWTF-,  saved in column R
+//   PULLOUT           -> RTV sheet,      prefix MWPF-,  saved in column V
+//
+// This just PREVIEWS the next number above the DATE field the moment a
+// form opens. The real/final number is generated and locked in on the
+// backend at save time (see saveRequestData / saveTransferData /
+// savePulloutData) so two people saving at once can never collide.
+async function loadNextSerialPreview(containerId, formKey) {
+    const container = document.getElementById(containerId);
+    const field = container ? container.querySelector('#serialNoDisplay') : document.getElementById('serialNoDisplay');
+    if (!field || !window.API) return;
+
+    field.value = "LOADING...";
+    try {
+        const url = `${window.API}?action=peekNextSerial&form=${encodeURIComponent(formKey)}&token=${encodeURIComponent(window.API_TOKEN)}`;
+        const response = await fetch(url);
+        const result = await response.json();
+        field.value = (result && result.success && result.serial) ? result.serial : "—";
+    } catch (error) {
+        console.error("Failed to load next serial number:", error);
+        field.value = "—";
+    }
+}
+
 function setTransferDate() {
     const todayObj = new Date();
     const formatted = todayObj.toLocaleDateString('en-US', { 
@@ -1785,7 +2200,7 @@ function setTransferDate() {
 }
 
 async function loadOutletFilterFromConfig() {
-    const datalists = document.querySelectorAll('datalist#outletList');
+    const datalists = document.querySelectorAll('datalist#outletList, datalist#pulloutIncomingList');
     if (datalists.length === 0) return;
 
     if (window.cachedOutlets && window.cachedOutlets.length > 0) {
@@ -1841,6 +2256,156 @@ function populateOutletDatalist(outlets) {
             datalist.appendChild(option);
         });
     });
+
+    // The PULL OUT form's INCOMING DEPARTMENT field uses its own datalist
+    // (id="pulloutIncomingList") so the extra "PULL OUT" choice below only
+    // shows up there — not on every other outgoing/incoming department
+    // field in the app, which still only offer real AREA departments.
+    populatePulloutIncomingDatalist(outlets);
+}
+
+// RTV pull-outs are used for returns-to-vendor, so the item isn't always
+// going to another department — it can be leaving the business entirely.
+// Non-admins still get their own client pre-filled as the default (see
+// applyIncomingDeptDefaultForNonAdmin), but this adds a literal "PULL OUT"
+// choice they can pick instead, alongside the normal AREA department list.
+function populatePulloutIncomingDatalist(outlets) {
+    const datalist = document.getElementById('pulloutIncomingList');
+    if (!datalist) return;
+    datalist.innerHTML = '';
+
+    const pullOutOption = document.createElement('option');
+    pullOutOption.value = 'PULL OUT';
+    datalist.appendChild(pullOutOption);
+
+    outlets.forEach(outlet => {
+        const option = document.createElement('option');
+        option.value = outlet;
+        datalist.appendChild(option);
+    });
+}
+
+// ==========================================
+// OUTGOING MODULE — groups REQUEST & RELEASED / TRANSFER / PULL OUT
+// behind one "OUTGOING" nav button + category modal, mirroring the
+// INCOMING module's own category-picker pattern. The actual forms are
+// unchanged — this just adds a selection screen in front of them and
+// reuses the existing mod-REQUEST_AND_RELEASED_FORM / mod-TRANSFER_FORM /
+// mod-PULLOUT_FORM containers + loaders/closers as-is.
+// ==========================================
+
+const OUTGOING_CONFIGS = {
+    REQUEST_AND_RELEASED_FORM: {
+        icon: 'fa-file-invoice',
+        label: 'REQUEST &amp; RELEASED FORM'
+    },
+    TRANSFER_FORM: {
+        icon: 'fa-right-left',
+        label: 'TRANSFER FORM'
+    },
+    PULLOUT_FORM: {
+        icon: 'fa-file-arrow-down',
+        label: 'PULLOUT FORM'
+    }
+};
+
+async function loadOutgoingModuleCode(container) {
+    if (!container) return;
+    injectIncoming3DButtonStyles();
+    try {
+        container.innerHTML = `
+            <div style="width: 100%; height: 100%; padding: 25px; box-sizing: border-box; display: flex; flex-direction: column; align-items: stretch;">
+                <div style="margin-bottom: 35px; border-bottom: 1px solid rgba(0, 0, 0, 0.2); padding-bottom: 15px; position: relative;">
+                    <h2 style="color: #111; margin: 0; font-family: 'Roboto Mono', monospace; font-size: 1.3rem; letter-spacing: 2px; font-weight: 700;">
+                        <i class="fa-solid fa-dolly icon-3d-anim" style="margin-right: 10px; color: #111;"></i>OUTGOING FORMS
+                    </h2>
+                    <div style="position: absolute; top: -5px; right: 0; z-index: 10;">
+                        <button class="app-close-btn" onclick="closeOutgoingModal()" title="Close">
+                            <i class="fa-solid fa-xmark"></i>
+                        </button>
+                    </div>
+                </div>
+
+                <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; width: 100%; gap: 20px; margin: auto 0;">
+                    <div style="display: flex; justify-content: center; gap: 20px; width: 100%; max-width: 900px; flex-wrap: wrap;">
+                        <button class="nav-icon-btn btn-3d" onclick="selectOutgoingCategory('REQUEST_AND_RELEASED_FORM')" style="flex: 1 1 0px; min-width: 220px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; padding: 15px 10px; min-height: 110px; border-radius: 12px; cursor: pointer; background: rgba(144, 168, 168, 0.35); border: 1.5px solid rgba(0, 0, 0, 0.4); color: #111; backdrop-filter: blur(10px);">
+                            <i class="fa-solid ${OUTGOING_CONFIGS.REQUEST_AND_RELEASED_FORM.icon} icon-3d-anim" style="font-size: 1.8rem; color: #111;"></i>
+                            <span style="font-family: 'Roboto Mono', monospace; font-size: 0.8rem; font-weight: 700; text-align: center; letter-spacing: 1px;">${OUTGOING_CONFIGS.REQUEST_AND_RELEASED_FORM.label}</span>
+                        </button>
+
+                        <button class="nav-icon-btn btn-3d" onclick="selectOutgoingCategory('TRANSFER_FORM')" style="flex: 1 1 0px; min-width: 220px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; padding: 15px 10px; min-height: 110px; border-radius: 12px; cursor: pointer; background: rgba(144, 168, 168, 0.35); border: 1.5px solid rgba(0, 0, 0, 0.4); color: #111; backdrop-filter: blur(10px);">
+                            <i class="fa-solid ${OUTGOING_CONFIGS.TRANSFER_FORM.icon} icon-3d-anim" style="font-size: 1.8rem; color: #111;"></i>
+                            <span style="font-family: 'Roboto Mono', monospace; font-size: 0.8rem; font-weight: 700; text-align: center; letter-spacing: 1px;">${OUTGOING_CONFIGS.TRANSFER_FORM.label}</span>
+                        </button>
+
+                        <button class="nav-icon-btn btn-3d" onclick="selectOutgoingCategory('PULLOUT_FORM')" style="flex: 1 1 0px; min-width: 220px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; padding: 15px 10px; min-height: 110px; border-radius: 12px; cursor: pointer; background: rgba(144, 168, 168, 0.35); border: 1.5px solid rgba(0, 0, 0, 0.4); color: #111; backdrop-filter: blur(10px);">
+                            <i class="fa-solid ${OUTGOING_CONFIGS.PULLOUT_FORM.icon} icon-3d-anim" style="font-size: 1.8rem; color: #111;"></i>
+                            <span style="font-family: 'Roboto Mono', monospace; font-size: 0.8rem; font-weight: 700; text-align: center; letter-spacing: 1px;">${OUTGOING_CONFIGS.PULLOUT_FORM.label}</span>
+                        </button>
+                    </div>
+                </div>
+            </div>
+        `;
+    } catch (error) {
+        console.error(error);
+        container.innerHTML = `<p style="padding: 20px; color: red;">Error loading outgoing module.</p>`;
+    }
+}
+
+function closeOutgoingModal() {
+    const outgoingView = document.getElementById('mod-OUTGOING');
+    const welcomeView = document.getElementById('defaultWelcomeView');
+    if (outgoingView) outgoingView.style.display = 'none';
+    if (welcomeView) welcomeView.style.display = 'flex';
+}
+
+function selectOutgoingCategory(categoryKey) {
+    const cfg = OUTGOING_CONFIGS[categoryKey];
+    if (!cfg) return;
+
+    logButtonClick('OUTGOING_' + categoryKey + '_BUTTON_CLICKED');
+
+    // Hide the OUTGOING category picker itself before showing the chosen
+    // sub-form. Several functions (openProductListModal, the print/save
+    // handlers, clearTableData) locate the "active" form via
+    // document.querySelector('.module-view[style*="display: block"]') —
+    // if mod-OUTGOING were left visible too, it (being earlier in the DOM)
+    // would win that lookup instead of the real form, and every field
+    // read from it would come back empty.
+    const outgoingView = document.getElementById('mod-OUTGOING');
+    if (outgoingView) outgoingView.style.display = 'none';
+
+    const targetView = document.getElementById('mod-' + categoryKey);
+    if (!targetView) return;
+    targetView.style.display = 'block';
+
+    switch (categoryKey) {
+        case 'REQUEST_AND_RELEASED_FORM':
+            loadRequestAndReleasedFormModuleCode(targetView);
+            break;
+        case 'TRANSFER_FORM':
+            loadTransferFormModuleCode(targetView);
+            break;
+        case 'PULLOUT_FORM':
+            loadPulloutFormModuleCode(targetView);
+            break;
+    }
+}
+
+// Shared "back" used by each outgoing sub-form's own Close (X) button —
+// instead of dropping all the way back to the main dashboard, it returns
+// to the OUTGOING category picker, matching the INCOMING module's UX.
+function returnToOutgoingCategories(moduleKey) {
+    const targetView = document.getElementById('mod-' + moduleKey);
+    if (targetView) {
+        targetView.style.display = 'none';
+        targetView.innerHTML = '';
+    }
+    const outgoingView = document.getElementById('mod-OUTGOING');
+    if (outgoingView) {
+        outgoingView.style.display = 'block';
+        loadOutgoingModuleCode(outgoingView);
+    }
 }
 
 // ==========================================
@@ -1861,7 +2426,7 @@ async function loadRequestAndReleasedFormModuleCode(container) {
             <div style="position: fixed; top: 0; left: 0; width: 100vw; height: 98%; background: rgba(0, 0, 0, 0.75); backdrop-filter: blur(8px); display: flex; justify-content: center; align-items: center; z-index: 3000; box-sizing: border-box; padding: 20px 50px 20px 20px;">
                 <div class="glass-card" style="position: relative; width: 100%; height:100%; max-width: none; max-height: none; overflow-y: auto; background: rgba(20, 20, 25, 0.95); border: 1px solid rgba(255, 255, 255, 0.2); border-radius: 16px; padding: 60px; box-sizing: border-box; display: flex; flex-direction: column; align-items: stretch; box-shadow: 0 30px 60px rgba(0,0,0,0.7);">
                     <div style="position: absolute; top: 18px; right: 25px; z-index: 10; display: flex; gap: 12px; align-items: center;">
-                        <button onclick="closeRequestAndReleasedFormModal()" style="background: transparent; border: none; color: #ff4d4d; font-size: 1.8rem; cursor: pointer; padding: 5px; line-height: 1; display: flex; align-items: center; justify-content: center;" title="Close">
+                        <button class="app-close-btn" onclick="closeRequestAndReleasedFormModal()" title="Close">
                             <i class="fa-solid fa-xmark"></i>
                         </button>
                     </div>
@@ -1874,6 +2439,8 @@ async function loadRequestAndReleasedFormModuleCode(container) {
 
         if (typeof loadOutletFilterFromConfig === 'function') loadOutletFilterFromConfig();
         if (typeof setTransferDate === 'function') setTransferDate();
+        applyIncomingDeptLockForNonAdmin(container);
+        loadNextSerialPreview('mod-REQUEST_AND_RELEASED_FORM', 'REQUEST_RELEASED');
 
     } catch (error) {
         console.error("Module Load Error:", error);
@@ -1882,14 +2449,7 @@ async function loadRequestAndReleasedFormModuleCode(container) {
 }
 
 function closeRequestAndReleasedFormModal() {
-    const defaultView = document.getElementById('defaultWelcomeView');
-    if (defaultView) defaultView.style.display = 'flex';
-    
-    const targetView = document.getElementById('mod-REQUEST_AND_RELEASED_FORM');
-    if (targetView) {
-        targetView.style.display = 'none';
-        targetView.innerHTML = '';
-    }
+    returnToOutgoingCategories('REQUEST_AND_RELEASED_FORM');
 }
 
 async function loadTransferFormModuleCode(container) {
@@ -1906,7 +2466,7 @@ async function loadTransferFormModuleCode(container) {
             <div style="position: fixed; top: 0; left: 0; width: 100vw; height: 98%; background: rgba(0, 0, 0, 0.75); backdrop-filter: blur(8px); display: flex; justify-content: center; align-items: center; z-index: 3000; box-sizing: border-box; padding: 20px 50px 20px 20px;">
                 <div class="glass-card" style="position: relative; width: 100%; height:100%; max-width: none; max-height: none; overflow-y: auto; background: rgba(20, 20, 25, 0.95); border: 1px solid rgba(255, 255, 255, 0.2); border-radius: 16px; padding: 60px; box-sizing: border-box; display: flex; flex-direction: column; align-items: stretch; box-shadow: 0 30px 60px rgba(0,0,0,0.7);">
                     <div style="position: absolute; top: 18px; right: 25px; z-index: 10; display: flex; gap: 12px; align-items: center;">
-                        <button onclick="closeTransferModal()" style="background: transparent; border: none; color: #ff4d4d; font-size: 1.8rem; cursor: pointer; padding: 5px; line-height: 1; display: flex; align-items: center; justify-content: center;" title="Close">
+                        <button class="app-close-btn" onclick="closeTransferModal()" title="Close">
                             <i class="fa-solid fa-xmark"></i>
                         </button>
                     </div>
@@ -1919,6 +2479,8 @@ async function loadTransferFormModuleCode(container) {
 
         if (typeof loadOutletFilterFromConfig === 'function') loadOutletFilterFromConfig();
         if (typeof setTransferDate === 'function') setTransferDate();
+        applyIncomingDeptLockForNonAdmin(container);
+        loadNextSerialPreview('mod-TRANSFER_FORM', 'TRANSFER');
 
     } catch (error) {
         console.error(error);
@@ -1927,14 +2489,7 @@ async function loadTransferFormModuleCode(container) {
 }
 
 function closeTransferModal() {
-    const defaultView = document.getElementById('defaultWelcomeView');
-    if (defaultView) defaultView.style.display = 'flex';
-    
-    const targetView = document.getElementById('mod-TRANSFER_FORM');
-    if (targetView) {
-        targetView.style.display = 'none';
-        targetView.innerHTML = '';
-    }
+    returnToOutgoingCategories('TRANSFER_FORM');
 }
 
 async function loadPulloutFormModuleCode(container) {
@@ -1951,7 +2506,7 @@ async function loadPulloutFormModuleCode(container) {
             <div style="position: fixed; top: 0; left: 0; width: 100vw; height: 98%; background: rgba(0, 0, 0, 0.75); backdrop-filter: blur(8px); display: flex; justify-content: center; align-items: center; z-index: 3000; box-sizing: border-box; padding: 20px 50px 20px 20px;">
                 <div class="glass-card" style="position: relative; width: 100%; height:100%; max-width: none; max-height: none; overflow-y: auto; background: rgba(20, 20, 25, 0.95); border: 1px solid rgba(255, 255, 255, 0.2); border-radius: 16px; padding: 60px; box-sizing: border-box; display: flex; flex-direction: column; align-items: stretch; box-shadow: 0 30px 60px rgba(0,0,0,0.7);">
                     <div style="position: absolute; top: 18px; right: 25px; z-index: 10; display: flex; gap: 12px; align-items: center;">
-                        <button onclick="closePulloutModal()" style="background: transparent; border: none; color: #ff4d4d; font-size: 1.8rem; cursor: pointer; padding: 5px; line-height: 1; display: flex; align-items: center; justify-content: center;" title="Close">
+                        <button class="app-close-btn" onclick="closePulloutModal()" title="Close">
                             <i class="fa-solid fa-xmark"></i>
                         </button>
                     </div>
@@ -1964,6 +2519,9 @@ async function loadPulloutFormModuleCode(container) {
 
         if (typeof loadOutletFilterFromConfig === 'function') loadOutletFilterFromConfig();
         if (typeof setTransferDate === 'function') setTransferDate();
+        applyPulloutOutgoingLockForNonAdmin(container);
+        applyPulloutIncomingLockForNonAdmin(container);
+        loadNextSerialPreview('mod-PULLOUT_FORM', 'PULLOUT');
 
     } catch (error) {
         console.error(error);
@@ -1972,14 +2530,7 @@ async function loadPulloutFormModuleCode(container) {
 }
 
 function closePulloutModal() {
-    const defaultView = document.getElementById('defaultWelcomeView');
-    if (defaultView) defaultView.style.display = 'flex';
-    
-    const targetView = document.getElementById('mod-PULLOUT_FORM');
-    if (targetView) {
-        targetView.style.display = 'none';
-        targetView.innerHTML = '';
-    }
+    returnToOutgoingCategories('PULLOUT_FORM');
 }
 
 // ==========================================
@@ -1994,8 +2545,11 @@ const HISTORY_CONFIGS = {
       'DEPARTMENT', 'SKU CODE', 'PRODUCT DESCRIPTION', 'UOM', 'EXP. DATE', 'ON HAND',
       'TOTAL ON HAND', 'COST', 'SRP', 'TRANSFER QTY', 'EXP. DATE', 'QTY RELEASED', 'UOM',
       'REMARKS', 'EXPIRATION DATE', 'QTY RETURNED', 'UOM', 'REMARKS',
-      'INCOMING DEPARTMENT', 'DATE'
-    ]
+      'OUTGOING REMARKS', 'INCOMING DEPARTMENT', 'DATE'
+    ],
+    // Same always-empty columns as PULL_OUT below (both read the RTV
+    // sheet) — kept in `headers` for index alignment, just not rendered.
+    hiddenColumns: [10, 11, 12, 13, 18]
   },
   REQUEST_RELEASED: {
     title: 'REQUEST AND RELEASED HISTORY',
@@ -2004,8 +2558,12 @@ const HISTORY_CONFIGS = {
       'DEPARTMENT', 'SKU CODE', 'PRODUCT DESCRIPTION', 'UOM', 'EXP. DATE', 'ON HAND',
       'TOTAL ON HAND', 'COST', 'SRP', 'TRANSFER QTY', 'EXP. DATE', 'QTY RELEASED', 'UOM',
       'REMARKS', 'EXPIRATION DATE', 'QTY RECEIVED', 'UOM', 'REMARKS',
-      'INCOMING DEPARTMENT', 'DATE'
-    ]
+      'OUTGOING REMARKS', 'INCOMING DEPARTMENT', 'DATE'
+    ],
+    // The 2nd EXP. DATE/QTY RELEASED/UOM/REMARKS block and OUTGOING
+    // REMARKS are never populated for request & released transactions —
+    // kept in `headers` for index alignment, just not rendered.
+    hiddenColumns: [10, 11, 12, 13, 18]
   },
   TRANSFER: {
     title: 'TRANSFER HISTORY',
@@ -2013,8 +2571,11 @@ const HISTORY_CONFIGS = {
     headers: [
       'DEPARTMENT', 'SKU CODE', 'PRODUCT DESCRIPTION', 'UOM', 'EXP. DATE', 'ON HAND',
       'TOTAL ON HAND', 'COST', 'SRP', 'TRANSFER QTY', 'EXP. DATE', 'QTY RELEASED', 'UOM',
-      'REMARKS', 'INCOMING DEPARTMENT', 'DATE'
-    ]
+      'REMARKS', 'OUTGOING REMARKS', 'INCOMING DEPARTMENT', 'DATE'
+    ],
+    // Only OUTGOING REMARKS is never populated here — the rest of this
+    // shape (unlike RTV/REQUEST/PULL_OUT) is actually used for transfers.
+    hiddenColumns: [14]
   },
   PULL_OUT: {
     title: 'PULLOUT HISTORY',
@@ -2023,8 +2584,15 @@ const HISTORY_CONFIGS = {
       'DEPARTMENT', 'SKU CODE', 'PRODUCT DESCRIPTION', 'UOM', 'EXP. DATE', 'ON HAND',
       'TOTAL ON HAND', 'COST', 'SRP', 'TRANSFER QTY', 'EXP. DATE', 'QTY RELEASED', 'UOM',
       'REMARKS', 'EXPIRATION DATE', 'QTY RETURNED', 'UOM', 'REMARKS',
-      'INCOMING DEPARTMENT', 'DATE'
-    ]
+      'OUTGOING REMARKS', 'INCOMING DEPARTMENT', 'DATE'
+    ],
+    // These columns are carried over from the shared RTV sheet layout but
+    // are never populated for actual PULL OUT transactions (they belong to
+    // a "release" step pull-outs don't go through). Their indices stay in
+    // `headers` so row[i] lookups elsewhere (filtering, etc.) still line
+    // up with the real sheet columns — only rendering skips them, via
+    // renderHistoryRows/openHistoryModal checking this list.
+    hiddenColumns: [10, 11, 12, 13, 18]
   }
 };
 
@@ -2075,7 +2643,7 @@ function openHistoryModal(categoryKey) {
           
           <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid rgba(0, 219, 255, 0.3); padding-bottom: 12px; margin-bottom: 15px;">
             <h2 id="historyModalTitle" style="color: #00dbff; margin: 0; font-size: 1.3rem; letter-spacing: 1px;"></h2>
-            <button class="no-print" onclick="document.getElementById('historyModal').style.display='none'" style="background: transparent; border: none; color: #ff4d4d; font-size: 1.8rem; cursor: pointer;">&times;</button>
+            <button class="app-close-btn no-print" onclick="document.getElementById('historyModal').style.display='none'" title="Close"><i class="fa-solid fa-xmark"></i></button>
           </div>
 
           <div class="no-print" style="display: flex; gap: 15px; margin-bottom: 15px; align-items: flex-end;">
@@ -2135,8 +2703,10 @@ function openHistoryModal(categoryKey) {
   }
 
   document.getElementById('historyModalTitle').textContent = config.title;
-  
-  const headerHTML = `<tr>${config.headers.map(h => {
+
+  const hidden = config.hiddenColumns || [];
+  const headerHTML = `<tr>${config.headers.map((h, i) => {
+    if (hidden.includes(i)) return '';
     const align = (h === 'DEPARTMENT' || h === 'SKU CODE' || h === 'PRODUCT DESCRIPTION' || h === 'INCOMING DEPARTMENT') ? 'left' : 'center';
     return `<th style="padding: 10px; border: 1px solid rgba(0,219,255,0.2); text-align: ${align};">${h}</th>`;
   }).join('')}</tr>`;
@@ -2255,7 +2825,7 @@ async function fetchHistoryData(forceRefresh = false) {
   if (!config) return;
 
   const tableBody = document.getElementById('historyTableBody');
-  const colCount = config.headers.length;
+  const colCount = config.headers.length - (config.hiddenColumns ? config.hiddenColumns.length : 0);
   const scope = getSessionScope();
   const deptInput = document.getElementById('historyDeptInput');
 
@@ -2305,7 +2875,7 @@ async function fetchHistoryData(forceRefresh = false) {
     }
 
     cachedHistoryRows = result.data;
-    renderHistoryRows(cachedHistoryRows, config.headers);
+    renderHistoryRows(cachedHistoryRows, config.headers, config.hiddenColumns);
 
   } catch (err) {
     clearInterval(interval);
@@ -2344,7 +2914,7 @@ function filterHistoryByInput() {
     return outgoingDept === searchTerm || incomingDept === searchTerm;
   });
 
-  renderHistoryRows(filtered, config.headers);
+  renderHistoryRows(filtered, config.headers, config.hiddenColumns);
 }
 
 function filterHistoryBySearchInput() {
@@ -2371,27 +2941,195 @@ function filterHistoryBySearchInput() {
     return row.some(cell => String(cell || '').toLowerCase().includes(query));
   });
 
-  renderHistoryRows(filtered, config.headers);
+  renderHistoryRows(filtered, config.headers, config.hiddenColumns);
 }
 
-function renderHistoryRows(rows, headers) {
+function renderHistoryRows(rows, headers, hiddenColumns) {
   const tableBody = document.getElementById('historyTableBody');
   if (!tableBody) return;
 
+  const hidden = hiddenColumns || [];
+  const visibleColCount = headers.length - hidden.length;
+
   if (!rows || rows.length === 0) {
-    tableBody.innerHTML = `<tr><td colspan="${headers.length}" style="text-align: center; padding: 30px; color: #ff4d4d;">No matching records found.</td></tr>`;
+    tableBody.innerHTML = `<tr><td colspan="${visibleColCount}" style="text-align: center; padding: 30px; color: #ff4d4d;">No matching records found.</td></tr>`;
     return;
   }
 
   tableBody.innerHTML = rows.map(row => {
     return `<tr style="border-bottom: 1px solid rgba(255, 255, 255, 0.05);">
       ${headers.map((h, i) => {
+        if (hidden.includes(i)) return '';
         const val = row[i] !== undefined && row[i] !== null ? row[i] : '';
         const align = (h === 'DEPARTMENT' || h === 'SKU CODE' || h === 'PRODUCT DESCRIPTION' || h === 'INCOMING DEPARTMENT') ? 'left' : 'center';
         return `<td style="padding: 8px 10px; border-right: 1px solid rgba(255,255,255,0.05); text-align: ${align};">${escapeHtml(val)}</td>`;
       }).join('')}
     </tr>`;
   }).join('');
+}
+
+// ==========================================
+// USER LOGS HISTORY — reads LOGIN_LOGS via the backend's dedicated
+// getLoginLogsFiltered / getLogsUsernameList actions. LOGIN_LOGS is a
+// blocked sheet for the generic getFilteredHistory endpoint above (and
+// its row shape — username/department/action/timestamp/status — doesn't
+// match the DEPARTMENT-first, transaction-style rows the HISTORY_CONFIGS
+// modal expects), so this is its own small modal rather than a
+// HISTORY_CONFIGS entry.
+// ==========================================
+let cachedUserLogsRows = [];
+
+const USER_LOGS_HEADERS = ['USERNAME', 'DEPARTMENT', 'ACTION', 'TIMESTAMP', 'STATUS'];
+
+function openUserLogsModal() {
+    let modal = document.getElementById('userLogsModal');
+
+    if (!modal) {
+        const modalHTML = `
+        <div id="userLogsModal" style="display: flex; position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; background: rgba(0, 0, 0, 0.85); backdrop-filter: blur(8px); z-index: 9999; justify-content: center; align-items: center;">
+            <div id="userLogsPrintableArea" style="background: rgba(18, 24, 38, 0.98); border: 1.5px solid rgba(0, 219, 255, 0.4); box-shadow: 0 0 25px rgba(0, 219, 255, 0.2); padding: 25px; width: 95vw; height: 90vh; color: #fff; font-family: 'Roboto Mono', monospace; display: flex; flex-direction: column; box-sizing: border-box; position: relative;">
+
+                <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid rgba(0, 219, 255, 0.3); padding-bottom: 12px; margin-bottom: 15px;">
+                    <h2 style="color: #00dbff; margin: 0; font-size: 1.3rem; letter-spacing: 1px;">USER LOGS HISTORY</h2>
+                    <button class="app-close-btn no-print" onclick="document.getElementById('userLogsModal').style.display='none'" title="Close"><i class="fa-solid fa-xmark"></i></button>
+                </div>
+
+                <div class="no-print" style="display: flex; gap: 15px; margin-bottom: 15px; align-items: flex-end;">
+                    <div style="display: flex; flex-direction: column; flex: 1; gap: 6px;">
+                        <label for="userLogsUsernameInput" style="color: #00dbff; font-size: 0.75rem; font-weight: bold; letter-spacing: 1px; text-transform: uppercase;">
+                            FILTER BY USERNAME
+                        </label>
+                        <input type="text" id="userLogsUsernameInput" list="userLogsUsernameOptions" placeholder="All users..." oninput="filterUserLogsBySearch()" style="width: 100%; padding: 10px 14px; border-radius: 4px; border: 1px solid rgba(0, 219, 255, 0.4); background: #0c101a; color: #fff; outline: none; box-sizing: border-box; font-family: inherit; font-size: 0.85rem;" autocomplete="off">
+                        <datalist id="userLogsUsernameOptions"></datalist>
+                    </div>
+
+                    <div style="display: flex; flex-direction: column; flex: 1; gap: 6px;">
+                        <label for="userLogsSearchInput" style="color: #00dbff; font-size: 0.75rem; font-weight: bold; letter-spacing: 1px; text-transform: uppercase;">
+                            SEARCH TABLE
+                        </label>
+                        <input type="text" id="userLogsSearchInput" oninput="filterUserLogsBySearch()" placeholder="Search any column..." style="width: 100%; padding: 10px 14px; border-radius: 4px; border: 1px solid rgba(0, 219, 255, 0.4); background: #0c101a; color: #fff; outline: none; box-sizing: border-box; font-family: inherit; font-size: 0.85rem;" autocomplete="off">
+                    </div>
+
+                    <button id="userLogsRefreshBtn" onclick="resetAndFetchUserLogs()" style="padding: 10px 20px; background: rgba(0, 219, 255, 0.15); border: 1px solid #00dbff; color: #00dbff; font-weight: bold; border-radius: 4px; cursor: pointer; display: flex; align-items: center; gap: 6px; height: 40px;">
+                        <i class="fa-solid fa-rotate-right"></i> REFRESH
+                    </button>
+
+                    <button id="userLogsPrintBtn" onclick="window.print()" style="padding: 10px 20px; background: rgba(0, 255, 136, 0.2); border: 1px solid #00ff88; color: #00ff88; font-weight: bold; border-radius: 4px; cursor: pointer; display: flex; align-items: center; gap: 6px; height: 40px;">
+                        <i class="fa-solid fa-print"></i> PRINT
+                    </button>
+                </div>
+
+                <div style="flex: 1; overflow: auto; border: 1px solid rgba(255, 255, 255, 0.1); background: rgba(0, 0, 0, 0.4);">
+                    <table style="width: 100%; border-collapse: collapse; font-size: 0.8rem; white-space: nowrap;">
+                        <thead style="position: sticky; top: 0; background: rgba(18, 24, 38, 1); color: #00dbff;">
+                            <tr>${USER_LOGS_HEADERS.map(h => `<th style="padding: 10px; border: 1px solid rgba(0,219,255,0.2); text-align: left;">${h}</th>`).join('')}</tr>
+                        </thead>
+                        <tbody id="userLogsTableBody"></tbody>
+                    </table>
+                </div>
+
+            </div>
+        </div>`;
+        document.body.insertAdjacentHTML('beforeend', modalHTML);
+        modal = document.getElementById('userLogsModal');
+    }
+
+    modal.style.display = 'flex';
+    resetAndFetchUserLogs();
+}
+
+function resetAndFetchUserLogs() {
+    const usernameInput = document.getElementById('userLogsUsernameInput');
+    const searchInput = document.getElementById('userLogsSearchInput');
+    if (usernameInput) usernameInput.value = '';
+    if (searchInput) searchInput.value = '';
+
+    fetchUserLogsUsernameList();
+    fetchUserLogsData();
+}
+
+async function fetchUserLogsUsernameList() {
+    try {
+        const username = window.sessionUser || localStorage.getItem('activeUser') || '';
+        const url = `${window.API}?action=getLogsUsernameList&user=${encodeURIComponent(username)}&token=${encodeURIComponent(window.API_TOKEN)}`;
+        const response = await fetch(url);
+        const result = await response.json();
+        const usernames = (result.success && Array.isArray(result.data)) ? result.data : [];
+
+        const datalist = document.getElementById('userLogsUsernameOptions');
+        if (datalist) {
+            datalist.innerHTML = usernames.map(u => `<option value="${escapeHtml(u)}"></option>`).join('');
+        }
+    } catch (err) {
+        console.error("Failed to load username list for User Logs History:", err);
+    }
+}
+
+async function fetchUserLogsData() {
+    const tableBody = document.getElementById('userLogsTableBody');
+    if (tableBody) {
+        tableBody.innerHTML = `<tr><td colspan="${USER_LOGS_HEADERS.length}" style="text-align: center; padding: 30px; color: #00dbff;">Loading records...</td></tr>`;
+    }
+
+    try {
+        const username = window.sessionUser || localStorage.getItem('activeUser') || '';
+        const url = `${window.API}?action=getLoginLogsFiltered&user=${encodeURIComponent(username)}&token=${encodeURIComponent(window.API_TOKEN)}`;
+        const response = await fetch(url);
+        const result = await response.json();
+
+        if (!result.success || !result.data || result.data.length === 0) {
+            cachedUserLogsRows = [];
+            if (tableBody) {
+                tableBody.innerHTML = `<tr><td colspan="${USER_LOGS_HEADERS.length}" style="text-align: center; padding: 30px; color: #ff4d4d;">No log records found.</td></tr>`;
+            }
+            return;
+        }
+
+        cachedUserLogsRows = result.data;
+        renderUserLogsRows(cachedUserLogsRows);
+    } catch (err) {
+        console.error("Error fetching user logs history:", err);
+        if (tableBody) {
+            tableBody.innerHTML = `<tr><td colspan="${USER_LOGS_HEADERS.length}" style="text-align: center; padding: 30px; color: #ff4d4d;">Failed to retrieve log data.</td></tr>`;
+        }
+    }
+}
+
+function filterUserLogsBySearch() {
+    if (!cachedUserLogsRows || cachedUserLogsRows.length === 0) return;
+
+    const usernameFilter = document.getElementById('userLogsUsernameInput')?.value.trim().toLowerCase() || '';
+    const query = document.getElementById('userLogsSearchInput')?.value.trim().toLowerCase() || '';
+
+    const filtered = cachedUserLogsRows.filter(row => {
+        if (usernameFilter) {
+            const rowUsername = row[0] ? String(row[0]).trim().toLowerCase() : '';
+            if (rowUsername !== usernameFilter) return false;
+        }
+        if (!query) return true;
+        return row.some(cell => String(cell || '').toLowerCase().includes(query));
+    });
+
+    renderUserLogsRows(filtered);
+}
+
+function renderUserLogsRows(rows) {
+    const tableBody = document.getElementById('userLogsTableBody');
+    if (!tableBody) return;
+
+    if (!rows || rows.length === 0) {
+        tableBody.innerHTML = `<tr><td colspan="${USER_LOGS_HEADERS.length}" style="text-align: center; padding: 30px; color: #ff4d4d;">No matching records found.</td></tr>`;
+        return;
+    }
+
+    tableBody.innerHTML = rows.map(row => `
+        <tr style="border-bottom: 1px solid rgba(255,255,255,0.05);">
+            ${USER_LOGS_HEADERS.map((h, i) => {
+                const val = row[i] !== undefined && row[i] !== null ? row[i] : '';
+                return `<td style="padding: 8px 10px; border-right: 1px solid rgba(255,255,255,0.05); text-align: left;">${escapeHtml(val)}</td>`;
+            }).join('')}
+        </tr>
+    `).join('');
 }
 
 // --- NEAR EXPIRY MODAL SCRIPT ADDITIONS ---
@@ -2423,7 +3161,7 @@ function checkAndShowNearExpiryModal() {
                             </h3>
                             <p id="nearExpiryModalSubtitle" style="margin: 6px 0 0; font-size: 0.72rem; color: #b89a9a;">Items in this department meeting the near-expiry condition (col AA &le; 90)</p>
                         </div>
-                        <button type="button" onclick="closeNearExpiryModal()" style="background: transparent; border: none; color: #ff8888; font-size: 1.6rem; cursor: pointer; line-height: 1; padding: 0 4px;">&times;</button>
+                        <button type="button" class="app-close-btn" onclick="closeNearExpiryModal()" title="Close"><i class="fa-solid fa-xmark"></i></button>
                     </div>
                     <div style="flex: 1; overflow-y: auto;">
                         <table style="width: 100%; border-collapse: collapse; font-size: 0.82rem;">
@@ -2521,7 +3259,7 @@ function checkAndShowStockAvailabilityModal() {
                             </h3>
                             <p style="margin: 6px 0 0; font-size: 0.72rem; color: #7d8ba0;">Items flagged Critical, Low in Stock, or Out of Stock in this department</p>
                         </div>
-                        <button type="button" onclick="closeStockAvailabilityModal()" style="background: transparent; border: none; color: #8fd6ff; font-size: 1.6rem; cursor: pointer; line-height: 1; padding: 0 4px;">&times;</button>
+                        <button type="button" class="app-close-btn" onclick="closeStockAvailabilityModal()" title="Close"><i class="fa-solid fa-xmark"></i></button>
                     </div>
                     <div style="flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 20px;">
 
@@ -2708,7 +3446,7 @@ function showExpiredPopup(expiredItems) {
                         <h3 class="blink-alert" style="color: #ff4d4d; margin: 0; font-size: 1.2rem; display: flex; align-items: center; gap: 10px; letter-spacing: 1px;">
                             <i class="fa-solid fa-triangle-exclamation"></i> EXPIRED ITEMS DETECTED
                         </h3>
-                        <button onclick="closeExpiredAlertModal()" style="background: transparent; border: none; color: #ff4d4d; font-size: 1.6rem; cursor: pointer; line-height: 1;">&times;</button>
+                        <button class="app-close-btn" onclick="closeExpiredAlertModal()" title="Close"><i class="fa-solid fa-xmark"></i></button>
                     </div>
 
                     <p id="expiredAlertSummary" style="font-size: 0.85rem; color: #ff9999; margin-bottom: 15px; font-weight: bold;"></p>
@@ -2775,7 +3513,7 @@ const INCOMING_CONFIGS = {
     REQUEST: {
         sheet: 'REQUEST',
         title: 'INCOMING REQUEST AND RELEASED FORM',
-        qtyLabel: 'TRANSFER QTY',
+        qtyLabel: 'TRANSFER QUANTITY',
         // Column letters below refer to the REQUEST sheet layout:
         // A dept | B-I product/cost/srp | J transfer qty |
         // K-N released info | O-R received info | S incoming dept | T date | U status
@@ -2783,73 +3521,116 @@ const INCOMING_CONFIGS = {
         dateCol: 'T',
         statusCol: 'U',
         writeBackStartCol: 'O',   // RECEIVED INFORMATION block
-        writeBackLabel: 'QTY RECEIVED'
+        writeBackLabel: 'QTY RECEIVED',
+        // Archive sheet a RECEIVED submission lands on (for display only —
+        // Code.gs resolves the real mapping/columns server-side).
+        destSheet: 'RECEIVED'
     },
     TRANSFER: {
         sheet: 'TRANSFER',
         title: 'INCOMING TRANSFER FORM',
-        qtyLabel: 'TRANSFER QTY',
+        qtyLabel: 'TRANSFER QUANTITY',
         // A dept | B-I product/cost/srp | J transfer qty |
         // K-N received info | O incoming dept | P date | Q status
         incomingCol: 'O',
         dateCol: 'P',
         statusCol: 'Q',
         writeBackStartCol: 'K',   // RECEIVED INFORMATION block (only block on TRANSFER)
-        writeBackLabel: 'QTY RELEASED'
+        writeBackLabel: 'QTY RELEASED',
+        destSheet: 'TRANSFERED'
     },
     PULLOUT: {
         sheet: 'RTV',
         title: 'INCOMING PULL OUT / GATE PASS FORM',
-        qtyLabel: 'TRANSFER QTY',
+        qtyLabel: 'TRANSFER QUANTITY',
         // A dept | B-I product/cost/srp | J transfer qty |
         // K-N out/exit info | O-R return info | S incoming dept | T date | U status
         incomingCol: 'S',
         dateCol: 'T',
         statusCol: 'U',
         writeBackStartCol: 'O',   // RETURN INFORMATION block
-        writeBackLabel: 'QTY RETURNED'
+        writeBackLabel: 'QTY RETURNED',
+        destSheet: 'RETURN'
     }
 };
 
 let activeIncomingKey = '';
 let incomingFetchedRows = [];
 
+// ==========================================
+// 3D ANIMATED BUTTON STYLE (Incoming module)
+// Injected once into <head>; buttons opt in via class="btn-3d".
+// ==========================================
+function injectIncoming3DButtonStyles() {
+    if (document.getElementById('incoming3dBtnStyles')) return;
+    const style = document.createElement('style');
+    style.id = 'incoming3dBtnStyles';
+    style.textContent = `
+        .btn-3d {
+            position: relative;
+            transform: translateY(0) scale(1);
+            box-shadow: 0 4px 0 rgba(0,0,0,0.35), 0 6px 12px rgba(0,0,0,0.25);
+            transition: transform 0.12s ease, box-shadow 0.12s ease, filter 0.12s ease;
+            will-change: transform;
+        }
+        .btn-3d:hover {
+            transform: translateY(-3px) scale(1.02);
+            box-shadow: 0 7px 0 rgba(0,0,0,0.35), 0 12px 18px rgba(0,0,0,0.3);
+            filter: brightness(1.06);
+        }
+        .btn-3d:active {
+            transform: translateY(2px) scale(0.98);
+            box-shadow: 0 1px 0 rgba(0,0,0,0.35), 0 2px 4px rgba(0,0,0,0.25);
+            filter: brightness(0.96);
+        }
+        .btn-3d:disabled {
+            transform: none;
+            box-shadow: none;
+            filter: grayscale(0.3) opacity(0.6);
+            cursor: not-allowed;
+        }
+    `;
+    document.head.appendChild(style);
+}
+
 async function loadIncomingModuleCode(container) {
     if (!container) return;
+    injectIncoming3DButtonStyles();
     try {
         container.innerHTML = `
             <div style="width: 100%; height: 100%; padding: 25px; box-sizing: border-box; display: flex; flex-direction: column; align-items: stretch;">
                 <div style="margin-bottom: 35px; border-bottom: 1px solid rgba(0, 0, 0, 0.2); padding-bottom: 15px; position: relative;">
                     <h2 style="color: #111; margin: 0; font-family: 'Roboto Mono', monospace; font-size: 1.3rem; letter-spacing: 2px; font-weight: 700;">
-                        <i class="fa-solid fa-truck-ramp-box" style="margin-right: 10px; color: #111;"></i>INCOMING FORMS
+                        <i class="fa-solid fa-truck-ramp-box icon-3d-anim" style="margin-right: 10px; color: #111;"></i>INCOMING FORMS
                     </h2>
                     <div style="position: absolute; top: -5px; right: 0; z-index: 10;">
-                        <button onclick="closeIncomingModal()" style="background: transparent; border: none; color: #ff4d4d; font-size: 1.8rem; cursor: pointer; padding: 5px; line-height: 1; display: flex; align-items: center; justify-content: center;" title="Close">
-                            <i class="fa-solid fa-circle-xmark"></i>
+                        <button class="app-close-btn" onclick="closeIncomingModal()" title="Close">
+                            <i class="fa-solid fa-xmark"></i>
                         </button>
                     </div>
                 </div>
 
                 <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; width: 100%; gap: 20px; margin: auto 0;">
                     <div style="display: flex; justify-content: center; gap: 20px; width: 100%; max-width: 900px; flex-wrap: wrap;">
-                        <button class="nav-icon-btn" onclick="selectIncomingCategory('REQUEST')" style="flex: 1 1 0px; min-width: 220px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; padding: 15px 10px; min-height: 110px; border-radius: 12px; cursor: pointer; background: rgba(144, 168, 168, 0.35); border: 1.5px solid rgba(0, 0, 0, 0.4); color: #111; backdrop-filter: blur(10px); transition: all 0.3s ease;">
-                            <i class="fa-solid fa-file-invoice" style="font-size: 1.8rem; color: #111;"></i>
+                        <button class="nav-icon-btn btn-3d" onclick="selectIncomingCategory('REQUEST')" style="flex: 1 1 0px; min-width: 220px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; padding: 15px 10px; min-height: 110px; border-radius: 12px; cursor: pointer; background: rgba(144, 168, 168, 0.35); border: 1.5px solid rgba(0, 0, 0, 0.4); color: #111; backdrop-filter: blur(10px);">
+                            <i class="fa-solid fa-file-invoice icon-3d-anim" style="font-size: 1.8rem; color: #111;"></i>
                             <span style="font-family: 'Roboto Mono', monospace; font-size: 0.8rem; font-weight: 700; text-align: center; letter-spacing: 1px;">INCOMING REQUEST &amp; RELEASED FORM</span>
                         </button>
 
-                        <button class="nav-icon-btn" onclick="selectIncomingCategory('TRANSFER')" style="flex: 1 1 0px; min-width: 220px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; padding: 15px 10px; min-height: 110px; border-radius: 12px; cursor: pointer; background: rgba(144, 168, 168, 0.35); border: 1.5px solid rgba(0, 0, 0, 0.4); color: #111; backdrop-filter: blur(10px); transition: all 0.3s ease;">
-                            <i class="fa-solid fa-right-left" style="font-size: 1.8rem; color: #111;"></i>
+                        <button class="nav-icon-btn btn-3d" onclick="selectIncomingCategory('TRANSFER')" style="flex: 1 1 0px; min-width: 220px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; padding: 15px 10px; min-height: 110px; border-radius: 12px; cursor: pointer; background: rgba(144, 168, 168, 0.35); border: 1.5px solid rgba(0, 0, 0, 0.4); color: #111; backdrop-filter: blur(10px);">
+                            <i class="fa-solid fa-right-left icon-3d-anim" style="font-size: 1.8rem; color: #111;"></i>
                             <span style="font-family: 'Roboto Mono', monospace; font-size: 0.8rem; font-weight: 700; text-align: center; letter-spacing: 1px;">INCOMING TRANSFER FORM</span>
                         </button>
 
-                        <button class="nav-icon-btn" onclick="selectIncomingCategory('PULLOUT')" style="flex: 1 1 0px; min-width: 220px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; padding: 15px 10px; min-height: 110px; border-radius: 12px; cursor: pointer; background: rgba(144, 168, 168, 0.35); border: 1.5px solid rgba(0, 0, 0, 0.4); color: #111; backdrop-filter: blur(10px); transition: all 0.3s ease;">
-                            <i class="fa-solid fa-file-arrow-down" style="font-size: 1.8rem; color: #111;"></i>
+                        <button class="nav-icon-btn btn-3d" onclick="selectIncomingCategory('PULLOUT')" style="flex: 1 1 0px; min-width: 220px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; padding: 15px 10px; min-height: 110px; border-radius: 12px; cursor: pointer; background: rgba(144, 168, 168, 0.35); border: 1.5px solid rgba(0, 0, 0, 0.4); color: #111; backdrop-filter: blur(10px);">
+                            <i class="fa-solid fa-file-arrow-down icon-3d-anim" style="font-size: 1.8rem; color: #111;"></i>
                             <span style="font-family: 'Roboto Mono', monospace; font-size: 0.8rem; font-weight: 700; text-align: center; letter-spacing: 1px;">INCOMING PULL OUT / GATE PASS FORM</span>
                         </button>
                     </div>
                 </div>
             </div>
         `;
+
     } catch (error) {
         console.error(error);
         container.innerHTML = `<p style="padding: 20px; color: red;">Error loading incoming module.</p>`;
@@ -2876,16 +3657,23 @@ function selectIncomingCategory(categoryKey) {
     const container = document.getElementById('mod-INCOMING');
     if (!container) return;
 
+    injectIncoming3DButtonStyles();
+
+    // Admins can view incoming items across ALL departments (field left
+    // blank / freely editable). Non-admins are locked to their own client,
+    // matching the pattern used in the History and Inventory modules.
+    const scope = getSessionScope();
+
     container.innerHTML = `
         <div style="width: 100%; height: 100%; padding: 25px; box-sizing: border-box; display: flex; flex-direction: column; align-items: stretch;">
 
             <div style="margin-bottom: 25px; border-bottom: 1px solid rgba(0, 0, 0, 0.2); padding-bottom: 15px; position: relative;">
                 <h2 style="color: #111; margin: 0; font-family: 'Roboto Mono', monospace; font-size: 1.2rem; letter-spacing: 2px; font-weight: 700;">
-                    <i class="fa-solid fa-truck-ramp-box" style="margin-right: 10px; color: #111;"></i>${escapeHtml(cfg.title)}
+                    <i class="fa-solid fa-truck-ramp-box icon-3d-anim" style="margin-right: 10px; color: #111;"></i>${escapeHtml(cfg.title)}
                 </h2>
                 <div style="position: absolute; top: -5px; right: 0; z-index: 10;">
-                    <button onclick="loadIncomingModuleCode(document.getElementById('mod-INCOMING'))" style="background: transparent; border: none; color: #ff4d4d; font-size: 1.8rem; cursor: pointer; padding: 5px; line-height: 1; display: flex; align-items: center; justify-content: center;" title="Back">
-                        <i class="fa-solid fa-circle-xmark"></i>
+                    <button class="app-close-btn" onclick="loadIncomingModuleCode(document.getElementById('mod-INCOMING'))" title="Back">
+                        <i class="fa-solid fa-xmark"></i>
                     </button>
                 </div>
             </div>
@@ -2899,7 +3687,12 @@ function selectIncomingCategory(categoryKey) {
                     </div>
                     <div style="display: flex; align-items: center; gap: 8px; flex: 1; min-width: 240px;">
                         <span style="font-weight: bold; color: #111; text-transform: uppercase; white-space: nowrap;">INCOMING DEPARTMENT:</span>
-                        <input type="text" id="incIncomingDept" placeholder="Type to search outlet..." value="${escapeHtml(window.sessionClient || '')}" style="padding: 6px 10px; background: #fff; border: 1px solid #000; border-radius: 4px; color: #000; font-family: inherit; outline: none; flex: 1;" list="outletList">
+                        <input type="text" id="incIncomingDept"
+                            placeholder="${scope.isAdmin ? 'Leave blank to view ALL departments' : (scope.client ? '' : 'No client on this account')}"
+                            value="${escapeHtml(scope.isAdmin ? '' : scope.client)}"
+                            ${scope.isAdmin ? '' : 'readonly'}
+                            style="padding: 6px 10px; background: ${scope.isAdmin ? '#fff' : '#f4f4f4'}; border: 1px solid #000; border-radius: 4px; color: #000; font-family: inherit; outline: none; flex: 1; cursor: ${scope.isAdmin ? 'text' : 'not-allowed'}; opacity: ${scope.isAdmin ? '1' : '0.85'};"
+                            list="outletList">
                     </div>
                     <datalist id="outletList"></datalist>
                 </div>
@@ -2907,8 +3700,8 @@ function selectIncomingCategory(categoryKey) {
                     <span style="font-weight: bold; color: #111; text-transform: uppercase;">DATE:</span>
                     <input type="text" id="formattedDateDisplay" readonly style="padding: 6px 10px; background: #f4f4f4; border: 1px solid #000; border-radius: 4px; color: #000; font-family: inherit; outline: none; width: 170px; text-align: center; font-weight: bold;">
                 </div>
-                <button type="button" onclick="fetchIncomingRows()" style="padding: 8px 16px; background: #111; color: #fff; border: none; border-radius: 4px; font-family: inherit; font-size: 0.75rem; cursor: pointer; text-transform: uppercase; font-weight: 600; letter-spacing: 0.5px;">
-                    <i class="fa-solid fa-magnifying-glass"></i> FETCH
+                <button type="button" class="btn-3d" onclick="fetchIncomingRows()" style="padding: 8px 16px; background: #111; color: #fff; border: none; border-radius: 4px; font-family: inherit; font-size: 0.75rem; cursor: pointer; text-transform: uppercase; font-weight: 600; letter-spacing: 0.5px;">
+                    <i class="fa-solid fa-magnifying-glass"></i> UPLOAD
                 </button>
             </div>
 
@@ -2925,17 +3718,18 @@ function selectIncomingCategory(categoryKey) {
                                 <th style="padding: 10px 8px; font-weight: 600;">PRODUCT DESCRIPTION</th>
                                 <th style="padding: 10px 8px; font-weight: 600; text-align: center; width: 60px;">UOM</th>
                                 <th style="padding: 10px 8px; font-weight: 600; text-align: center; width: 160px;">EXP. DATE</th>
-                                <th style="padding: 10px 8px; font-weight: 600; text-align: center; width: 100px;">${escapeHtml(cfg.qtyLabel)}</th>
+                                <th style="padding: 10px 8px; font-weight: 600; text-align: center; width: 110px;">${escapeHtml(cfg.qtyLabel)}</th>
+                                <th style="padding: 10px 8px; font-weight: 600; text-align: center; width: 180px;">REMARKS</th>
                             </tr>
                         </thead>
                         <tbody id="incomingTableBody">
-                            <tr><td colspan="6" style="padding: 20px; text-align: center; color: #888;">Select departments and click FETCH to load pending items.</td></tr>
+                            <tr><td colspan="7" style="padding: 20px; text-align: center; color: #888;">Select departments and click UPLOAD to load pending items.</td></tr>
                         </tbody>
                     </table>
                 </div>
 
                 <div style="display: flex; justify-content: flex-end; margin-top: 10px;">
-                    <button type="button" onclick="submitIncomingReceived()" style="padding: 8px 20px; background: #28a745; color: #fff; border: none; border-radius: 4px; font-family: inherit; font-size: 0.8rem; cursor: pointer; text-transform: uppercase; font-weight: 700; letter-spacing: 0.5px;">
+                    <button type="button" class="btn-3d" onclick="submitIncomingReceived()" style="padding: 8px 20px; background: #28a745; color: #fff; border: none; border-radius: 4px; font-family: inherit; font-size: 0.8rem; cursor: pointer; text-transform: uppercase; font-weight: 700; letter-spacing: 0.5px;">
                         <i class="fa-solid fa-check"></i> RECEIVED
                     </button>
                 </div>
@@ -2955,17 +3749,29 @@ async function fetchIncomingRows() {
     const cfg = INCOMING_CONFIGS[activeIncomingKey];
     if (!cfg) return;
 
+    const scope = getSessionScope();
     const container = document.getElementById('mod-INCOMING');
     const selectDept = container?.querySelector('#incSelectDept')?.value.trim() || '';
-    const incomingDept = container?.querySelector('#incIncomingDept')?.value.trim() || '';
+    const incDeptInput = container?.querySelector('#incIncomingDept');
+
+    // Non-admins can't widen scope by editing the field — always use their
+    // own client. This is a second guard in case the input is ever
+    // manipulated; the field is also rendered readonly for non-admins.
+    let incomingDept = incDeptInput ? incDeptInput.value.trim() : '';
+    if (!scope.isAdmin) {
+        incomingDept = scope.client;
+        if (incDeptInput) incDeptInput.value = scope.client;
+    }
+
     const formDate = container?.querySelector('#formattedDateDisplay')?.value.trim() || '';
     const tableBody = document.getElementById('incomingTableBody');
 
     if (!selectDept) return showCustomAlert('Please select a SELECT DEPARTMENT.');
-    if (!incomingDept) return showCustomAlert('Please select an INCOMING DEPARTMENT.');
+    // Admins may leave INCOMING DEPARTMENT blank to view items across ALL departments.
+    if (!scope.isAdmin && !incomingDept) return showCustomAlert('No client is associated with your account. Contact an admin.');
 
-    if (tableBody) tableBody.innerHTML = `<tr><td colspan="6" style="padding: 20px; text-align: center; color: #888;">Loading...</td></tr>`;
-    if (typeof showSeaWaveLoader === 'function') showSeaWaveLoader("FETCHING...");
+    if (tableBody) tableBody.innerHTML = `<tr><td colspan="7" style="padding: 20px; text-align: center; color: #888;">Loading...</td></tr>`;
+    if (typeof showSeaWaveLoader === 'function') showSeaWaveLoader("UPLOADING...");
 
     try {
         const url = `${window.API}?action=getIncomingPending&sheet=${encodeURIComponent(cfg.sheet)}`
@@ -2984,7 +3790,7 @@ async function fetchIncomingRows() {
         renderIncomingRows(incomingFetchedRows, cfg);
     } catch (error) {
         console.error("Fetch Incoming Error:", error);
-        if (tableBody) tableBody.innerHTML = `<tr><td colspan="6" style="padding: 20px; text-align: center; color: #d9534f;">Error: ${escapeHtml(error.message)}</td></tr>`;
+        if (tableBody) tableBody.innerHTML = `<tr><td colspan="7" style="padding: 20px; text-align: center; color: #d9534f;">Error: ${escapeHtml(error.message)}</td></tr>`;
     } finally {
         if (typeof hideSeaWaveLoader === 'function') hideSeaWaveLoader();
     }
@@ -2995,7 +3801,7 @@ function renderIncomingRows(rows, cfg) {
     if (!tableBody) return;
 
     if (!rows || rows.length === 0) {
-        tableBody.innerHTML = `<tr><td colspan="6" style="padding: 20px; text-align: center; color: #888;">No pending items found for that selection.</td></tr>`;
+        tableBody.innerHTML = `<tr><td colspan="7" style="padding: 20px; text-align: center; color: #888;">No pending items found for that selection.</td></tr>`;
         return;
     }
 
@@ -3013,59 +3819,199 @@ function renderIncomingRows(rows, cfg) {
             <td style="padding: 6px 8px; border-bottom: 1px solid #e9ecef; text-align: center;">
                 <input type="date" class="incoming-exp-date" style="width: 100%; border: 1px solid #ccc; border-radius: 6px; padding: 4px 6px; font-family: inherit; font-size: 0.78rem; outline: none; box-sizing: border-box;">
             </td>
-            <td style="padding: 6px 8px; border-bottom: 1px solid #e9ecef; text-align: center; font-weight: 600;">${escapeHtml(item.qty)}</td>
+            <td style="padding: 6px 8px; border-bottom: 1px solid #e9ecef; text-align: center;">
+                <input type="number" class="incoming-qty" value="${escapeHtml(item.qty)}" min="0" step="any" style="width: 100%; border: 1px solid #ccc; border-radius: 6px; padding: 4px 6px; font-family: inherit; font-size: 0.78rem; font-weight: 600; text-align: center; outline: none; box-sizing: border-box;">
+            </td>
+            <td style="padding: 6px 8px; border-bottom: 1px solid #e9ecef; text-align: center;">
+                <input type="text" class="incoming-remarks" placeholder="Optional remarks" style="width: 100%; border: 1px solid #ccc; border-radius: 6px; padding: 4px 6px; font-family: inherit; font-size: 0.78rem; outline: none; box-sizing: border-box;">
+            </td>
         `;
         tableBody.appendChild(tr);
     });
 }
 
+// ==========================================
+// PROGRESS MODAL — shown while RECEIVED submissions process
+// ==========================================
+function showIncomingProgressModal() {
+    hideIncomingProgressModal();
+    const modal = document.createElement('div');
+    modal.id = 'incomingProgressModal';
+    modal.style.cssText = 'position: fixed; inset: 0; background: rgba(0,0,0,0.55); display: flex; align-items: center; justify-content: center; z-index: 99999;';
+    modal.innerHTML = `
+        <div style="background: #fff; width: 360px; max-width: 90vw; border-radius: 14px; padding: 28px 26px; text-align: center; font-family: 'Roboto Mono', monospace; box-shadow: 0 20px 50px rgba(0,0,0,0.4);">
+            <i class="fa-solid fa-truck-fast" style="font-size: 1.8rem; color: #111; margin-bottom: 10px;"></i>
+            <p style="margin: 0 0 16px; font-weight: 700; color: #111; letter-spacing: 1px; text-transform: uppercase;">Processing, please wait...</p>
+            <div style="width: 100%; height: 14px; background: #eee; border-radius: 8px; overflow: hidden;">
+                <div id="incomingProgressBarFill" style="height: 100%; width: 0%; background: linear-gradient(90deg, #00dbff, #111); transition: width 0.2s ease;"></div>
+            </div>
+            <p id="incomingProgressPercent" style="margin: 10px 0 0; font-weight: 700; color: #111;">0%</p>
+        </div>
+    `;
+    document.body.appendChild(modal);
+}
+
+function updateIncomingProgress(percent) {
+    const fill = document.getElementById('incomingProgressBarFill');
+    const label = document.getElementById('incomingProgressPercent');
+    if (fill) fill.style.width = percent + '%';
+    if (label) label.innerText = percent + '%';
+}
+
+function hideIncomingProgressModal() {
+    const modal = document.getElementById('incomingProgressModal');
+    if (modal) modal.remove();
+}
+
+// Self-contained notice for the Incoming module — built the same way as
+// showIncomingProgressModal (its own DOM node appended straight to
+// <body>), so it always renders even if the page's shared
+// #customAlertModal/#statusModal markup is missing, hidden behind
+// something, or not present on this screen. This is what
+// submitIncomingReceived() now uses for every failure/validation path so
+// clicking RECEIVED is never a silent no-op.
+function showIncomingAlert(message, isError = true) {
+    const existing = document.getElementById('incomingAlertPopup');
+    if (existing) existing.remove();
+
+    const popup = document.createElement('div');
+    popup.id = 'incomingAlertPopup';
+    popup.style.cssText = 'position: fixed; inset: 0; background: rgba(0,0,0,0.55); display: flex; align-items: center; justify-content: center; z-index: 100000;';
+    popup.innerHTML = `
+        <div style="background: #fff; width: 380px; max-width: 90vw; border-radius: 14px; overflow: hidden; box-shadow: 0 20px 50px rgba(0,0,0,0.4); font-family: 'Roboto Mono', monospace;">
+            <div style="padding: 22px 20px 6px; text-align: center;">
+                <i class="fa-solid ${isError ? 'fa-triangle-exclamation' : 'fa-circle-info'}" style="font-size: 2rem; color: ${isError ? '#d9534f' : '#00bcd4'};"></i>
+                <p style="margin: 14px 0 0; color: #222; font-size: 0.85rem; line-height: 1.5;">${escapeHtml(message)}</p>
+            </div>
+            <div style="display: flex; justify-content: center; padding: 18px 20px 22px;">
+                <button type="button" class="btn-3d" onclick="document.getElementById('incomingAlertPopup').remove()" style="padding: 8px 22px; background: #111; color: #fff; border: none; border-radius: 4px; font-family: inherit; font-size: 0.75rem; cursor: pointer; text-transform: uppercase; font-weight: 600; letter-spacing: 0.5px;">
+                    OK
+                </button>
+            </div>
+        </div>
+    `;
+    document.body.appendChild(popup);
+}
+
+// Resets the form back to its empty starting state after a successful save.
+function clearIncomingForm() {
+    const container = document.getElementById('mod-INCOMING');
+    if (!container) return;
+    const scope = getSessionScope();
+
+    const selectDeptInput = container.querySelector('#incSelectDept');
+    if (selectDeptInput) selectDeptInput.value = '';
+
+    const incDeptInput = container.querySelector('#incIncomingDept');
+    if (incDeptInput) incDeptInput.value = scope.isAdmin ? '' : scope.client;
+
+    const selectAll = container.querySelector('#incSelectAll');
+    if (selectAll) selectAll.checked = false;
+
+    incomingFetchedRows = [];
+    const tableBody = document.getElementById('incomingTableBody');
+    if (tableBody) {
+        tableBody.innerHTML = `<tr><td colspan="7" style="padding: 20px; text-align: center; color: #888;">Select departments and click UPLOAD to load pending items.</td></tr>`;
+    }
+}
+
 async function submitIncomingReceived() {
-    const cfg = INCOMING_CONFIGS[activeIncomingKey];
-    if (!cfg) return;
-
-    const rowsEls = Array.from(document.querySelectorAll('#incomingTableBody tr'));
-    const checked = Array.from(document.querySelectorAll('.incoming-row-checkbox:checked'));
-
-    if (checked.length === 0) return showCustomAlert('Please select at least one item to mark as RECEIVED.');
-
-    if (typeof showSeaWaveLoader === 'function') showSeaWaveLoader("SAVING...");
-
     try {
-        const requests = checked.map(cb => {
-            const idx = Number(cb.getAttribute('data-index'));
-            const item = incomingFetchedRows[idx];
-            const tr = cb.closest('tr');
-            const expDateInput = tr ? tr.querySelector('.incoming-exp-date') : null;
-            const expDate = expDateInput ? expDateInput.value : '';
+        console.log("submitIncomingReceived: activeIncomingKey =", activeIncomingKey);
 
-            return fetch(window.API, {
-                method: "POST",
-                body: JSON.stringify({
-                    action: "markIncomingReceived",
-                    sheetName: cfg.sheet,
-                    rowIndex: item.rowIndex,
-                    expDate: expDate,
-                    qty: item.qty,
-                    uom: item.uom,
-                    user: window.sessionUser || '',
-                    token: window.API_TOKEN
-                })
-            }).then(r => r.json());
-        });
-
-        const results = await Promise.all(requests);
-        const failed = results.filter(r => !r.success);
-
-        if (failed.length > 0) {
-            throw new Error(failed[0].error || failed[0].message || "Some items failed to save.");
+        const cfg = INCOMING_CONFIGS[activeIncomingKey];
+        if (!cfg) {
+            console.error("submitIncomingReceived: no matching INCOMING_CONFIGS entry for activeIncomingKey =", activeIncomingKey);
+            showIncomingAlert("No incoming category is active. Please close this form and reopen it from INCOMING REQUEST & RELEASED / TRANSFER / PULL OUT, then try again.");
+            return;
         }
 
-        showModal("RECEIVED", "Selected items were marked as received.", "success");
-        fetchIncomingRows();
+        const checked = Array.from(document.querySelectorAll('.incoming-row-checkbox:checked'));
+        console.log("submitIncomingReceived: checked rows =", checked.length, "of", incomingFetchedRows.length, "fetched");
+        if (checked.length === 0) {
+            showIncomingAlert("Please check at least one row in the table, then click RECEIVED.");
+            return;
+        }
+
+        const total = checked.length;
+        let completed = 0;
+        const results = [];
+
+        showIncomingProgressModal();
+        updateIncomingProgress(0);
+
+        // Sequential (not Promise.all) so the progress bar reflects real,
+        // per-item completion rather than a fake animation.
+        for (const cb of checked) {
+            const idx = Number(cb.getAttribute('data-index'));
+            const item = incomingFetchedRows[idx];
+            if (!item) {
+                console.error("submitIncomingReceived: no fetched row at index", idx, "— table may be stale, try UPLOAD again.");
+                results.push({ success: false, error: "A selected row is out of date. Please click UPLOAD again and retry." });
+                completed++;
+                updateIncomingProgress(Math.round((completed / total) * 100));
+                continue;
+            }
+
+            const tr = cb.closest('tr');
+            const expDateInput = tr ? tr.querySelector('.incoming-exp-date') : null;
+            const qtyInput = tr ? tr.querySelector('.incoming-qty') : null;
+            const remarksInput = tr ? tr.querySelector('.incoming-remarks') : null;
+            const expDate = expDateInput ? expDateInput.value : '';
+            // QTY is editable in the table for corrections — send the
+            // (possibly corrected) input value instead of the originally
+            // fetched item.qty. Falls back to the original value if the
+            // field was somehow left blank.
+            const qty = (qtyInput && qtyInput.value.trim() !== '') ? qtyInput.value.trim() : item.qty;
+            const remarks = remarksInput ? remarksInput.value.trim() : '';
+
+            // Only the source sheet + row/qty/exp/remarks data are sent.
+            // Which archive sheet it lands on, which columns get marked,
+            // and the serial number are all resolved server-side (Code.gs)
+            // from sourceSheet alone — never trusted from the client. The
+            // backend already writes remarks into the 4th column of each
+            // sheet's own EXP/QTY/UOM/REMARKS write-back block (that lands
+            // on column N for TRANSFER, column R for REQUEST and RTV) —
+            // i.e. the correct REMARKS column for that sheet's own layout.
+            let result;
+            try {
+                result = await fetch(window.API, {
+                    method: "POST",
+                    body: JSON.stringify({
+                        action: "markIncomingReceived",
+                        sourceSheet: cfg.sheet,
+                        rowIndex: item.rowIndex,
+                        expDate: expDate,
+                        qty: qty,
+                        uom: item.uom,
+                        remarks: remarks,
+                        user: window.sessionUser || '',
+                        token: window.API_TOKEN
+                    })
+                }).then(r => r.json());
+            } catch (networkErr) {
+                console.error("submitIncomingReceived: network/fetch error for row", item.rowIndex, networkErr);
+                result = { success: false, error: "Network error while saving row " + item.rowIndex + ": " + networkErr.message };
+            }
+
+            results.push(result);
+            completed++;
+            updateIncomingProgress(Math.round((completed / total) * 100));
+        }
+
+        const failed = results.filter(r => !r || !r.success);
+        if (failed.length > 0) {
+            throw new Error((failed[0] && (failed[0].error || failed[0].message)) || "Some items failed to save.");
+        }
+
+        hideIncomingProgressModal();
+
+        showModal("RECEIVED", "SUCCESSFULLY RECEIVED... INVENTORY UPDATED..", "success");
+
+        clearIncomingForm();
     } catch (error) {
+        hideIncomingProgressModal();
         console.error("Mark Received Error:", error);
-        showCustomAlert("Error saving record: " + error.message);
-    } finally {
-        if (typeof hideSeaWaveLoader === 'function') hideSeaWaveLoader();
+        showIncomingAlert("Error saving record: " + error.message);
     }
 }

@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <link rel="stylesheet" href="style.css">
     <script src="config.js"></script>
-    <title>Mothers Wonderland</title>
+    <title>MW FORMS SYSTEM</title>
     <link rel="icon" type="image/png" href="BETA.png">
     <link href="https://fonts.googleapis.com/css2?family=Roboto+Mono:wght@400;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
@@ -96,7 +96,7 @@
         }
 
         .nav-icon-btn {
-            min-height: 95px !important;
+            min-height: 44px !important;
         }
 
         button:hover,
@@ -180,6 +180,47 @@
         @keyframes mwModalPop {
             from { opacity: 0; transform: scale(0.94) translateY(8px); }
             to   { opacity: 1; transform: scale(1) translateY(0); }
+        }
+
+        /* ==========================================
+           OUTGOING NAV BUTTON — 3D animated icon button
+           Same push/lift language as .nav-icon-btn/.modal-btn above, plus
+           an always-on floating/tilting icon animation so it visibly reads
+           as "3D animated" even before the user touches it.
+           ========================================== */
+        .btn-3d {
+            position: relative;
+            transform: translateY(0) scale(1);
+            box-shadow: 0 4px 0 rgba(0,0,0,0.35), 0 6px 12px rgba(0,0,0,0.25);
+            transition: transform 0.12s ease, box-shadow 0.12s ease, filter 0.12s ease;
+            will-change: transform;
+        }
+        .btn-3d:hover {
+            transform: translateY(-3px) scale(1.02);
+            box-shadow: 0 7px 0 rgba(0,0,0,0.35), 0 12px 18px rgba(0,0,0,0.3);
+            filter: brightness(1.06);
+        }
+        .btn-3d:active {
+            transform: translateY(2px) scale(0.98);
+            box-shadow: 0 1px 0 rgba(0,0,0,0.35), 0 2px 4px rgba(0,0,0,0.25);
+            filter: brightness(0.96);
+        }
+        .btn-3d:disabled {
+            transform: none;
+            box-shadow: none;
+            filter: grayscale(0.3) opacity(0.6);
+            cursor: not-allowed;
+        }
+
+        .icon-3d-anim {
+            display: inline-block;
+            animation: icon3dFloat 2.2s ease-in-out infinite;
+            text-shadow: 0 6px 8px rgba(0,0,0,0.35);
+            transform-style: preserve-3d;
+        }
+        @keyframes icon3dFloat {
+            0%, 100% { transform: translateY(0) rotateX(0deg) rotateY(0deg); }
+            50%      { transform: translateY(-5px) rotateX(10deg) rotateY(-8deg); }
         }
 
         /* Flat icon-only close/X buttons (transparent background) opt out
@@ -295,33 +336,26 @@
                     <div id="defaultWelcomeView" style="display: flex; flex-direction: column; justify-content: flex-start; align-items: center; height: 100%; width: 100%; padding-top: 120px; padding-bottom: 10px; text-align: center; box-sizing: border-box;">
                         <h2 style="margin-top: 0px; margin-bottom: 12px; font-size: 30px; letter-spacing: 2px; color: #456805; -webkit-text-stroke: 1px #030303;">WELCOME TO MOTHER'S WONDERLAND FORM DASHBOARD</h2>
 
-                        <!-- 2x2 (+1 full-width) Grid Layout Container -->
-                        <div class="icon-nav" id="mainNav" style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px; align-items: center; width: 100%; max-width: 650px; margin: 0 auto;">
+                        <!-- Row layout matching the OUTGOING/INCOMING category picker
+                             style: icon on top, label below, uniform fixed-width cards. -->
+                        <div class="icon-nav" id="mainNav" style="display: flex; justify-content: center; gap: 20px; width: 100%; max-width: 800px; margin: 0 auto;">
 
-                            <button class="nav-icon-btn" onclick="openModule('REPORT')" style="display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; padding: 12px 10px; min-height: 95px; border-radius: 12px; cursor: pointer; background: rgba(144, 168, 168, 0.35); border: 1.5px solid rgba(0, 0, 0, 0.4); color: #111; backdrop-filter: blur(10px); transition: all 0.3s ease;">
-                                <i class="fa-solid fa-chart-line" style="font-size: 1.6rem; color: #111;"></i>
-                                <span style="font-family: 'Roboto Mono', monospace; font-size: 0.75rem; font-weight: 700; text-align: center; letter-spacing: 1px;">REPORT AND HISTORY</span>
+                            <button class="nav-icon-btn btn-3d" onclick="openModule('REPORT')" style="flex: 0 0 240px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; padding: 15px 10px; min-height: 110px; border-radius: 12px; cursor: pointer; background: rgba(144, 168, 168, 0.35); border: 1.5px solid rgba(0, 0, 0, 0.4); color: #111; backdrop-filter: blur(10px); transition: all 0.3s ease;">
+                                <i class="fa-solid fa-chart-line icon-3d-anim" style="font-size: 1.8rem; color: #111;"></i>
+                                <span style="font-family: 'Roboto Mono', monospace; font-size: 0.8rem; font-weight: 700; text-align: center; letter-spacing: 1px;">REPORT AND HISTORY</span>
                             </button>
 
-                            <button class="nav-icon-btn" onclick="openModule('REQUEST_AND_RELEASED_FORM')" style="display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; padding: 12px 10px; min-height: 95px; border-radius: 12px; cursor: pointer; background: rgba(144, 168, 168, 0.35); border: 1.5px solid rgba(0, 0, 0, 0.4); color: #111; backdrop-filter: blur(10px); transition: all 0.3s ease;">
-                                <i class="fa-solid fa-file-invoice" style="font-size: 1.6rem; color: #111;"></i>
-                                <span style="font-family: 'Roboto Mono', monospace; font-size: 0.75rem; font-weight: 700; text-align: center; letter-spacing: 1px;">REQUEST & RELEASED FORM</span>
+                            <!-- OUTGOING: consolidates REQUEST & RELEASED / TRANSFER / PULLOUT
+                                 forms behind one 3D animated icon button + category modal. -->
+                            <button class="nav-icon-btn btn-3d" onclick="openModule('OUTGOING')" style="flex: 0 0 240px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; padding: 15px 10px; min-height: 110px; border-radius: 12px; cursor: pointer; background: rgba(144, 168, 168, 0.35); border: 1.5px solid rgba(0, 0, 0, 0.4); color: #111; backdrop-filter: blur(10px); transition: all 0.3s ease;">
+                                <i class="fa-solid fa-dolly icon-3d-anim" style="font-size: 1.8rem; color: #111;"></i>
+                                <span style="font-family: 'Roboto Mono', monospace; font-size: 0.8rem; font-weight: 700; text-align: center; letter-spacing: 1px;">OUTGOING</span>
                             </button>
 
-                            <button class="nav-icon-btn" onclick="openModule('TRANSFER_FORM')" style="display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; padding: 12px 10px; min-height: 95px; border-radius: 12px; cursor: pointer; background: rgba(144, 168, 168, 0.35); border: 1.5px solid rgba(0, 0, 0, 0.4); color: #111; backdrop-filter: blur(10px); transition: all 0.3s ease;">
-                                <i class="fa-solid fa-right-left" style="font-size: 1.6rem; color: #111;"></i>
-                                <span style="font-family: 'Roboto Mono', monospace; font-size: 0.75rem; font-weight: 700; text-align: center; letter-spacing: 1px;">TRANSFER FORM</span>
-                            </button>
-
-                            <button class="nav-icon-btn" onclick="openModule('PULLOUT_FORM')" style="display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; padding: 12px 10px; min-height: 95px; border-radius: 12px; cursor: pointer; background: rgba(144, 168, 168, 0.35); border: 1.5px solid rgba(0, 0, 0, 0.4); color: #111; backdrop-filter: blur(10px); transition: all 0.3s ease;">
-                                <i class="fa-solid fa-file-arrow-down" style="font-size: 1.6rem; color: #111;"></i>
-                                <span style="font-family: 'Roboto Mono', monospace; font-size: 0.75rem; font-weight: 700; text-align: center; letter-spacing: 1px;">PULLOUT FORM</span>
-                            </button>
-
-                            <!-- NEW: INCOMING nav button (spans both columns, icon added) -->
-                            <button class="nav-icon-btn" onclick="openModule('INCOMING')" style="grid-column: span 2; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; padding: 12px 10px; min-height: 95px; border-radius: 12px; cursor: pointer; background: rgba(144, 168, 168, 0.35); border: 1.5px solid rgba(0, 0, 0, 0.4); color: #111; backdrop-filter: blur(10px); transition: all 0.3s ease;">
-                                <i class="fa-solid fa-truck-ramp-box" style="font-size: 1.6rem; color: #111;"></i>
-                                <span style="font-family: 'Roboto Mono', monospace; font-size: 0.75rem; font-weight: 700; text-align: center; letter-spacing: 1px;">INCOMING</span>
+                            <!-- NEW: INCOMING nav button (icon added) -->
+                            <button class="nav-icon-btn btn-3d" onclick="openModule('INCOMING')" style="flex: 0 0 240px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; padding: 15px 10px; min-height: 110px; border-radius: 12px; cursor: pointer; background: rgba(144, 168, 168, 0.35); border: 1.5px solid rgba(0, 0, 0, 0.4); color: #111; backdrop-filter: blur(10px); transition: all 0.3s ease;">
+                                <i class="fa-solid fa-truck-ramp-box icon-3d-anim" style="font-size: 1.8rem; color: #111;"></i>
+                                <span style="font-family: 'Roboto Mono', monospace; font-size: 0.8rem; font-weight: 700; text-align: center; letter-spacing: 1px;">INCOMING</span>
                             </button>
 
                         </div>
@@ -329,6 +363,7 @@
 
                     <!-- Individual Module Views -->
                     <div id="mod-REPORT" class="module-view" style="display:none;"></div>
+                    <div id="mod-OUTGOING" class="module-view" style="display:none;"></div>
                     <div id="mod-REQUEST_AND_RELEASED_FORM" class="module-view" style="display:none;"></div>
                     <div id="mod-TRANSFER_FORM" class="module-view" style="display:none;"></div>
                     <div id="mod-PULLOUT_FORM" class="module-view" style="display:none;"></div>

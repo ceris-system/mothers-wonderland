@@ -83,10 +83,16 @@
 
         </div>
 
-        <!-- Automatic Current Date Display -->
-        <div style="display: flex; align-items: center; gap: 10px;">
-            <span style="font-weight: bold; color: #000; text-transform: uppercase;">DATE:</span>
-            <input type="text" id="formattedDateDisplay" readonly style="padding: 6px 10px; background: #f4f4f4; border: 1px solid #000; border-radius: 4px; color: #000; font-family: inherit; outline: none; width: 170px; text-align: center; font-weight: bold;">
+        <!-- Auto Serial Number (above Date) + Automatic Current Date Display -->
+        <div style="display: flex; flex-direction: column; align-items: flex-end; gap: 8px;">
+            <div style="display: flex; align-items: center; gap: 10px;">
+                <span style="font-weight: bold; color: #000; text-transform: uppercase;">NO.:</span>
+                <input type="text" id="serialNoDisplay" readonly placeholder="LOADING..." style="padding: 6px 10px; background: #f4f4f4; border: 1px solid #000; border-radius: 4px; color: #000; font-family: inherit; outline: none; width: 170px; text-align: center; font-weight: bold; letter-spacing: 0.5px;">
+            </div>
+            <div style="display: flex; align-items: center; gap: 10px;">
+                <span style="font-weight: bold; color: #000; text-transform: uppercase;">DATE:</span>
+                <input type="text" id="formattedDateDisplay" readonly style="padding: 6px 10px; background: #f4f4f4; border: 1px solid #000; border-radius: 4px; color: #000; font-family: inherit; outline: none; width: 170px; text-align: center; font-weight: bold;">
+            </div>
         </div>
 
     </div>
@@ -119,7 +125,7 @@
                 <thead>
                     <!-- Section Group Headers -->
                     <tr style="background: #f8f9fa; color: #555; text-transform: uppercase; font-size: 0.7rem; letter-spacing: 0.5px; border-bottom: 1px solid #e0e0e0;">
-                        <th colspan="10" style="padding: 8px 10px; font-weight: 700; color: #111;">TRANSFER INFORMATION</th>
+                        <th colspan="11" style="padding: 8px 10px; font-weight: 700; color: #111;">TRANSFER INFORMATION</th>
                     </tr>
                     <!-- Main Column Headers -->
                     <tr style="background: #111; color: #fff; position: sticky; top: 0; z-index: 2;">
@@ -133,6 +139,7 @@
                         <th style="padding: 10px 8px; font-weight: 700; text-align: center; width: 60px;">COST</th>
                         <th style="padding: 10px 8px; font-weight: 700; text-align: center; width: 60px;">SRP</th>
                         <th style="padding: 10px 8px; font-weight: 600; text-align: center; width: 80px;">TRANSFER QTY</th>
+                        <th style="padding: 10px 8px; font-weight: 600; width: 130px;">REMARKS</th>
                         <th style="padding: 10px 8px; font-weight: 600; text-align: center; width: 40px;" class="no-print"></th>
                     </tr>
                 </thead>
