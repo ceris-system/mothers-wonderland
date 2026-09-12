@@ -289,6 +289,11 @@ function showDashboard(clientName, userName) {
     
     const displayUser = document.getElementById('displayUsername');
     if (displayUser) displayUser.innerText = formattedGreeting;
+
+    // Start loading the Incoming-module message count right away, so it's
+    // already cached by the time the user gets around to opening that
+    // module — see primeIncomingMessagesCache / showIncomingMailNotification.
+    if (typeof primeIncomingMessagesCache === 'function') primeIncomingMessagesCache();
 }
 
 function showModal(title, message, type) {
@@ -3572,6 +3577,18 @@ let incomingFetchedRows = [];
 // ==========================================
 let incomingMessagesCache = null;
 
+// Fired the moment the dashboard is shown (fresh login OR a page-reload
+// session restore — see showDashboard) so the message count is already
+// sitting in memory by the time the user actually opens the Incoming
+// module. showIncomingMailNotification() below renders straight from
+// this cache instead of waiting on a network round trip, which is what
+// caused the popup delay.
+function primeIncomingMessagesCache() {
+    fetchIncomingMessages().then(result => {
+        incomingMessagesCache = (result && result.totalCount) ? result : null;
+    });
+}
+
 async function fetchIncomingMessages() {
     const scope = getSessionScope();
     const user = window.sessionUser || loggedInUser || localStorage.getItem('activeUser') || '';
@@ -3618,25 +3635,51 @@ function injectIncomingMailStyles() {
 
 // Fetches pending counts and, if any exist, pops the envelope badge into
 // the Incoming module's header. Called every time that module is opened.
+// Renders INSTANTLY from incomingMessagesCache if it's already primed
+// (see primeIncomingMessagesCache, fired at dashboard load) — no waiting
+// on a fetch just to show the badge — then quietly re-fetches in the
+// background afterward to catch anything that changed since priming.
 async function showIncomingMailNotification(container) {
     if (!container) return;
     const oldBadge = container.querySelector('#incomingMailBadge');
     if (oldBadge) oldBadge.remove();
 
+    if (incomingMessagesCache) {
+        renderIncomingMailBadge(container, incomingMessagesCache);
+    }
+
     const result = await fetchIncomingMessages();
-    if (!container.isConnected) return; // module was closed/navigated away while fetching
+    if (!container.isConnected) return; // module closed/navigated away while fetching
+
     if (!result || !result.totalCount) {
         incomingMessagesCache = null;
+        const staleBadge = container.querySelector('#incomingMailBadge');
+        if (staleBadge) staleBadge.remove();
         return;
     }
 
     incomingMessagesCache = result;
+    // Only touch the DOM again if the count actually changed from what
+    // was already shown instantly above — avoids an unnecessary re-pop
+    // animation on the common case where nothing changed.
+    const shownBadge = container.querySelector('#incomingMailBadge');
+    const shownCount = shownBadge ? shownBadge.dataset.count : null;
+    if (String(result.totalCount) !== shownCount) {
+        renderIncomingMailBadge(container, result);
+    }
+}
+
+function renderIncomingMailBadge(container, result) {
+    const existing = container.querySelector('#incomingMailBadge');
+    if (existing) existing.remove();
+
     injectIncomingMailStyles();
 
     const badge = document.createElement('button');
     badge.id = 'incomingMailBadge';
     badge.type = 'button';
     badge.title = 'You have new messages';
+    badge.dataset.count = String(result.totalCount);
     badge.onclick = openIncomingMailDetails;
     badge.style.cssText = 'position: absolute; top: -8px; right: 48px; z-index: 11; display: flex; align-items: center; gap: 7px; background: #fff; border: 1.5px solid rgba(0,0,0,0.4); border-radius: 20px; padding: 6px 14px 6px 10px; cursor: pointer; box-shadow: 0 4px 10px rgba(0,0,0,0.2);';
     badge.innerHTML = `
