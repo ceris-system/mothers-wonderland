@@ -3558,6 +3558,154 @@ let activeIncomingKey = '';
 let incomingFetchedRows = [];
 
 // ==========================================
+// INCOMING MODULE — MAIL NOTIFICATION
+// Shown every time the Incoming Forms module is opened. If the logged-in
+// department has 1+ pending REQUEST/TRANSFER/PULL OUT items waiting for
+// it, a mail-envelope badge pops in next to the module title. Clicking
+// it opens a breakdown of exactly how many are pending and who sent
+// them (e.g. "(3) PENDING FOR TRANSFER FROM BNB HOTEL").
+//
+// Counting rule (matches the backend's handleGetIncomingMessages): one
+// "message" = one unique (sender department, date) pair — several
+// pending rows from the same sender on the same date collapse into one
+// message, but the same sender sending again on a NEW date adds another.
+// ==========================================
+let incomingMessagesCache = null;
+
+async function fetchIncomingMessages() {
+    const scope = getSessionScope();
+    const user = window.sessionUser || loggedInUser || localStorage.getItem('activeUser') || '';
+
+    try {
+        const url = `${window.API}?action=getIncomingMessages`
+            + `&incomingDept=${encodeURIComponent(scope.isAdmin ? '' : scope.client)}`
+            + `&user=${encodeURIComponent(user)}`
+            + `&token=${encodeURIComponent(window.API_TOKEN)}`;
+
+        const response = await fetch(url);
+        const result = await response.json();
+        if (!result.success) throw new Error(result.error || "Failed to fetch incoming messages.");
+        return result;
+    } catch (error) {
+        console.error("fetchIncomingMessages error:", error);
+        return null;
+    }
+}
+
+function injectIncomingMailStyles() {
+    if (document.getElementById('incomingMailStyles')) return;
+    const style = document.createElement('style');
+    style.id = 'incomingMailStyles';
+    style.textContent = `
+        @keyframes incomingMailPop {
+            0% { transform: scale(0.5); opacity: 0; }
+            60% { transform: scale(1.08); opacity: 1; }
+            100% { transform: scale(1); opacity: 1; }
+        }
+        @keyframes incomingMailShake {
+            0%, 100% { transform: rotate(0deg); }
+            20% { transform: rotate(-8deg); }
+            40% { transform: rotate(8deg); }
+            60% { transform: rotate(-6deg); }
+            80% { transform: rotate(6deg); }
+        }
+        #incomingMailBadge { animation: incomingMailPop 0.35s ease; }
+        #incomingMailBadge:hover { filter: brightness(0.97); }
+        #incomingMailBadge i.fa-envelope { animation: incomingMailShake 1.8s ease-in-out 0.4s 2; display: inline-block; }
+    `;
+    document.head.appendChild(style);
+}
+
+// Fetches pending counts and, if any exist, pops the envelope badge into
+// the Incoming module's header. Called every time that module is opened.
+async function showIncomingMailNotification(container) {
+    if (!container) return;
+    const oldBadge = container.querySelector('#incomingMailBadge');
+    if (oldBadge) oldBadge.remove();
+
+    const result = await fetchIncomingMessages();
+    if (!container.isConnected) return; // module was closed/navigated away while fetching
+    if (!result || !result.totalCount) {
+        incomingMessagesCache = null;
+        return;
+    }
+
+    incomingMessagesCache = result;
+    injectIncomingMailStyles();
+
+    const badge = document.createElement('button');
+    badge.id = 'incomingMailBadge';
+    badge.type = 'button';
+    badge.title = 'You have new messages';
+    badge.onclick = openIncomingMailDetails;
+    badge.style.cssText = 'position: absolute; top: -8px; right: 48px; z-index: 11; display: flex; align-items: center; gap: 7px; background: #fff; border: 1.5px solid rgba(0,0,0,0.4); border-radius: 20px; padding: 6px 14px 6px 10px; cursor: pointer; box-shadow: 0 4px 10px rgba(0,0,0,0.2);';
+    badge.innerHTML = `
+        <i class="fa-solid fa-envelope" style="color: #d81b60; font-size: 1rem;"></i>
+        <span style="font-family: 'Roboto Mono', monospace; font-size: 0.7rem; font-weight: 700; color: #111; letter-spacing: 0.5px; white-space: nowrap;">
+            YOU HAVE (${result.totalCount}) NEW MESSAGE${result.totalCount > 1 ? 'S' : ''}
+        </span>
+    `;
+
+    // The module's title block is already position:relative (see
+    // loadIncomingModuleCode), so an absolutely-positioned child anchors
+    // to it correctly, right next to the existing close button.
+    const header = container.querySelector('div[style*="border-bottom"]') || container;
+    header.appendChild(badge);
+}
+
+// Detail popup: one line per sender per category, e.g.
+// "(3) PENDING FOR TRANSFER FROM BNB HOTEL". Built entirely from the
+// last-fetched incomingMessagesCache (no re-fetch needed on click).
+function openIncomingMailDetails() {
+    if (!incomingMessagesCache) return;
+    const data = incomingMessagesCache;
+
+    const existing = document.getElementById('incomingMailDetailsModal');
+    if (existing) existing.remove();
+
+    let bodyHtml = '';
+    ['REQUEST', 'TRANSFER', 'RTV'].forEach(key => {
+        const cat = data.categories && data.categories[key];
+        if (!cat || !cat.total) return;
+        (cat.bySender || []).forEach(entry => {
+            if (!entry.count) return;
+            bodyHtml += `
+                <div style="display: flex; align-items: flex-start; gap: 10px; padding: 10px 4px; border-bottom: 1px solid rgba(0,0,0,0.08);">
+                    <i class="fa-solid fa-circle-info" style="color: #00bcd4; margin-top: 2px; flex-shrink: 0;"></i>
+                    <p style="margin: 0; font-size: 0.8rem; color: #222; line-height: 1.5;">
+                        <strong>(${entry.count})</strong> PENDING FOR <strong>${escapeHtml(cat.label)}</strong> FROM "<strong>${escapeHtml(entry.sender)}</strong>"
+                    </p>
+                </div>
+            `;
+        });
+    });
+
+    if (!bodyHtml) {
+        bodyHtml = `<p style="text-align:center; color:#888; padding: 24px 0; font-size: 0.8rem;">No pending messages.</p>`;
+    }
+
+    const modal = document.createElement('div');
+    modal.id = 'incomingMailDetailsModal';
+    modal.style.cssText = 'position: fixed; inset: 0; background: rgba(0,0,0,0.55); display: flex; align-items: center; justify-content: center; z-index: 100000;';
+    modal.innerHTML = `
+        <div style="background: #fff; width: 420px; max-width: 90vw; max-height: 80vh; border-radius: 14px; overflow: hidden; box-shadow: 0 20px 50px rgba(0,0,0,0.4); font-family: 'Roboto Mono', monospace; display: flex; flex-direction: column;">
+            <div style="padding: 18px 20px; border-bottom: 1px solid rgba(0,0,0,0.1); display: flex; align-items: center; justify-content: space-between;">
+                <span style="font-weight: 700; font-size: 0.85rem; letter-spacing: 1px; color: #111;">
+                    <i class="fa-solid fa-envelope-open-text" style="margin-right: 8px; color: #d81b60;"></i>NEW MESSAGES
+                </span>
+                <button type="button" class="app-close-btn" onclick="document.getElementById('incomingMailDetailsModal').remove()">
+                    <i class="fa-solid fa-xmark"></i>
+                </button>
+            </div>
+            <div style="padding: 6px 20px; overflow-y: auto; flex: 1;">
+                ${bodyHtml}
+            </div>
+        </div>
+    `;
+    document.body.appendChild(modal);
+}
+
+// ==========================================
 // 3D ANIMATED BUTTON STYLE (Incoming module)
 // Injected once into <head>; buttons opt in via class="btn-3d".
 // ==========================================
@@ -3630,6 +3778,12 @@ async function loadIncomingModuleCode(container) {
                 </div>
             </div>
         `;
+
+        // Pop the mail-envelope notification (if any pending items exist)
+        // every time the Incoming Forms module is opened. Not awaited —
+        // the module UI above renders immediately; the badge pops in as
+        // soon as the count comes back.
+        showIncomingMailNotification(container);
 
     } catch (error) {
         console.error(error);
