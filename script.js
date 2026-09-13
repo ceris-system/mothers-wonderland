@@ -531,7 +531,15 @@ function injectAppPrintStyles() {
             /* Everything inside the printable target renders plain black
                on white on paper, regardless of its on-screen dark/glass
                theme (the outgoing forms' glass card, the history/logs
-               modals' dark panel, etc). */
+               modals' dark panel, etc). min-height/max-height are also
+               neutralized as a safety net against any on-screen "fill the
+               viewport" wrapper (min-height: 100vh and similar) that
+               might otherwise reserve blank vertical space on the
+               printed page below the actual content. This is
+               deliberately narrow — it only clamps min/max, it never
+               forces height:auto — so it can't collapse an element that
+               genuinely needs an explicit height (e.g. a fixed-height
+               logo image). */
             .print-target-active * {
                 background: transparent !important;
                 color: #000 !important;
@@ -539,6 +547,8 @@ function injectAppPrintStyles() {
                 text-shadow: none !important;
                 filter: none !important;
                 backdrop-filter: none !important;
+                min-height: 0 !important;
+                max-height: none !important;
             }
 
             /* Known wrapper elements (the outgoing forms' fixed overlay +
@@ -1121,6 +1131,16 @@ async function triggerPrintRequestAndReleasedForm() {
 async function loadReportModuleCode(container) {
     if (!container) return;
     try {
+        const scope = getSessionScope();
+        // Non-admins can see this button but can't use it — it's visibly
+        // greyed out and clicking it (still wired to selectReportCategory,
+        // which re-checks admin status itself as the real gate) just
+        // explains why instead of silently doing nothing.
+        const userLogsBtnStyle = scope.isAdmin
+            ? 'flex: 0 0 240px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; padding: 15px 10px; min-height: 110px; border-radius: 12px; cursor: pointer; background: rgba(144, 168, 168, 0.35); border: 1.5px solid rgba(0, 0, 0, 0.4); color: #111; backdrop-filter: blur(10px); transition: all 0.3s ease;'
+            : 'flex: 0 0 240px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; padding: 15px 10px; min-height: 110px; border-radius: 12px; cursor: not-allowed; background: rgba(144, 168, 168, 0.15); border: 1.5px solid rgba(0, 0, 0, 0.2); color: #666; backdrop-filter: blur(10px); opacity: 0.6;';
+        const userLogsBtnTitle = scope.isAdmin ? '' : 'title="Admins only"';
+
         container.innerHTML = `
             <div style="width: 100%; height: 100%; padding: 25px; box-sizing: border-box; display: flex; flex-direction: column; align-items: stretch;">
                 <div style="margin-bottom: 35px; border-bottom: 1px solid rgba(0, 0, 0, 0.2); padding-bottom: 15px; position: relative;">
@@ -1158,9 +1178,9 @@ async function loadReportModuleCode(container) {
                             <span style="font-family: 'Roboto Mono', monospace; font-size: 0.8rem; font-weight: 700; text-align: center; letter-spacing: 1px;">PULL OUT HISTORY</span>
                         </button>
 
-                        <button class="nav-icon-btn" onclick="selectReportCategory('USER_LOGS')" style="flex: 0 0 240px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; padding: 15px 10px; min-height: 110px; border-radius: 12px; cursor: pointer; background: rgba(144, 168, 168, 0.35); border: 1.5px solid rgba(0, 0, 0, 0.4); color: #111; backdrop-filter: blur(10px); transition: all 0.3s ease;">
-                            <i class="fa-solid fa-user-clock" style="font-size: 1.8rem; color: #111;"></i>
-                            <span style="font-family: 'Roboto Mono', monospace; font-size: 0.8rem; font-weight: 700; text-align: center; letter-spacing: 1px;">USER LOGS HISTORY</span>
+                        <button class="nav-icon-btn" onclick="selectReportCategory('USER_LOGS')" ${userLogsBtnTitle} style="${userLogsBtnStyle}">
+                            <i class="fa-solid fa-user-clock" style="font-size: 1.8rem; color: ${scope.isAdmin ? '#111' : '#666'};"></i>
+                            <span style="font-family: 'Roboto Mono', monospace; font-size: 0.8rem; font-weight: 700; text-align: center; letter-spacing: 1px;">USER LOGS HISTORY${scope.isAdmin ? '' : ' <i class=\'fa-solid fa-lock\' style=\'font-size: 0.7rem; margin-left: 4px;\'></i>'}</span>
                         </button>
                     </div>
                 </div>
@@ -1185,6 +1205,10 @@ function selectReportCategory(category) {
         logButtonClick('INVENTORY_BUTTON_CLICKED');
         openInventoryModal();
     } else if (category === 'USER_LOGS') {
+        if (!getSessionScope().isAdmin) {
+            showCustomAlert('User Logs History is restricted to admin accounts.');
+            return;
+        }
         logButtonClick('USER_LOGS_HISTORY_BUTTON_CLICKED');
         openUserLogsModal();
     } else if (HISTORY_CONFIGS[category]) {
@@ -3227,6 +3251,12 @@ let cachedUserLogsRows = [];
 const USER_LOGS_HEADERS = ['USERNAME', 'DEPARTMENT', 'ACTION', 'TIMESTAMP', 'STATUS'];
 
 function openUserLogsModal() {
+    const scope = getSessionScope();
+    if (!scope.isAdmin) {
+        showCustomAlert('User Logs History is restricted to admin accounts.');
+        return;
+    }
+
     let modal = document.getElementById('userLogsModal');
 
     if (!modal) {
