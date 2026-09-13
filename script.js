@@ -483,7 +483,7 @@ function injectAppPrintStyles() {
         @media print {
             @page {
                 size: letter portrait; /* 8.5in x 11in — "short" bond paper */
-                margin: 0.4in;
+                margin: 0.5in;
             }
 
             /* Some app shells pin html/body to a fixed viewport height
@@ -516,7 +516,27 @@ function injectAppPrintStyles() {
                 max-width: 100% !important;
                 max-height: none !important;
                 margin: 0 !important;
-                padding: 0.1in !important;
+                /* This padding is the real safety net for page margins —
+                   the @page rule above only applies when the print
+                   dialog's own Margins setting is "Default"; if someone
+                   has it set to "None" (as Chrome/Edge remember per
+                   printer), @page is ignored entirely and content would
+                   otherwise butt right up against the paper edge. Padding
+                   on the actual content always applies regardless of that
+                   dialog setting. Top and right get extra room since
+                   those are the edges that read as cramped in practice. */
+                padding: 0.65in 0.6in 0.4in 0.4in !important;
+                /* THE FIX: without border-box, this element's width:100%
+                   is a pure content-box — the 0.6in + 0.4in of horizontal
+                   padding above gets added ON TOP of that 100%, so the box
+                   is actually 1in wider than the page's printable area.
+                   Since it's pinned to left:0, all of that extra width
+                   spills off the RIGHT edge — which is exactly why the
+                   right margin disappeared while the left one (anchored,
+                   untouched) still looked fine. border-box folds the
+                   padding back inside the 100%, so the visible content
+                   area is genuinely centered with margin on both sides. */
+                box-sizing: border-box !important;
                 background: #fff !important;
                 color: #000 !important;
                 box-shadow: none !important;
@@ -549,6 +569,14 @@ function injectAppPrintStyles() {
                 backdrop-filter: none !important;
                 min-height: 0 !important;
                 max-height: none !important;
+                /* Neutralizes any fixed pixel width baked into the fetched
+                   form markup (e.g. a hardcoded wrapper div several levels
+                   below .print-target-active, which the ">div"/".glass-card"
+                   reset below never reaches). Without this, that wrapper
+                   keeps its on-screen width and spills past the printed
+                   page's right edge — the overlap seen on paper. */
+                max-width: 100% !important;
+                box-sizing: border-box !important;
             }
 
             /* Known wrapper elements (the outgoing forms' fixed overlay +
@@ -581,8 +609,9 @@ function injectAppPrintStyles() {
             }
             .print-target-active table {
                 width: 100% !important;
+                max-width: 100% !important;
                 border-collapse: collapse !important;
-                font-size: 11pt !important;
+                font-size: 12pt !important;
                 white-space: normal !important;
                 table-layout: auto !important;
             }
@@ -594,7 +623,7 @@ function injectAppPrintStyles() {
             }
             .print-target-active th,
             .print-target-active td {
-                font-size: 11pt !important;
+                font-size: 12pt !important;
                 padding: 5px 6px !important;
                 border: 1px solid #000 !important;
                 white-space: normal !important;
@@ -603,7 +632,7 @@ function injectAppPrintStyles() {
             .print-target-active input,
             .print-target-active select,
             .print-target-active textarea {
-                font-size: 11pt !important;
+                font-size: 12pt !important;
                 border: none !important;
                 background: transparent !important;
                 color: #000 !important;
