@@ -209,6 +209,30 @@ async function handleAction(action) {
 
     if (typeof showSeaWaveLoader === 'function') showSeaWaveLoader("AUTHORIZING...");
 
+    // Kick off the pending-messages fetch IN PARALLEL with the login
+    // request itself, using this device's last-known department —
+    // instead of waiting for login to fully succeed first and only then
+    // starting it. That old sequential order (login round-trip, THEN
+    // incoming-messages round-trip) is what made the header badge pop in
+    // late after the dashboard was already visible. Running them
+    // concurrently means the badge is usually already resolved (or very
+    // close to it) by the time login succeeds and the dashboard appears.
+    // Safety: the result is only applied below if the department it was
+    // fetched for actually matches the department this login resolves to.
+    let speculativeIncoming = null;
+    if (action === 'login') {
+        const priorClient = String(localStorage.getItem('sessionClient') || '').trim();
+        const priorIsAdmin = localStorage.getItem('sessionIsAdmin') === '1';
+        if (priorClient || priorIsAdmin) {
+            speculativeIncoming = {
+                dept: priorIsAdmin ? '' : priorClient,
+                isAdmin: priorIsAdmin,
+                user: user,
+                promise: fetchIncomingMessages(priorIsAdmin ? '' : priorClient, user)
+            };
+        }
+    }
+
     try {
         const response = await fetch(API_URL, {
             method: "POST",
@@ -234,6 +258,20 @@ async function handleAction(action) {
                 window.sessionIsAdmin = !!data.isAdmin;
                 localStorage.setItem('sessionClient', window.sessionClient);
                 localStorage.setItem('sessionIsAdmin', window.sessionIsAdmin ? '1' : '0');
+
+                // Hand off the speculative pending-messages fetch (started
+                // above, in parallel with this login request) to
+                // primeIncomingMessagesCache — but only if it was fetched
+                // for the department this login actually resolved to;
+                // otherwise discard it and let a fresh fetch happen.
+                if (speculativeIncoming
+                    && speculativeIncoming.user === window.sessionUser
+                    && speculativeIncoming.isAdmin === window.sessionIsAdmin
+                    && speculativeIncoming.dept === (window.sessionIsAdmin ? '' : window.sessionClient)) {
+                    window.__speculativeIncomingPromise = speculativeIncoming.promise;
+                } else {
+                    window.__speculativeIncomingPromise = null;
+                }
                 
                 // Track & Log login activity upon successful login
                 if (typeof handleUserLoginSuccess === 'function') {
@@ -290,9 +328,9 @@ function showDashboard(clientName, userName) {
     const displayUser = document.getElementById('displayUsername');
     if (displayUser) displayUser.innerText = formattedGreeting;
 
-    // Start loading the Incoming-module message count right away, so it's
-    // already cached by the time the user gets around to opening that
-    // module — see primeIncomingMessagesCache / showIncomingMailNotification.
+    // Pop the pending-messages badge into the header right away. It
+    // paints instantly from a locally-persisted count, then corrects
+    // itself once the live fetch resolves — see primeIncomingMessagesCache.
     if (typeof primeIncomingMessagesCache === 'function') primeIncomingMessagesCache();
 }
 
@@ -422,6 +460,208 @@ function openModule(moduleName) {
         default:
             console.warn("Unknown module identifier:", moduleName);
     }
+}
+
+// ==========================================
+// UNIFIED "PRINT JUST THIS" SYSTEM
+// Every print button in the app (history log, user logs, the 3 outgoing
+// forms) used to call window.print() directly, which printed the ENTIRE
+// visible page — dashboard chrome, backdrop, everything — not just the
+// modal/form the user actually wanted on paper. printOnly(elementId)
+// fixes that: it temporarily relocates the target element to a plain
+// container appended straight to <body> (so no ancestor's fixed height/
+// overflow can ever clip it), applies print-only styling (portrait,
+// short/Letter bond paper, readable font sizes, plain black-on-white
+// regardless of the on-screen dark/glass theme, buttons hidden), prints,
+// then moves everything back exactly where it was.
+// ==========================================
+function injectAppPrintStyles() {
+    if (document.getElementById('appPrintStyles')) return;
+    const style = document.createElement('style');
+    style.id = 'appPrintStyles';
+    style.textContent = `
+        @media print {
+            @page {
+                size: letter portrait; /* 8.5in x 11in — "short" bond paper */
+                margin: 0.4in;
+            }
+
+            /* Some app shells pin html/body to a fixed viewport height
+               with overflow hidden (typical for a full-screen SPA) — that
+               would clip a printed page after the first screen's worth of
+               content. Force normal, unclipped flow for the print job. */
+            html, body {
+                height: auto !important;
+                overflow: visible !important;
+                background: #fff !important;
+            }
+
+            /* Classic "print only this element" technique: hide
+               literally everything, then re-reveal just the flagged
+               printable target (and everything inside it). This works no
+               matter how deeply the target is normally nested. */
+            body.print-mode-active * {
+                visibility: hidden !important;
+            }
+            body.print-mode-active .print-target-active,
+            body.print-mode-active .print-target-active * {
+                visibility: visible !important;
+            }
+            body.print-mode-active .print-target-active {
+                position: absolute !important;
+                top: 0 !important;
+                left: 0 !important;
+                width: 100% !important;
+                height: auto !important;
+                max-width: 100% !important;
+                max-height: none !important;
+                margin: 0 !important;
+                padding: 0.1in !important;
+                background: #fff !important;
+                color: #000 !important;
+                box-shadow: none !important;
+                border: none !important;
+                backdrop-filter: none !important;
+                overflow: visible !important;
+                font-family: 'Roboto Mono', monospace !important;
+                font-size: 12pt !important;
+                line-height: 1.4 !important;
+            }
+
+            /* Everything inside the printable target renders plain black
+               on white on paper, regardless of its on-screen dark/glass
+               theme (the outgoing forms' glass card, the history/logs
+               modals' dark panel, etc). */
+            .print-target-active * {
+                background: transparent !important;
+                color: #000 !important;
+                box-shadow: none !important;
+                text-shadow: none !important;
+                filter: none !important;
+                backdrop-filter: none !important;
+            }
+
+            /* Known wrapper elements (the outgoing forms' fixed overlay +
+               .glass-card, and any nested full-height/scroll box) get
+               their layout reset so the form fills the page naturally
+               instead of staying pinned to its on-screen fixed/scroll
+               box or getting cut off. */
+            .print-target-active > div,
+            .print-target-active .glass-card {
+                position: static !important;
+                display: block !important;
+                width: 100% !important;
+                height: auto !important;
+                max-width: 100% !important;
+                max-height: none !important;
+                margin: 0 !important;
+                padding: 0 !important;
+                overflow: visible !important;
+                border: none !important;
+                border-radius: 0 !important;
+            }
+
+            /* Readable, consistent scale — nothing smaller than 11pt so
+               it stays legible once it's actually on paper. */
+            .print-target-active h1,
+            .print-target-active h2,
+            .print-target-active h3 {
+                font-size: 15pt !important;
+                margin: 0 0 8px !important;
+            }
+            .print-target-active table {
+                width: 100% !important;
+                border-collapse: collapse !important;
+                font-size: 11pt !important;
+                white-space: normal !important;
+                table-layout: auto !important;
+            }
+            .print-target-active thead {
+                display: table-header-group !important; /* repeat header on every page */
+            }
+            .print-target-active tr {
+                page-break-inside: avoid !important;
+            }
+            .print-target-active th,
+            .print-target-active td {
+                font-size: 11pt !important;
+                padding: 5px 6px !important;
+                border: 1px solid #000 !important;
+                white-space: normal !important;
+                word-break: break-word !important;
+            }
+            .print-target-active input,
+            .print-target-active select,
+            .print-target-active textarea {
+                font-size: 11pt !important;
+                border: none !important;
+                background: transparent !important;
+                color: #000 !important;
+                padding: 1px 2px !important;
+            }
+
+            /* Buttons, the close (X) icon, search/filter controls, and
+               anything explicitly flagged .no-print are screen-only
+               chrome — never useful on a printed page. */
+            .print-target-active button,
+            .print-target-active .app-close-btn,
+            .print-target-active .no-print {
+                display: none !important;
+            }
+        }
+    `;
+    document.head.appendChild(style);
+}
+
+// Prints ONLY the element with the given id, on portrait Letter/short
+// bond paper, with the readable print styling above — then restores it
+// to its exact original place in the DOM afterward.
+function printOnly(elementId) {
+    const target = document.getElementById(elementId);
+    if (!target) {
+        console.error("printOnly: element not found:", elementId);
+        window.print(); // fall back rather than silently doing nothing
+        return;
+    }
+
+    injectAppPrintStyles();
+
+    // Relocate the target to a fresh container appended straight to
+    // <body> so no ancestor's fixed height / overflow:hidden can ever
+    // clip the printed page. A comment node marks exactly where to put
+    // it back.
+    const returnMarker = document.createComment('print-return-point');
+    const originalParent = target.parentNode;
+    originalParent.insertBefore(returnMarker, target);
+
+    const printRoot = document.createElement('div');
+    printRoot.id = 'appPrintRoot';
+    printRoot.appendChild(target);
+    document.body.appendChild(printRoot);
+
+    const wasHidden = target.style.display === 'none';
+    if (wasHidden) target.style.display = 'block';
+
+    document.body.classList.add('print-mode-active');
+    target.classList.add('print-target-active');
+
+    let restored = false;
+    const restore = () => {
+        if (restored) return;
+        restored = true;
+        originalParent.insertBefore(target, returnMarker.nextSibling);
+        returnMarker.remove();
+        printRoot.remove();
+        document.body.classList.remove('print-mode-active');
+        target.classList.remove('print-target-active');
+        if (wasHidden) target.style.display = 'none';
+        window.removeEventListener('afterprint', restore);
+    };
+
+    window.addEventListener('afterprint', restore);
+    setTimeout(restore, 3000); // safety net if afterprint never fires (older Safari)
+
+    window.print();
 }
 
 function printTransferForm() {
@@ -670,7 +910,7 @@ async function triggerPrintTransferForm() {
         const serialField = container?.querySelector('#serialNoDisplay');
         if (serialField && result.serial) serialField.value = result.serial;
 
-        window.print();
+        printOnly('mod-TRANSFER_FORM');
         clearTableData();
         loadNextSerialPreview('mod-TRANSFER_FORM', 'TRANSFER');
     } catch (error) {
@@ -776,7 +1016,7 @@ async function triggerPrintPulloutForm() {
         const serialField = container?.querySelector('#serialNoDisplay');
         if (serialField && result.serial) serialField.value = result.serial;
 
-        window.print();
+        printOnly('mod-PULLOUT_FORM');
         clearTableData();
         loadNextSerialPreview('mod-PULLOUT_FORM', 'PULLOUT');
     } catch (error) {
@@ -863,7 +1103,7 @@ async function triggerPrintRequestAndReleasedForm() {
         const serialField = container?.querySelector('#serialNoDisplay');
         if (serialField && result.serial) serialField.value = result.serial;
 
-        window.print();
+        printOnly('mod-REQUEST_AND_RELEASED_FORM');
         clearTableData();
         loadNextSerialPreview('mod-REQUEST_AND_RELEASED_FORM', 'REQUEST_RELEASED');
     } catch (error) {
@@ -2679,7 +2919,7 @@ function openHistoryModal(categoryKey) {
               <i class="fa-solid fa-rotate-right"></i> REFRESH
             </button>
             
-            <button id="historyPrintBtn" onclick="window.print()" style="padding: 10px 20px; background: rgba(0, 255, 136, 0.2); border: 1px solid #00ff88; color: #00ff88; font-weight: bold; border-radius: 4px; cursor: pointer; display: flex; align-items: center; gap: 6px; height: 40px;">
+            <button id="historyPrintBtn" onclick="printOnly('historyPrintableArea')" style="padding: 10px 20px; background: rgba(0, 255, 136, 0.2); border: 1px solid #00ff88; color: #00ff88; font-weight: bold; border-radius: 4px; cursor: pointer; display: flex; align-items: center; gap: 6px; height: 40px;">
               <i class="fa-solid fa-print"></i> PRINT
             </button>
           </div>
@@ -3019,7 +3259,7 @@ function openUserLogsModal() {
                         <i class="fa-solid fa-rotate-right"></i> REFRESH
                     </button>
 
-                    <button id="userLogsPrintBtn" onclick="window.print()" style="padding: 10px 20px; background: rgba(0, 255, 136, 0.2); border: 1px solid #00ff88; color: #00ff88; font-weight: bold; border-radius: 4px; cursor: pointer; display: flex; align-items: center; gap: 6px; height: 40px;">
+                    <button id="userLogsPrintBtn" onclick="printOnly('userLogsPrintableArea')" style="padding: 10px 20px; background: rgba(0, 255, 136, 0.2); border: 1px solid #00ff88; color: #00ff88; font-weight: bold; border-radius: 4px; cursor: pointer; display: flex; align-items: center; gap: 6px; height: 40px;">
                         <i class="fa-solid fa-print"></i> PRINT
                     </button>
                 </div>
@@ -3563,12 +3803,13 @@ let activeIncomingKey = '';
 let incomingFetchedRows = [];
 
 // ==========================================
-// INCOMING MODULE — MAIL NOTIFICATION
-// Shown every time the Incoming Forms module is opened. If the logged-in
-// department has 1+ pending REQUEST/TRANSFER/PULL OUT items waiting for
-// it, a mail-envelope badge pops in next to the module title. Clicking
-// it opens a breakdown of exactly how many are pending and who sent
-// them (e.g. "(3) PENDING FOR TRANSFER FROM BNB HOTEL").
+// PENDING-MESSAGES NOTIFICATION (dashboard header)
+// If the logged-in department has 1+ pending REQUEST/TRANSFER/PULL OUT
+// items waiting for it, a mail-envelope badge shows in the dashboard
+// header — visible immediately on login, next to the username/logout
+// controls. Clicking it opens a breakdown of exactly how many are
+// pending and who sent them (e.g. "(3) PENDING FOR TRANSFER FROM BNB
+// HOTEL").
 //
 // Counting rule (matches the backend's handleGetIncomingMessages): one
 // "message" = one unique (sender department, date) pair — several
@@ -3577,25 +3818,106 @@ let incomingFetchedRows = [];
 // ==========================================
 let incomingMessagesCache = null;
 
+// Scope the locally-persisted badge cache per user, so switching accounts
+// on the same browser doesn't leak one department's pending count into
+// another's instant paint below.
+function getMailCacheStorageKey() {
+    const user = window.sessionUser || loggedInUser || localStorage.getItem('activeUser') || 'default';
+    return 'incomingMailCache_' + user;
+}
+
 // Fired the moment the dashboard is shown (fresh login OR a page-reload
-// session restore — see showDashboard) so the message count is already
-// sitting in memory by the time the user actually opens the Incoming
-// module. showIncomingMailNotification() below renders straight from
-// this cache instead of waiting on a network round trip, which is what
-// caused the popup delay.
+// session restore — see showDashboard). Renders the header badge TWICE:
+// first instantly from whatever was persisted locally last time (no
+// network wait at all — this is what makes it appear immediately instead
+// of popping in late), then again once the fresh fetch resolves, which
+// corrects the count if anything changed since.
 function primeIncomingMessagesCache() {
-    fetchIncomingMessages().then(result => {
+    try {
+        const stored = localStorage.getItem(getMailCacheStorageKey());
+        if (stored) {
+            const parsed = JSON.parse(stored);
+            incomingMessagesCache = (parsed && parsed.totalCount) ? parsed : null;
+            updateDashboardMailBadge(incomingMessagesCache, { persist: false });
+        }
+    } catch (e) { /* ignore corrupt/blocked local cache */ }
+
+    // Prefer the speculative fetch kicked off in parallel with the login
+    // request itself (see handleAction) — it was likely started well
+    // before this point and may already be resolved, which is what makes
+    // the badge appear right away instead of after a second, sequential
+    // round trip. Falls back to a normal fetch (e.g. on a page-reload
+    // session restore, where there's no login request to piggyback on).
+    const speculative = window.__speculativeIncomingPromise;
+    window.__speculativeIncomingPromise = null;
+    const resultPromise = speculative || fetchIncomingMessages();
+
+    resultPromise.then(result => {
         incomingMessagesCache = (result && result.totalCount) ? result : null;
+        updateDashboardMailBadge(incomingMessagesCache);
     });
 }
 
-async function fetchIncomingMessages() {
+// ==========================================
+// DASHBOARD HEADER MAIL BADGE
+// The ONLY place the pending-messages badge is shown — see index.html
+// for #dashboardMailBadge in the header. (It used to also pop up inside
+// the Incoming Forms module itself; that's been removed so there's a
+// single, always-visible notification instead of a duplicate one.)
+// Clicking it reuses the same details popup as before
+// (openIncomingMailDetails reads straight from incomingMessagesCache).
+// ==========================================
+function updateDashboardMailBadge(result, options) {
+    const persist = !options || options.persist !== false;
+    if (persist) {
+        try {
+            const key = getMailCacheStorageKey();
+            if (result && result.totalCount) {
+                localStorage.setItem(key, JSON.stringify(result));
+            } else {
+                localStorage.removeItem(key);
+            }
+        } catch (e) { /* ignore blocked/full local storage */ }
+    }
+
+    const wrapper = document.getElementById('dashboardMailBadge');
+    if (!wrapper) return;
+
+    if (!result || !result.totalCount) {
+        wrapper.style.display = 'none';
+        wrapper.innerHTML = '';
+        delete wrapper.dataset.count;
+        return;
+    }
+
+    injectIncomingMailStyles();
+
+    const prevCount = wrapper.dataset.count;
+    wrapper.dataset.count = String(result.totalCount);
+    wrapper.style.display = 'flex';
+
+    // Skip re-rendering (and re-popping the animation) if the count
+    // hasn't actually changed since last render.
+    if (prevCount === String(result.totalCount) && wrapper.querySelector('#dashboardMailBadgeBtn')) return;
+
+    wrapper.innerHTML = `
+        <button type="button" id="dashboardMailBadgeBtn" onclick="openIncomingMailDetails()" title="You have new messages" style="display: flex; align-items: center; gap: 7px; background: #fff; border: 1.5px solid rgba(0,0,0,0.4); border-radius: 20px; padding: 6px 14px 6px 10px; cursor: pointer; box-shadow: 0 4px 10px rgba(0,0,0,0.2);">
+            <i class="fa-solid fa-envelope" style="color: #d81b60; font-size: 1rem;"></i>
+            <span style="font-family: 'Roboto Mono', monospace; font-size: 0.7rem; font-weight: 700; color: #111; letter-spacing: 0.5px; white-space: nowrap;">
+                (${result.totalCount}) NEW MESSAGE${result.totalCount > 1 ? 'S' : ''}
+            </span>
+        </button>
+    `;
+}
+
+async function fetchIncomingMessages(deptOverride, userOverride) {
     const scope = getSessionScope();
-    const user = window.sessionUser || loggedInUser || localStorage.getItem('activeUser') || '';
+    const dept = (deptOverride !== undefined && deptOverride !== null) ? deptOverride : (scope.isAdmin ? '' : scope.client);
+    const user = userOverride || window.sessionUser || loggedInUser || localStorage.getItem('activeUser') || '';
 
     try {
         const url = `${window.API}?action=getIncomingMessages`
-            + `&incomingDept=${encodeURIComponent(scope.isAdmin ? '' : scope.client)}`
+            + `&incomingDept=${encodeURIComponent(dept)}`
             + `&user=${encodeURIComponent(user)}`
             + `&token=${encodeURIComponent(window.API_TOKEN)}`;
 
@@ -3626,74 +3948,23 @@ function injectIncomingMailStyles() {
             60% { transform: rotate(-6deg); }
             80% { transform: rotate(6deg); }
         }
-        #incomingMailBadge { animation: incomingMailPop 0.35s ease; }
-        #incomingMailBadge:hover { filter: brightness(0.97); }
-        #incomingMailBadge i.fa-envelope { animation: incomingMailShake 1.8s ease-in-out 0.4s 2; display: inline-block; }
+        #dashboardMailBadgeBtn { animation: incomingMailPop 0.35s ease; }
+        #dashboardMailBadgeBtn:hover { filter: brightness(0.97); }
+        #dashboardMailBadgeBtn i.fa-envelope { animation: incomingMailShake 1.8s ease-in-out 0.4s 2; display: inline-block; }
     `;
     document.head.appendChild(style);
 }
 
-// Fetches pending counts and, if any exist, pops the envelope badge into
-// the Incoming module's header. Called every time that module is opened.
-// Renders INSTANTLY from incomingMessagesCache if it's already primed
-// (see primeIncomingMessagesCache, fired at dashboard load) — no waiting
-// on a fetch just to show the badge — then quietly re-fetches in the
-// background afterward to catch anything that changed since priming.
+// Refreshes the pending-messages cache in the background whenever the
+// Incoming module is opened, keeping the header badge (the only place
+// this notification shows now) accurate. No longer renders anything
+// inside the module itself — that duplicate in-module badge was removed.
 async function showIncomingMailNotification(container) {
-    if (!container) return;
-    const oldBadge = container.querySelector('#incomingMailBadge');
-    if (oldBadge) oldBadge.remove();
-
-    if (incomingMessagesCache) {
-        renderIncomingMailBadge(container, incomingMessagesCache);
-    }
-
     const result = await fetchIncomingMessages();
-    if (!container.isConnected) return; // module closed/navigated away while fetching
+    if (container && !container.isConnected) return; // module closed/navigated away while fetching
 
-    if (!result || !result.totalCount) {
-        incomingMessagesCache = null;
-        const staleBadge = container.querySelector('#incomingMailBadge');
-        if (staleBadge) staleBadge.remove();
-        return;
-    }
-
-    incomingMessagesCache = result;
-    // Only touch the DOM again if the count actually changed from what
-    // was already shown instantly above — avoids an unnecessary re-pop
-    // animation on the common case where nothing changed.
-    const shownBadge = container.querySelector('#incomingMailBadge');
-    const shownCount = shownBadge ? shownBadge.dataset.count : null;
-    if (String(result.totalCount) !== shownCount) {
-        renderIncomingMailBadge(container, result);
-    }
-}
-
-function renderIncomingMailBadge(container, result) {
-    const existing = container.querySelector('#incomingMailBadge');
-    if (existing) existing.remove();
-
-    injectIncomingMailStyles();
-
-    const badge = document.createElement('button');
-    badge.id = 'incomingMailBadge';
-    badge.type = 'button';
-    badge.title = 'You have new messages';
-    badge.dataset.count = String(result.totalCount);
-    badge.onclick = openIncomingMailDetails;
-    badge.style.cssText = 'position: absolute; top: -8px; right: 48px; z-index: 11; display: flex; align-items: center; gap: 7px; background: #fff; border: 1.5px solid rgba(0,0,0,0.4); border-radius: 20px; padding: 6px 14px 6px 10px; cursor: pointer; box-shadow: 0 4px 10px rgba(0,0,0,0.2);';
-    badge.innerHTML = `
-        <i class="fa-solid fa-envelope" style="color: #d81b60; font-size: 1rem;"></i>
-        <span style="font-family: 'Roboto Mono', monospace; font-size: 0.7rem; font-weight: 700; color: #111; letter-spacing: 0.5px; white-space: nowrap;">
-            YOU HAVE (${result.totalCount}) NEW MESSAGE${result.totalCount > 1 ? 'S' : ''}
-        </span>
-    `;
-
-    // The module's title block is already position:relative (see
-    // loadIncomingModuleCode), so an absolutely-positioned child anchors
-    // to it correctly, right next to the existing close button.
-    const header = container.querySelector('div[style*="border-bottom"]') || container;
-    header.appendChild(badge);
+    incomingMessagesCache = (result && result.totalCount) ? result : null;
+    updateDashboardMailBadge(incomingMessagesCache);
 }
 
 // Detail popup: one line per sender per category, e.g.
