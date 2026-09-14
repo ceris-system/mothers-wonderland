@@ -4305,6 +4305,10 @@ function selectIncomingCategory(categoryKey) {
     // blank / freely editable). Non-admins are locked to their own client,
     // matching the pattern used in the History and Inventory modules.
     const scope = getSessionScope();
+    const automaticIncomingDept = categoryKey === 'PULLOUT'
+        ? 'PULL OUT'
+        : (scope.isAdmin ? '' : scope.client);
+    const incomingDeptReadonly = categoryKey === 'PULLOUT' || !scope.isAdmin;
 
     container.innerHTML = `
         <div style="width: 100%; height: 100%; padding: 25px; box-sizing: border-box; display: flex; flex-direction: column; align-items: stretch;">
@@ -4330,10 +4334,10 @@ function selectIncomingCategory(categoryKey) {
                     <div style="display: flex; align-items: center; gap: 8px; flex: 1; min-width: 240px;">
                         <span style="font-weight: bold; color: #111; text-transform: uppercase; white-space: nowrap;">INCOMING DEPARTMENT:</span>
                         <input type="text" id="incIncomingDept"
-                            placeholder="${scope.isAdmin ? 'Leave blank to view ALL departments' : (scope.client ? '' : 'No client on this account')}"
-                            value="${escapeHtml(scope.isAdmin ? '' : scope.client)}"
-                            ${scope.isAdmin ? '' : 'readonly'}
-                            style="padding: 6px 10px; background: ${scope.isAdmin ? '#fff' : '#f4f4f4'}; border: 1px solid #000; border-radius: 4px; color: #000; font-family: inherit; outline: none; flex: 1; cursor: ${scope.isAdmin ? 'text' : 'not-allowed'}; opacity: ${scope.isAdmin ? '1' : '0.85'};"
+                            placeholder="${categoryKey === 'PULLOUT' ? '' : (scope.isAdmin ? 'Leave blank to view ALL departments' : (scope.client ? '' : 'No client on this account'))}"
+                            value="${escapeHtml(automaticIncomingDept)}"
+                            ${incomingDeptReadonly ? 'readonly' : ''}
+                            style="padding: 6px 10px; background: ${incomingDeptReadonly ? '#f4f4f4' : '#fff'}; border: 1px solid #000; border-radius: 4px; color: #000; font-family: inherit; outline: none; flex: 1; cursor: ${incomingDeptReadonly ? 'not-allowed' : 'text'}; opacity: ${incomingDeptReadonly ? '0.85' : '1'};"
                             list="incomingOutletList">
                     </div>
                     <!-- Own id (not "outletList") on purpose: the 3 outgoing
@@ -4486,10 +4490,12 @@ async function fetchIncomingRowsAutomatically() {
     const tableBody = document.getElementById('incomingTableBody');
     if (!cfg || (!scope.client && !scope.isAdmin)) return;
 
+    const incomingDept = document.getElementById('incIncomingDept')?.value.trim() || '';
+
     if (tableBody) tableBody.innerHTML = '<tr><td colspan="7" style="padding: 20px; text-align: center; color: #888;">Checking incoming forms...</td></tr>';
     try {
         const url = `${window.API}?action=getIncomingPendingForDepartment&sheet=${encodeURIComponent(cfg.sheet)}`
-            + `&incomingDept=${encodeURIComponent(scope.client || '')}`
+            + `&incomingDept=${encodeURIComponent(incomingDept)}`
             + `&user=${encodeURIComponent(window.sessionUser || '')}`
             + `&token=${encodeURIComponent(window.API_TOKEN)}`;
         const response = await fetch(url);
