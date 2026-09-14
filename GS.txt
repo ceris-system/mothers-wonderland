@@ -1,0 +1,1939 @@
+const SPREADSHEET_ID = "168OcpxiUZs0dUUZX93HqGpKzQ2cH4mTtb5pjUxngATI";
+const SHEET_NAME = "USERDB";
+const LOG_SHEET_NAME = "LOGIN_LOGS";
+
+// MUST exactly match window.API_TOKEN in config.js. Generate a long
+// random string and paste it in both places — never leave the placeholder.
+const APP_SECRET = "fab3805f-73fa-43f4-a844-8c42ddc322a99050e3aa-e547-4e51-962f-dbd936dcb47d";
+
+// Sheets that must NEVER be readable through the generic ?sheet=&range=
+// GET endpoint, regardless of what's requested. USERDB holds credentials;
+// LOGIN_LOGS holds activity history. Everything else (department sheets,
+// AREA, DATA, TRANSFER, REQUEST, RTV, etc.) stays reachable because the
+// app looks up arbitrary department sheets by name.
+const BLOCKED_READ_SHEETS = ["USERDB", "LOGIN_LOGS"];
+
+// ==========================================
+// AUTOMATIC SEQUENTIAL SERIAL / REFERENCE NUMBERS
+// ==========================================
+// One serial is issued per FORM SUBMISSION (not per product row) and
+// stamped into every row that submission writes. Column is the LETTER
+// of the column the serial lives in on that sheet — chosen to land
+// right after the existing "RECEIVED status" column (U for REQUEST
+// and RTV, Q for TRANSFER — see INCOMING_SHEET_LAYOUT.statusCol below).
+const SERIAL_CONFIG = {
+  REQUEST_RELEASED: { sheet: 'REQUEST',  prefix: 'MWRRF-', column: 'V' },
+  TRANSFER:          { sheet: 'TRANSFER', prefix: 'MWTF-',  column: 'R' },
+  PULLOUT:           { sheet: 'RTV',      prefix: 'MWPF-',  column: 'V' },
+
+  // Issued when an item is marked RECEIVED via the Incoming module.
+  // Stamped on the ARCHIVE sheet (RECEIVED/TRANSFERED/RETURN), one column
+  // to the right of that sheet's status column — never on the original
+  // REQUEST/TRANSFER/RTV row.
+  INCOMING_RECEIVED:   { sheet: 'RECEIVED',   prefix: 'MWRCV-', column: 'V' },
+  INCOMING_TRANSFERED: { sheet: 'TRANSFERED', prefix: 'MWTRD-', column: 'R' },
+  INCOMING_RETURN:     { sheet: 'RETURN',     prefix: 'MWRTN-', column: 'V' }
+};
+const SERIAL_PAD_LENGTH = 8; // MWRRF-00000001
+
+// Fixed salt used when hashing passwords. Change this to your own random
+// string before first use (then re-hash any existing plaintext passwords
+// in USERDB — see the note above updateUserCredentials below).
+const PASSWORD_SALT = "dcca02ff-4600-42f4-bfc4-698a68b60fda0cd85d51-6266-4c5d-ae46-9ed3a3e5df59";
+
+function hashPassword(password) {
+  const salted = String(password) + PASSWORD_SALT;
+  const digest = Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256, salted, Utilities.Charset.UTF_8);
+  return digest.map(function(b) {
+    return (b < 0 ? b + 256 : b).toString(16).padStart(2, '0');
+  }).join('');
+}
+
+function isAuthorized(token) {
+  return typeof token === "string" && token === APP_SECRET;
+}
+
+/**
+ * Looks up a username in USERDB and returns their real client/admin status.
+ * This is the source of truth for "which department/client can this user
+ * see" — callers must NEVER trust a client-supplied client/department name
+ * for a non-admin user; always resolve it from here instead.
+ */
+function getUserAccount(username) {
+  if (!username) return null;
+
+  const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
+  const sheet = ss.getSheetByName(SHEET_NAME);
+  const data = sheet.getDataRange().getDisplayValues();
+  const targetUser = username.trim().toLowerCase();
+
+  for (let i = 1; i < data.length; i++) {
+    if (data[i][0].toString().trim().toLowerCase() === targetUser) {
+      const uname = data[i][0].toString().trim();
+      const status = data[i][2] ? data[i][2].toString().trim().toUpperCase() : "";
+      const client = data[i][3] ? data[i][3].toString().trim() : "";
+      const isAdmin = uname.toUpperCase().includes("ADMIN") || client.toUpperCase().includes("ADMIN");
+      return { username: uname, status: status, client: client, isAdmin: isAdmin };
+    }
+  }
+  return null;
+}
+
+function doPost(e) {
+  try {
+    const data = JSON.parse(e.postData.contents);
+
+    if (!isAuthorized(data.token)) {
+      return createJsonResponse({ success: false, error: "Unauthorized." });
+    }
+
+    const action = data.action;
+    const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
+
+    // Fetch user and client fallback context from previous logs
+    const context = getFallbackUserContext(ss, data);
+    const user = context.user;
+    const client = context.client;
+
+    // 1. LOGIN HANDLING
+    if (action === "login") {
+      const result = processLogin(data.user || data.username, data.pass || data.password);
+      return createJsonResponse(Object.assign({ success: result.status !== "ERROR" && result.status !== "LOCKED" }, result));
+    } 
+
+    // 2. LOGOUT HANDLING (NEW)
+    if (action === "logout") {
+      const durationInfo = calculateSessionDuration(ss, user);
+      recordLoginLog(ss, user, client, "SUCCESS", "LOGOUT" + (durationInfo ? " | Duration: " + durationInfo : ""));
+      return createJsonResponse({ success: true, user: user, sessionDuration: durationInfo });
+    }
+
+    // 3. MODULE & MODAL CLICK LOGGING
+    if (action === 'logModuleClick' || action === "recordModalLogin") {
+      const targetName = data.modalName || data.module || "UNKNOWN_MODULE";
+      
+      const formattedTimestamp = Utilities.formatDate(
+        new Date(),
+        Session.getScriptTimeZone(),
+        "EEEE, MMMM d, yyyy h:mm:ss a"
+      );
+
+      recordLoginLog(ss, user, client, "SUCCESS", "" + targetName);
+
+      return createJsonResponse({
+        success: true,
+        user: user,
+        client: client,
+        timestamp: formattedTimestamp,
+        module: targetName
+      });
+    }
+    
+    // 4. GENERIC ACTIVITY LOGGING
+    if (action === "logActivity") {
+      recordLoginLog(ss, user, client, data.status || "INFO", data.activity);
+      return createJsonResponse({ success: true });
+    }
+
+    // 5. USER CREDENTIAL UPDATES
+    if (action === "updatePassword") {
+      const result = updateUserCredentials(data.rowIndex, data.newUser, data.newPass);
+      return createJsonResponse(Object.assign({ success: result.status !== "ERROR" }, result));
+    }
+
+    // 6. INVENTORY TRANSFER
+    if (action === "transferInventory") {
+      const result = processInventoryTransfer(data.payload, user, client);
+      return createJsonResponse(result);
+    }
+
+    // 7. INVENTORY ITEM UPDATES
+    if (action === "updateInventoryItem") {
+      if (data.sheetName !== undefined && (data.colM !== undefined || data.colN !== undefined || data.colP !== undefined || data.colQ !== undefined)) {
+        return handleUpdateInventoryItem(data, user, client);
+      }
+      const result = processSingleItemUpdate(data, user, client);
+      return createJsonResponse(result);
+    }
+
+    // 8. FORM DATA SAVING
+    if (action === "savePulloutData") {
+      return withScriptLock_(function() { return handleSavePulloutData(data, user, client); });
+    }
+
+    if (action === "saveTransferData") {
+      return withScriptLock_(function() { return handleSaveTransferData(data, user, client); });
+    }
+
+    if (action === "saveRequestData") {
+      return withScriptLock_(function() { return handleSaveRequestData(data, user, client); });
+    }
+
+    // 8b. OUTGOING FORM APPROVAL WORKFLOW — submit / admin approve+release
+    if (action === "submitOutgoingForApproval") {
+      return withScriptLock_(function() { return handleSubmitOutgoingForApproval(data, user, client); });
+    }
+
+    if (action === "adminReleaseForm") {
+      return handleAdminReleaseForm(data, user, client);
+    }
+
+    if (action === "markWorkflowNotificationsRead") {
+      return handleMarkWorkflowNotificationsRead(data);
+    }
+
+    // 9. INCOMING MODULE — mark a pending REQUEST/TRANSFER/RTV row RECEIVED
+    if (action === "markIncomingReceived") {
+      return withScriptLock_(function() { return handleMarkIncomingReceived(data, user, client); });
+    }
+
+    return createJsonResponse({ success: false, error: "Invalid action provided." });
+  } catch (err) {
+    return createJsonResponse({ success: false, error: err.toString() });
+  }
+}
+
+function doGet(e) {
+  try {
+    if (!isAuthorized(e.parameter.token)) {
+      return createJsonResponse({ success: false, error: "Unauthorized." });
+    }
+
+    const action = e.parameter.action;
+
+    // FETCH LATEST LOGIN TIMESTAMP FOR MODAL DISPLAY
+    if (action === "getLoginTimestamp") {
+      const username = e.parameter.user || e.parameter.username;
+      if (!username) {
+        return createJsonResponse({ success: false, error: "Missing user parameter." });
+      }
+
+      const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
+      const timestamp = getLatestLoginTimestamp(ss, username);
+      return createJsonResponse({ success: true, timestamp: timestamp });
+    }
+
+    if (action === "printView") {
+      const sheetName = e.parameter.sheet || "RTV";
+      return generateTableOnlyPrintView(sheetName);
+    }
+
+    if (action === "getScopedInventory") {
+      const username = e.parameter.user;
+      const account = getUserAccount(username);
+
+      if (!account) {
+        return createJsonResponse({ success: false, error: "Unknown user." });
+      }
+
+      // Non-admins are always scoped to their own client, no matter what
+      // (if anything) the request asked for. Admins may request any
+      // department, defaulting to their own if none was given.
+      const requestedDept = e.parameter.department ? e.parameter.department.trim() : "";
+      const targetDept = account.isAdmin ? (requestedDept || account.client) : account.client;
+
+      if (!targetDept) {
+        return createJsonResponse({ success: false, error: "No department associated with this account." });
+      }
+
+      if (BLOCKED_READ_SHEETS.indexOf(targetDept.toUpperCase()) !== -1) {
+        return createJsonResponse({ success: false, error: "Access denied." });
+      }
+
+      const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
+      const sheet = ss.getSheetByName(targetDept);
+
+      if (!sheet) {
+        return createJsonResponse({ success: true, data: [], department: targetDept });
+      }
+
+      const lastRow = sheet.getLastRow();
+      if (lastRow < 8) {
+        return createJsonResponse({ success: true, data: [], department: targetDept });
+      }
+
+      // Width covers through column AB (28 cols) — updated after a column
+      // was deleted from the department sheets, which shifted everything
+      // from T onward one column to the right. Current layout:
+      // SKU=B, DESCRIPTION=C, UOM=E, COST=F, SRP=G,
+      // EXP DATE 1/QTY 1=H/I, EXP DATE 2/QTY 2=J/K, EXP DATE 3/QTY 3=L/M,
+      // TOTAL ONHAND=U, NEAREST EXPIRATION DATE=X, QTY (near expiry)=Y,
+      // LOCATION=Z, NEAREX AGING (near-expiry checker)=AA, STOCK STATUS
+      // (Critical/Low in Stock/Out of Stock)=AB.
+      const values = sheet.getRange(8, 1, lastRow - 7, 28).getDisplayValues();
+      return createJsonResponse({ success: true, data: values, department: targetDept });
+    }
+
+    if (action === "getFilteredHistory") {
+      const sheetName = e.parameter.sheet;
+      const targetDept = e.parameter.department ? e.parameter.department.trim().toLowerCase() : "";
+
+      if (!sheetName) {
+        return createJsonResponse({ success: false, error: "Missing sheet parameter." });
+      }
+
+      if (BLOCKED_READ_SHEETS.indexOf(sheetName.toUpperCase()) !== -1) {
+        return createJsonResponse({ success: false, error: "Access denied." });
+      }
+
+      // Resolve the caller's account and, unless they're an admin, force
+      // the department filter to their own client — a non-admin cannot
+      // widen or change scope by editing the department parameter.
+      const account = getUserAccount(e.parameter.user);
+      let effectiveDeptFilter = targetDept;
+      if (account && !account.isAdmin) {
+        effectiveDeptFilter = account.client.trim().toLowerCase();
+      } else if (!account) {
+        // Unknown/unauthenticated user context: don't allow browsing
+        // everything by default — require a recognized account.
+        return createJsonResponse({ success: false, error: "Unknown user." });
+      }
+
+      const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
+      const sheet = ss.getSheetByName(sheetName);
+
+      if (!sheet) {
+        return createJsonResponse({ success: false, error: "Sheet not found: " + sheetName });
+      }
+
+      const lastRow = sheet.getLastRow();
+      if (lastRow < 2) {
+        return createJsonResponse({ success: true, data: [] });
+      }
+
+      if (sheetName.toUpperCase() === "AREA") {
+        const areaValues = sheet.getRange(1, 1, lastRow, 1).getDisplayValues();
+        return createJsonResponse({ success: true, data: areaValues });
+      }
+
+      const fullRangeValues = sheet.getRange(2, 1, lastRow - 1, sheet.getLastColumn()).getDisplayValues();
+
+      const filteredRows = fullRangeValues.filter(row => {
+        // ADMIN can see every history record.
+        if (account.isAdmin) return true;
+
+        if (!effectiveDeptFilter) return false;
+
+        const userClient = String(effectiveDeptFilter).trim().toLowerCase();
+        const outgoingDepartment = row[0] ? String(row[0]).trim().toLowerCase() : "";
+
+        // TRANSFER HISTORY has INCOMING DEPARTMENT in column 13 (index 12).
+        // REQUEST / RELEASED HISTORY has INCOMING DEPARTMENT in column 17 (index 16).
+        let incomingDepartment = "";
+        if (sheetName.toUpperCase() === "TRANSFER") {
+          incomingDepartment = row[12] ? String(row[12]).trim().toLowerCase() : "";
+        } else if (sheetName.toUpperCase() === "REQUEST") {
+          incomingDepartment = row[16] ? String(row[16]).trim().toLowerCase() : "";
+        }
+
+        // Normal users see only their exact client.
+        // For transfers, either outgoing or incoming client qualifies.
+        return outgoingDepartment === userClient || incomingDepartment === userClient;
+      });
+
+      // OUTGOING REMARKS (new — column S on TRANSFER, column W on
+      // REQUEST/RTV) lives well to the right of INCOMING DEPARTMENT / DATE
+      // in the sheet. It's spliced in front of those two here instead of
+      // appended at the end, so INCOMING DEPARTMENT / DATE stay the LAST
+      // two entries of the mapped row — several front-end functions
+      // (row[row.length-2] / row[row.length-1]) depend on that position.
+      const mappedData = filteredRows.map(row => {
+        if (sheetName === "TRANSFER") {
+          // A..N (14) + OUTGOING REMARKS (S, idx 18) + INCOMING DEPT (O) + DATE (P)
+          return row.slice(0, 14).concat([row[18] || "", row[14], row[15]]);
+        } else {
+          // A..R (18) + OUTGOING REMARKS (W, idx 22) + INCOMING DEPT (S) + DATE (T)
+          return row.slice(0, 18).concat([row[22] || "", row[18], row[19]]);
+        }
+      });
+
+      return createJsonResponse({ success: true, data: mappedData });
+    }
+
+    // Returns the list of usernames (USERDB col A) for the Logs History
+    // filter dropdown. Never returns anything beyond the username itself
+    // (no password hashes, no other USERDB columns). Admins get every
+    // username; non-admins only see usernames belonging to their own
+    // client, since LOGIN_LOGS entries outside their client are hidden
+    // from them anyway.
+    if (action === "getLogsUsernameList") {
+      const account = getUserAccount(e.parameter.user);
+      if (!account) {
+        return createJsonResponse({ success: false, error: "Unknown user." });
+      }
+
+      const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
+      const sheet = ss.getSheetByName(SHEET_NAME);
+      const lastRow = sheet.getLastRow();
+      if (lastRow < 2) {
+        return createJsonResponse({ success: true, data: [] });
+      }
+
+      const values = sheet.getRange(2, 1, lastRow - 1, 4).getDisplayValues(); // A:D
+      const usernames = [];
+      values.forEach(function(row) {
+        const uname = row[0] ? String(row[0]).trim() : "";
+        if (!uname) return;
+        if (account.isAdmin) {
+          usernames.push(uname);
+        } else {
+          const rowClient = row[3] ? String(row[3]).trim().toLowerCase() : "";
+          if (rowClient === String(account.client || "").trim().toLowerCase()) {
+            usernames.push(uname);
+          }
+        }
+      });
+
+      return createJsonResponse({ success: true, data: usernames });
+    }
+
+    // Returns LOGIN_LOGS rows for the Logs History modal, each formatted
+    // as [username, department, actionTaken, timestamp, status] to match
+    // that table's column order directly.
+    if (action === "getLoginLogsFiltered") {
+      const account = getUserAccount(e.parameter.user);
+      if (!account) {
+        return createJsonResponse({ success: false, error: "Unknown user." });
+      }
+
+      const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
+      const sheet = ss.getSheetByName(LOG_SHEET_NAME);
+      if (!sheet) {
+        return createJsonResponse({ success: true, data: [] });
+      }
+
+      const lastRow = sheet.getLastRow();
+      if (lastRow < 2) {
+        return createJsonResponse({ success: true, data: [] });
+      }
+
+      const values = sheet.getRange(2, 1, lastRow - 1, 5).getDisplayValues(); // A:E
+      const requestedUsername = e.parameter.username ? String(e.parameter.username).trim().toLowerCase() : "";
+
+      const filtered = values.filter(function(row) {
+        const rowUsername = row[1] ? String(row[1]).trim().toLowerCase() : "";
+        const rowClient = row[2] ? String(row[2]).trim().toLowerCase() : "";
+
+        // Non-admins never see entries outside their own client, regardless
+        // of the username filter they pass.
+        if (!account.isAdmin && rowClient !== String(account.client || "").trim().toLowerCase()) {
+          return false;
+        }
+        if (requestedUsername && rowUsername !== requestedUsername) {
+          return false;
+        }
+        return true;
+      });
+
+      const mapped = filtered.map(function(row) {
+        return [row[1], row[2], row[4], row[0], row[3]]; // username, department, action, timestamp, status
+      });
+
+      return createJsonResponse({ success: true, data: mapped });
+    }
+
+    // ==========================================
+    // INCOMING MODULE — fetch pending (not-yet-received) rows
+    // ==========================================
+    if (action === "getIncomingPending") {
+      return handleGetIncomingPending(e);
+    }
+
+    if (action === "getIncomingPendingForDepartment") {
+      return handleGetIncomingPendingForDepartment(e);
+    }
+
+    // Lightweight count (no selectDept needed) used by the "mail popup"
+    // notification shown when the Incoming Forms module is opened.
+    if (action === "getIncomingPendingCount") {
+      return handleGetIncomingPendingCount(e);
+    }
+
+    // Full mail-style notification: pending counts across ALL THREE
+    // outgoing sheets (REQUEST/TRANSFER/RTV), grouped per sender
+    // department, for the mail-envelope popup shown when the Incoming
+    // Forms module opens.
+    if (action === "getIncomingMessages") {
+      return handleGetIncomingMessages(e);
+    }
+
+    // Preview of the next auto-generated serial/reference number, shown
+    // in the "NO.:" box above DATE on each form. Read-only — does not
+    // reserve the number (the real one is generated at save time).
+    if (action === "peekNextSerial") {
+      try {
+        const serial = peekNextSerial(e.parameter.form);
+        return createJsonResponse({ success: true, serial: serial });
+      } catch (err) {
+        return createJsonResponse({ success: false, error: err.toString() });
+      }
+    }
+
+    // OUTGOING FORM APPROVAL WORKFLOW — admin's pending list, outgoing
+    // department's released-forms list, and the notification badge.
+    if (action === "getPendingApprovals") {
+      return handleGetPendingApprovals(e);
+    }
+
+    if (action === "getReleasedForOutgoing") {
+      return handleGetReleasedForOutgoing(e);
+    }
+
+    if (action === "getWorkflowNotifications") {
+      return handleGetWorkflowNotifications(e);
+    }
+
+    const sheetName = e.parameter.sheet;
+    const rangeName = e.parameter.range;
+
+    if (!sheetName || !rangeName) {
+      return createJsonResponse({ success: false, error: "Missing required parameters." });
+    }
+
+    if (BLOCKED_READ_SHEETS.indexOf(sheetName.toUpperCase()) !== -1) {
+      return createJsonResponse({ success: false, error: "Access denied." });
+    }
+
+    const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
+    const sheet = ss.getSheetByName(sheetName);
+
+    if (!sheet) {
+      return createJsonResponse({ success: false, error: "Sheet not found: " + sheetName });
+    }
+
+    const values = sheet.getRange(rangeName).getDisplayValues();
+    return createJsonResponse({ success: true, values: values });
+
+  } catch (err) {
+    return createJsonResponse({ success: false, error: err.toString() });
+  }
+}
+
+/**
+ * Robust fallback lookup that scans top-down to get the active session user and client.
+ */
+function getFallbackUserContext(ss, data) {
+  let user = data.user || data.username || data.currentUser;
+  let client = data.client || data.currentClient || data.clientName || data.account;
+
+  const logSheet = ss.getSheetByName(LOG_SHEET_NAME);
+  if (!logSheet) {
+    return { user: user || "UNKNOWN_USER", client: client || "N/A" };
+  }
+
+  const dataValues = logSheet.getDataRange().getDisplayValues();
+
+  // If user is missing completely, pull the most recent active user from bottom of sheet
+  if (!user || user === "N/A" || user === "UNKNOWN_USER") {
+    for (let i = dataValues.length - 1; i >= 1; i--) {
+      const rowUser = dataValues[i][1] ? dataValues[i][1].toString().trim() : "";
+      if (rowUser && rowUser !== "N/A" && rowUser !== "UNKNOWN_USER") {
+        user = rowUser;
+        break;
+      }
+    }
+  }
+
+  // Find client for the user from any recent activity row
+  if (user && (!client || client === "N/A")) {
+    const targetUser = user.trim().toLowerCase();
+    for (let i = dataValues.length - 1; i >= 1; i--) {
+      const rowUser = dataValues[i][1] ? dataValues[i][1].toString().trim().toLowerCase() : "";
+      const rowClient = dataValues[i][2] ? dataValues[i][2].toString().trim() : "";
+
+      if (rowUser === targetUser && rowClient && rowClient !== "N/A") {
+        client = rowClient;
+        break;
+      }
+    }
+  }
+
+  return {
+    user: user || "UNKNOWN_USER",
+    client: client || "N/A"
+  };
+}
+
+/**
+ * Calculates session length between the last LOGIN action and current LOGOUT action.
+ */
+function calculateSessionDuration(ss, username) {
+  const logSheet = ss.getSheetByName(LOG_SHEET_NAME);
+  if (!logSheet) return null;
+
+  const dataValues = logSheet.getDataRange().getDisplayValues();
+  const targetUser = username.trim().toLowerCase();
+
+  for (let i = dataValues.length - 1; i >= 1; i--) {
+    const rowUser = dataValues[i][1] ? dataValues[i][1].toString().trim().toLowerCase() : "";
+    const rowAction = dataValues[i][4] ? dataValues[i][4].toString().trim() : "";
+
+    if (rowUser === targetUser && rowAction === "LOGIN") {
+      const loginTimeString = dataValues[i][0];
+      const loginDate = new Date(loginTimeString);
+      const logoutDate = new Date();
+
+      if (isNaN(loginDate.getTime())) return null;
+
+      const diffMs = logoutDate.getTime() - loginDate.getTime();
+      const diffMins = Math.floor(diffMs / 60000);
+      const hours = Math.floor(diffMins / 60);
+      const mins = diffMins % 60;
+
+      return `${hours}h ${mins}m`;
+    }
+  }
+  return null;
+}
+
+function getLatestLoginTimestamp(ss, username) {
+  const logSheet = ss.getSheetByName(LOG_SHEET_NAME);
+  if (!logSheet) return "Log sheet not found";
+
+  const dataValues = logSheet.getDataRange().getDisplayValues();
+  const targetUser = username.trim().toLowerCase();
+
+  for (let i = dataValues.length - 1; i >= 1; i--) {
+    const rowUser = dataValues[i][1] ? dataValues[i][1].toString().trim().toLowerCase() : "";
+    const rowAction = dataValues[i][4] ? dataValues[i][4].toString().trim() : "";
+
+    if (rowUser === targetUser && rowAction === "LOGIN") {
+      return dataValues[i][0];
+    }
+  }
+
+  return "No recent login recorded";
+}
+
+function processLogin(username, password) {
+  const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
+  const sheet = ss.getSheetByName(SHEET_NAME);
+  const data = sheet.getDataRange().getDisplayValues();
+
+  let userRowIndex = -1;
+  let userData = null;
+
+  for (let i = 1; i < data.length; i++) {
+    if (data[i][0].toString().trim().toLowerCase() === username.trim().toLowerCase()) {
+      userRowIndex = i + 1;
+      userData = data[i];
+      break;
+    }
+  }
+
+  if (!userData) {
+    recordLoginLog(ss, username, "N/A", "FAILED", "USER_NOT_FOUND");
+    return { status: "ERROR", message: "Invalid username or password." };
+  }
+
+  const storedPassword = userData[1].toString().trim();
+  const accountStatus = userData[2].toString().trim().toUpperCase();
+  const clientName = userData[3] ? userData[3].toString().trim() : "";
+
+  const isAdmin = username.toUpperCase().includes("ADMIN") || clientName.toUpperCase().includes("ADMIN");
+
+  // Supports a one-time migration: if a row still has a plaintext password
+  // (shorter than a hash, or doesn't match hash format), compare directly
+  // ONCE and then re-hash it on success so it's never stored in plaintext
+  // again going forward. Once every row has been logged into at least once
+  // after deploying this change, you can remove the isLikelyPlaintext branch.
+  const isLikelyPlaintext = storedPassword.length !== 64 || !/^[0-9a-f]{64}$/i.test(storedPassword);
+  const passwordMatches = isLikelyPlaintext
+    ? storedPassword === password.trim()
+    : storedPassword === hashPassword(password.trim());
+
+  if (!passwordMatches) {
+    recordLoginLog(ss, username, clientName, "FAILED", "WRONG_PASSWORD");
+    return { status: "ERROR", message: "Invalid username or password." };
+  }
+
+  if (isLikelyPlaintext) {
+    // Silently upgrade this row to a hashed password now that we've verified it.
+    sheet.getRange(userRowIndex, 2).setValue(hashPassword(password.trim()));
+  }
+
+  if (accountStatus === "INACTIVE") {
+    recordLoginLog(ss, username, clientName, "LOCKED", "ACCOUNT_INACTIVE");
+    return { status: "LOCKED", message: "ACCOUNT IS LOCKED PLEASE INFORM ADMIN" };
+  }
+
+  if (accountStatus === "DEFAULT") {
+    recordLoginLog(ss, username, clientName, "PENDING", "REQUIRE_UPDATE");
+    return { 
+      status: "REQUIRE_UPDATE", 
+      rowIndex: userRowIndex,
+      message: "Default account detected. Please update your details." 
+    };
+  }
+
+  if (accountStatus === "ACTIVE") {
+    recordLoginLog(ss, username, clientName, "SUCCESS", "LOGIN");
+    return { 
+      status: "SUCCESS", 
+      message: "Login successful!",
+      username: username,
+      clientName: clientName,
+      isAdmin: isAdmin,
+      bridges: {} 
+    };
+  }
+
+  recordLoginLog(ss, username, clientName, "ERROR", "UNKNOWN_STATUS");
+  return { status: "ERROR", message: "Unknown account status. Contact admin." };
+}
+
+function recordLoginLog(ss, username, clientName, status, action) {
+  try {
+    let logSheet = ss.getSheetByName(LOG_SHEET_NAME);
+    
+    if (!logSheet) {
+      logSheet = ss.insertSheet(LOG_SHEET_NAME);
+      logSheet.appendRow(["Timestamp", "Username", "Client / Account", "Status", "Action"]);
+      logSheet.getRange("A1:E1").setFontWeight("bold").setBackground("#0b1d28").setFontColor("#00e5ff");
+    }
+    
+    const formattedTimestamp = Utilities.formatDate(
+      new Date(), 
+      Session.getScriptTimeZone(), 
+      "EEEE, MMMM d, yyyy h:mm:ss a"
+    );
+    
+    logSheet.appendRow([formattedTimestamp, username || "N/A", clientName || "N/A", status, action || "LOGIN"]);
+  } catch (e) {
+    Logger.log("Failed to write login log: " + e.toString());
+  }
+}
+
+function generateTableOnlyPrintView(sheetName) {
+  const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
+  const sheet = ss.getSheetByName(sheetName);
+  
+  if (!sheet) {
+    return ContentService.createTextOutput("Sheet not found: " + sheetName);
+  }
+
+  const lastRow = sheet.getLastRow();
+  const lastCol = sheet.getLastColumn();
+  
+  if (lastRow < 2) {
+    return ContentService.createTextOutput("No data found to print.");
+  }
+
+  const values = sheet.getRange(1, 1, lastRow, lastCol).getDisplayValues();
+  
+  let tableHtml = '<table class="isolated-table">';
+  
+  values.forEach((row, index) => {
+    tableHtml += '<tr>';
+    row.forEach(cell => {
+      if (index === 0) {
+        tableHtml += `<th>${cell}</th>`;
+      } else {
+        tableHtml += `<td>${cell}</td>`;
+      }
+    });
+    tableHtml += '</tr>';
+  });
+  tableHtml += '</table>';
+
+  const htmlContent = `
+    <!DOCTYPE html>
+    <html>
+      <head>
+        <title>Print Table</title>
+        <style>
+          * { box-sizing: border-box; margin: 0; padding: 0; }
+          body { font-family: Arial, sans-serif; background: #fff; padding: 0; }
+          
+          .isolated-table { 
+            width: 100% !important; 
+            border-collapse: collapse; 
+            table-layout: fixed; 
+          }
+          .isolated-table th, .isolated-table td { 
+            border: 1px solid #000; 
+            padding: 3px 2px; 
+            font-size: 7.5px; 
+            word-break: break-word; 
+            text-align: center; 
+          }
+          .isolated-table th { 
+            background-color: #0b1d28 !important; 
+            color: #00e5ff !important; 
+            font-weight: bold;
+            -webkit-print-color-adjust: exact;
+            print-color-adjust: exact;
+          }
+          
+          @media print {
+            @page { size: A4 landscape; margin: 4mm; }
+            tr { page-break-inside: avoid; }
+          }
+        </style>
+      </head>
+      <body>
+        ${tableHtml}
+        <script>
+          window.onload = function() { window.print(); }
+        </script>
+      </body>
+    </html>
+  `;
+
+  return HtmlService.createHtmlOutput(htmlContent)
+    .setXframeOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
+}
+
+function createJsonResponse(data) {
+  return ContentService.createTextOutput(JSON.stringify(data))
+                       .setMimeType(ContentService.MimeType.JSON);
+}
+
+function processSingleItemUpdate(data, user, client) {
+  try {
+    const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
+    const account = getUserAccount(user);
+
+    if (!account) {
+      return { success: false, error: "Unknown user." };
+    }
+
+    const requestedSheetName = String(data.sheetName || "").trim();
+    if (!requestedSheetName) {
+      return { success: false, error: "Missing inventory department." };
+    }
+
+    // ADMIN may update any inventory sheet.
+    // NORMAL USER may update only their USERDB client sheet.
+    const allowedSheetName = account.isAdmin
+      ? requestedSheetName
+      : String(account.client || "").trim();
+
+    if (!allowedSheetName) {
+      return { success: false, error: "No client is associated with this account." };
+    }
+
+    if (!account.isAdmin && requestedSheetName.toLowerCase() !== allowedSheetName.toLowerCase()) {
+      recordLoginLog(ss, user, account.client, "DENIED", "UNAUTHORIZED_INVENTORY_UPDATE_ATTEMPT: " + requestedSheetName);
+      return { success: false, error: "Access denied. You can only update your own client inventory." };
+    }
+
+    const targetSheet = ss.getSheetByName(allowedSheetName);
+    if (!targetSheet) {
+      return { success: false, error: "Target inventory sheet '" + allowedSheetName + "' not found." };
+    }
+
+    const row = Number(data.rowIndex);
+    if (!row || row < 8 || row > targetSheet.getLastRow()) {
+      return { success: false, error: "Invalid target row index." };
+    }
+
+    // 3 expiration-date/qty batch pairs live at H/I, J/K, L/M.
+    if (data.expDate1 !== undefined && data.expDate1 !== "") targetSheet.getRange(row, 8).setValue(data.expDate1);
+    if (data.qty1 !== undefined && data.qty1 !== "") targetSheet.getRange(row, 9).setValue(data.qty1);
+    if (data.expDate2 !== undefined && data.expDate2 !== "") targetSheet.getRange(row, 10).setValue(data.expDate2);
+    if (data.qty2 !== undefined && data.qty2 !== "") targetSheet.getRange(row, 11).setValue(data.qty2);
+    if (data.expDate3 !== undefined && data.expDate3 !== "") targetSheet.getRange(row, 12).setValue(data.expDate3);
+    if (data.qty3 !== undefined && data.qty3 !== "") targetSheet.getRange(row, 13).setValue(data.qty3);
+
+    // SRP (col G) and COST (col F) are the two editable fields in the item
+    // drawer. STOCK RECEIVED/RECEIVED DATE live at O/P.
+    if (data.srp !== undefined && data.srp !== "") targetSheet.getRange(row, 7).setValue(data.srp);
+    if (data.cost !== undefined && data.cost !== "") targetSheet.getRange(row, 6).setValue(data.cost);
+
+    if (data.stockReceived !== undefined && data.stockReceived !== "") targetSheet.getRange(row, 15).setValue(data.stockReceived);
+    if (data.receivedDate !== undefined && data.receivedDate !== "") targetSheet.getRange(row, 16).setValue(data.receivedDate);
+
+    // Adjustments block: CATEGORY (chosen from the DD sheet, functions as
+    // the REASON) -> R, QTY -> S, REMARKS -> T.
+    const adjCategory = data.adjCategory !== undefined ? String(data.adjCategory).trim() : "";
+    const adjQty = data.adjQty !== undefined ? String(data.adjQty).trim() : "";
+    const adjRemarks = data.adjRemarks !== undefined ? String(data.adjRemarks).trim() : "";
+
+    if (adjCategory !== "") targetSheet.getRange(row, 18).setValue(adjCategory); // R
+    if (adjQty !== "") targetSheet.getRange(row, 19).setValue(adjQty);           // S
+    if (adjRemarks !== "") targetSheet.getRange(row, 20).setValue(adjRemarks);   // T
+
+    // Whenever an adjustment quantity was actually entered, also log it as
+    // a new row in the "MINUS TO INV" sheet for audit purposes.
+    if (adjQty !== "" && Number(adjQty) > 0) {
+      logMinusToInv(ss, {
+        sku: targetSheet.getRange(row, 2).getDisplayValue(),          // B
+        description: data.itemDescription || targetSheet.getRange(row, 3).getDisplayValue(), // C
+        uom: data.itemUom || targetSheet.getRange(row, 5).getDisplayValue(),                  // E
+        cost: data.cost !== undefined && data.cost !== "" ? data.cost : targetSheet.getRange(row, 6).getDisplayValue(),
+        srp: data.srp !== undefined && data.srp !== "" ? data.srp : targetSheet.getRange(row, 7).getDisplayValue(),
+        department: allowedSheetName,
+        qty: adjQty
+      });
+    }
+
+    recordLoginLog(ss, user, account.client, "SUCCESS", "UPDATED_INVENTORY_ITEM: " + allowedSheetName);
+    return { success: true, message: "Inventory updated successfully." };
+  } catch (err) {
+    return { success: false, error: err.toString() };
+  }
+}
+
+/**
+ * Appends one row to the "MINUS TO INV" sheet:
+ * SKU (B), Item Description (C), UOM (D), COST (E), SRP (F), QTY (H),
+ * DEPARTMENT (J), DATE (K) — starting at row 8, matching the rest of
+ * the app's convention for these data sheets. Column A, G and I are
+ * intentionally left blank; nothing in the request specifies them.
+ */
+function logMinusToInv(ss, item) {
+  const sheet = ss.getSheetByName("MINUS TO INV");
+  if (!sheet) return; // Sheet not present — skip silently rather than fail the whole update.
+
+  const lastRow = sheet.getLastRow();
+  const targetRow = lastRow < 7 ? 8 : lastRow + 1;
+
+  const today = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), "MMMM d, yyyy").toUpperCase();
+
+  sheet.getRange(targetRow, 2).setValue(item.sku || "");          // B
+  sheet.getRange(targetRow, 3).setValue(item.description || "");  // C
+  sheet.getRange(targetRow, 4).setValue(item.uom || "");           // D
+  sheet.getRange(targetRow, 5).setValue(item.cost || "");          // E
+  sheet.getRange(targetRow, 6).setValue(item.srp || "");           // F
+  sheet.getRange(targetRow, 8).setValue(item.qty || "");           // H
+  sheet.getRange(targetRow, 10).setValue(item.department || "");  // J
+  sheet.getRange(targetRow, 11).setValue(today);                   // K
+}
+
+function processInventoryTransfer(payload, user, client) {
+  try {
+    const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
+    const targetSheet = ss.getSheetByName(payload.incomingSheetName);
+
+    if (!targetSheet) {
+      return { success: false, error: "Target sheet '" + payload.incomingSheetName + "' not found." };
+    }
+
+    const lastRow = targetSheet.getLastRow();
+    if (lastRow < 8) {
+      return { success: false, error: "Target sheet has no data rows starting at row 8." };
+    }
+
+    const skuValues = targetSheet.getRange(8, 1, lastRow - 7, 1).getDisplayValues();
+    const skuRowMap = {};
+    
+    for (let i = 0; i < skuValues.length; i++) {
+      const skuVal = String(skuValues[i][0]).trim();
+      if (skuVal) skuRowMap[skuVal] = i + 8;
+    }
+
+    let updatedCount = 0;
+    payload.items.forEach(function(item) {
+      const skuKey = String(item.sku).trim();
+      const targetRow = skuRowMap[skuKey];
+
+      if (targetRow) {
+        targetSheet.getRange(targetRow, 13).setValue(item.qty);
+        targetSheet.getRange(targetRow, 14).setValue(payload.formDate);
+        updatedCount++;
+      }
+    });
+
+    recordLoginLog(ss, user, client, "SUCCESS", "TRANSFERRED_INVENTORY");
+
+    return { success: true, message: "Successfully updated " + updatedCount + " items in " + payload.incomingSheetName };
+  } catch (err) {
+    return { success: false, error: err.toString() };
+  }
+}
+
+function updateUserCredentials(rowIndex, newUsername, newPassword) {
+  try {
+    const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
+    const sheet = ss.getSheetByName(SHEET_NAME);
+
+    // Defensive check: rowIndex must be a real row within USERDB's data,
+    // not just any number the client happened to send.
+    const row = Number(rowIndex);
+    if (!row || row < 2 || row > sheet.getLastRow()) {
+      return { status: "ERROR", message: "Invalid account reference." };
+    }
+
+    sheet.getRange(row, 1).setValue(newUsername);
+    sheet.getRange(row, 2).setValue(hashPassword(newPassword));
+    sheet.getRange(row, 3).setValue("ACTIVE");
+
+    const existingClient = sheet.getRange(row, 4).getDisplayValue().trim();
+    const isAdmin = newUsername.toUpperCase().includes("ADMIN") || existingClient.toUpperCase().includes("ADMIN");
+
+    recordLoginLog(ss, newUsername, "N/A", "SUCCESS", "UPDATED_CREDENTIALS");
+
+    return { status: "SUCCESS", message: "Account updated successfully! You can now log in.", clientName: existingClient, isAdmin: isAdmin };
+  } catch (error) {
+    return { status: "ERROR", message: "Failed to update account: " + error.toString() };
+  }
+}
+
+/**
+ * Core generator. Scans SERIAL_CONFIG[formKey]'s column on its sheet,
+ * finds the highest existing number for that prefix, and returns
+ * prefix + next number, zero-padded to SERIAL_PAD_LENGTH digits.
+ * Wrapped in a script lock so two simultaneous saves can never be
+ * handed the same number.
+ */
+function getNextSerial_(formKey) {
+  const cfg = SERIAL_CONFIG[formKey];
+  if (!cfg) throw new Error('Unknown serial form key: ' + formKey);
+
+  const lock = LockService.getScriptLock();
+  lock.waitLock(30000); // wait up to 30s if another save is mid-flight
+  try {
+    const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
+    const sheet = ss.getSheetByName(cfg.sheet);
+    if (!sheet) throw new Error('Sheet not found: ' + cfg.sheet);
+
+    const colIndex = columnLetterToIndex_(cfg.column);
+    const lastRow = sheet.getLastRow();
+    let maxNum = 0;
+
+    if (lastRow >= 1) {
+      const values = sheet.getRange(1, colIndex, lastRow, 1).getDisplayValues();
+      const re = new RegExp('^' + escapeRegExp_(cfg.prefix) + '(\\d+)$');
+      values.forEach(function (row) {
+        const cell = String(row[0] || '').trim();
+        const match = cell.match(re);
+        if (match) {
+          const num = parseInt(match[1], 10);
+          if (!isNaN(num) && num > maxNum) maxNum = num;
+        }
+      });
+    }
+
+    const nextNum = maxNum + 1;
+    return cfg.prefix + String(nextNum).padStart(SERIAL_PAD_LENGTH, '0');
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+/**
+ * Read-only preview used by the "NO.:" box above DATE on each form.
+ * Safe to call anytime — does not reserve/consume the number.
+ */
+function peekNextSerial(formKey) {
+  return getNextSerial_(formKey);
+}
+
+function columnLetterToIndex_(letter) {
+  let col = 0;
+  for (let i = 0; i < letter.length; i++) {
+    col = col * 26 + (letter.charCodeAt(i) - 64);
+  }
+  return col;
+}
+
+function escapeRegExp_(str) {
+  return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+/**
+ * Stamps one serial into every row of a just-written block. startRow is
+ * the first sheet row the data landed on; rowCount is how many rows
+ * were written (rows.length from the frontend payload).
+ */
+function stampSerial_(sheet, formKey, startRow, rowCount) {
+  const serial = getNextSerial_(formKey);
+  const colIndex = columnLetterToIndex_(SERIAL_CONFIG[formKey].column);
+  for (let i = 0; i < rowCount; i++) {
+    sheet.getRange(startRow + i, colIndex).setValue(serial);
+  }
+  return serial;
+}
+
+function handleSavePulloutData(data, user, client) {
+  const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
+  const sheet = ss.getSheetByName("RTV");
+  
+  if (!sheet) return createJsonResponse({ success: false, error: "'RTV' sheet not found." });
+  
+  const rows = data.rows;
+  let serial = null;
+  if (rows && rows.length > 0) {
+    const startRow = Math.max(sheet.getLastRow() + 1, 2);
+    sheet.getRange(startRow, 1, rows.length, rows[0].length).setValues(rows);
+    serial = stampSerial_(sheet, data.formKey || 'PULLOUT', startRow, rows.length);
+  }
+  
+  recordLoginLog(ss, user, client, "SUCCESS", "SAVE PULLOUT" + (serial ? " | " + serial : ""));
+  
+  return createJsonResponse({ success: true, message: "Pull-out data saved successfully.", serial: serial });
+}
+
+function handleSaveTransferData(data, user, client) {
+  const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
+  const sheet = ss.getSheetByName("TRANSFER");
+  
+  if (!sheet) return createJsonResponse({ success: false, error: "'TRANSFER' sheet not found." });
+  
+  const rows = data.rows;
+  let serial = null;
+  if (rows && rows.length > 0) {
+    const startRow = Math.max(sheet.getLastRow() + 1, 2);
+    sheet.getRange(startRow, 1, rows.length, rows[0].length).setValues(rows);
+    serial = stampSerial_(sheet, data.formKey || 'TRANSFER', startRow, rows.length);
+  }
+  
+  recordLoginLog(ss, user, client, "SUCCESS", "SAVE TRANSFER" + (serial ? " | " + serial : ""));
+  
+  return createJsonResponse({ success: true, message: "Transfer data saved successfully.", serial: serial });
+}
+
+function handleSaveRequestData(data, user, client) {
+  const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
+  const sheet = ss.getSheetByName("REQUEST");
+  
+  if (!sheet) return createJsonResponse({ success: false, error: "'REQUEST' sheet not found." });
+  
+  const rows = data.rows;
+  let serial = null;
+  if (rows && rows.length > 0) {
+    const startRow = Math.max(sheet.getLastRow() + 1, 2);
+    sheet.getRange(startRow, 1, rows.length, rows[0].length).setValues(rows);
+    serial = stampSerial_(sheet, data.formKey || 'REQUEST_RELEASED', startRow, rows.length);
+  }
+  
+  recordLoginLog(ss, user, client, "SUCCESS", "SAVE REQUEST" + (serial ? " | " + serial : ""));
+  
+  return createJsonResponse({ success: true, message: "Request data saved successfully.", serial: serial });
+}
+
+// ==========================================
+// OUTGOING FORM APPROVAL WORKFLOW
+// SUBMIT (requester) -> ADMIN APPROVED (admin, qty + e-signature) ->
+// RELEASED (outgoing department: view + print only)
+// ==========================================
+//
+// New columns added AFTER each sheet's existing serial column (nothing
+// existing is moved or overwritten):
+//   TRANSFER sheet:  U = WORKFLOW_STATUS, V = APPROVED_BY, W = APPROVED_DATE
+//   REQUEST sheet:   Y = WORKFLOW_STATUS, Z = APPROVED_BY, AA = APPROVED_DATE
+//   RTV sheet:       Y = WORKFLOW_STATUS, Z = APPROVED_BY, AA = APPROVED_DATE
+//
+// Statuses:
+//   PENDING_ADMIN_APPROVAL  -> requester submitted, waiting on admin
+//   RELEASED_TO_OUTGOING    -> admin approved qty + signed off, ready
+//                              for the outgoing department to print
+
+const WORKFLOW_CONFIG = {
+  REQUEST_RELEASED: { sheet: 'REQUEST', serialCol: 'V', statusCol: 'Y', approvedByCol: 'Z', approvedDateCol: 'AA', qtyCol: 'J' },
+  TRANSFER:          { sheet: 'TRANSFER', serialCol: 'R', statusCol: 'U', approvedByCol: 'V', approvedDateCol: 'W', qtyCol: 'J' },
+  PULLOUT:           { sheet: 'RTV',      serialCol: 'V', statusCol: 'Y', approvedByCol: 'Z', approvedDateCol: 'AA', qtyCol: 'J' }
+};
+
+const ADMIN_APPROVER_NAME = "JASMIN, CLYDIE ANN AICA MANLOGON";
+
+const WORKFLOW_NOTIF_SHEET = "WORKFLOW_NOTIFICATIONS";
+
+/**
+ * STEP 1 — requester clicks SUBMIT.
+ * Writes the rows exactly like handleSave*Data does, then stamps the
+ * new WORKFLOW_STATUS column so the row shows up in admin's pending list.
+ */
+function handleSubmitOutgoingForApproval(data, user, client) {
+  const cfg = WORKFLOW_CONFIG[data.formKey];
+  if (!cfg) return createJsonResponse({ success: false, error: "Unknown form key: " + data.formKey });
+
+  const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
+  const sheet = ss.getSheetByName(cfg.sheet);
+  if (!sheet) return createJsonResponse({ success: false, error: "'" + cfg.sheet + "' sheet not found." });
+
+  const rows = data.rows;
+  if (!rows || !rows.length) return createJsonResponse({ success: false, error: "No rows to submit." });
+
+  const startRow = Math.max(sheet.getLastRow() + 1, 2);
+  sheet.getRange(startRow, 1, rows.length, rows[0].length).setValues(rows);
+  const serial = stampSerial_(sheet, data.formKey, startRow, rows.length);
+
+  const statusColIdx = columnLetterToIndex_(cfg.statusCol);
+  const statusValues = [];
+  for (let i = 0; i < rows.length; i++) statusValues.push(["PENDING_ADMIN_APPROVAL"]);
+  sheet.getRange(startRow, statusColIdx, rows.length, 1).setValues(statusValues);
+
+  addWorkflowNotification_(ss, {
+    type: "PENDING_ADMIN_APPROVAL",
+    serial: serial,
+    formKey: data.formKey,
+    department: rows[0][0],
+    audience: "ADMIN",
+    audienceDept: "",
+    actor: user
+  });
+
+  recordLoginLog(ss, user, client, "SUCCESS", "SUBMITTED FOR APPROVAL | " + (serial || ""));
+
+  return createJsonResponse({ success: true, message: "Form submitted for admin approval.", serial: serial, status: "PENDING_ADMIN_APPROVAL" });
+}
+
+/**
+ * Admin's "PENDING APPROVALS" list — every row still awaiting review,
+ * grouped by the serial number that was stamped on submit.
+ */
+function handleGetPendingApprovals(e) {
+  try {
+    const formKey = String(e.parameter.form || "").trim();
+    const cfg = WORKFLOW_CONFIG[formKey];
+    if (!cfg) return createJsonResponse({ success: false, error: "Unknown form key: " + formKey });
+
+    const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
+    const sheet = ss.getSheetByName(cfg.sheet);
+    if (!sheet) return createJsonResponse({ success: true, groups: [] });
+
+    const lastRow = sheet.getLastRow();
+    if (lastRow < 2) return createJsonResponse({ success: true, groups: [] });
+
+    const lastCol = columnLetterToIndex_(cfg.approvedDateCol);
+    const values = sheet.getRange(2, 1, lastRow - 1, lastCol).getDisplayValues();
+
+    const statusIdx = columnLetterToIndex_(cfg.statusCol) - 1;
+    const serialIdx = columnLetterToIndex_(cfg.serialCol) - 1;
+
+    const groupsBySerial = {};
+    values.forEach(function (row, i) {
+      if (String(row[statusIdx]).trim() !== "PENDING_ADMIN_APPROVAL") return;
+      const serial = row[serialIdx];
+      if (!groupsBySerial[serial]) groupsBySerial[serial] = { serial: serial, items: [] };
+      groupsBySerial[serial].items.push({
+        rowNum: i + 2,
+        department: row[0], sku: row[1], description: row[2], uom: row[3],
+        expDate: row[4], onHand: row[5], totalOnHand: row[6],
+        cost: row[7], srp: row[8], qty: row[9]
+      });
+    });
+
+    return createJsonResponse({ success: true, groups: Object.keys(groupsBySerial).map(function (k) { return groupsBySerial[k]; }) });
+  } catch (err) {
+    return createJsonResponse({ success: false, error: err.toString() });
+  }
+}
+
+/**
+ * STEP 2 — admin reviews (optionally edits qty) and clicks
+ * "ADMIN APPROVED". Applies any qty edits, stamps status + the fixed
+ * e-signature name + timestamp, and notifies the outgoing department.
+ */
+function handleAdminReleaseForm(data, user, client) {
+  const cfg = WORKFLOW_CONFIG[data.formKey];
+  if (!cfg) return createJsonResponse({ success: false, error: "Unknown form key: " + data.formKey });
+
+  const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
+  const sheet = ss.getSheetByName(cfg.sheet);
+  if (!sheet) return createJsonResponse({ success: false, error: "'" + cfg.sheet + "' sheet not found." });
+
+  const items = data.items || []; // [{ rowNum, qty }]
+  if (!items.length) return createJsonResponse({ success: false, error: "No items to approve." });
+
+  const qtyColIdx = columnLetterToIndex_(cfg.qtyCol);
+  const statusColIdx = columnLetterToIndex_(cfg.statusCol);
+  const approvedByColIdx = columnLetterToIndex_(cfg.approvedByCol);
+  const approvedDateColIdx = columnLetterToIndex_(cfg.approvedDateCol);
+  const timestamp = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), "MMMM d, yyyy h:mm a");
+
+  items.forEach(function (it) {
+    if (!it.rowNum) return;
+    if (it.qty !== undefined && it.qty !== null && String(it.qty).trim() !== "") {
+      sheet.getRange(it.rowNum, qtyColIdx).setValue(it.qty);
+    }
+    sheet.getRange(it.rowNum, statusColIdx).setValue("RELEASED_TO_OUTGOING");
+    sheet.getRange(it.rowNum, approvedByColIdx).setValue(ADMIN_APPROVER_NAME);
+    sheet.getRange(it.rowNum, approvedDateColIdx).setValue(timestamp);
+  });
+
+  addWorkflowNotification_(ss, {
+    type: "RELEASED_TO_OUTGOING",
+    serial: data.serial || "",
+    formKey: data.formKey,
+    department: data.department || "",
+    audience: "OUTGOING",
+    audienceDept: data.department || "",
+    actor: ADMIN_APPROVER_NAME
+  });
+
+  recordLoginLog(ss, user, client, "SUCCESS", "ADMIN APPROVED & RELEASED | " + (data.serial || ""));
+
+  return createJsonResponse({
+    success: true,
+    message: "Form approved and released to the outgoing department.",
+    status: "RELEASED_TO_OUTGOING",
+    approvedBy: ADMIN_APPROVER_NAME,
+    approvedDate: timestamp
+  });
+}
+
+/**
+ * Outgoing department's "RELEASED FORMS" list — read-only, print-only.
+ * Filtered to their own department when `department` is supplied.
+ */
+function handleGetReleasedForOutgoing(e) {
+  try {
+    const formKey = String(e.parameter.form || "").trim();
+    const department = String(e.parameter.department || "").trim().toLowerCase();
+    const cfg = WORKFLOW_CONFIG[formKey];
+    if (!cfg) return createJsonResponse({ success: false, error: "Unknown form key: " + formKey });
+
+    const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
+    const sheet = ss.getSheetByName(cfg.sheet);
+    if (!sheet) return createJsonResponse({ success: true, groups: [] });
+
+    const lastRow = sheet.getLastRow();
+    if (lastRow < 2) return createJsonResponse({ success: true, groups: [] });
+
+    const lastCol = columnLetterToIndex_(cfg.approvedDateCol);
+    const values = sheet.getRange(2, 1, lastRow - 1, lastCol).getDisplayValues();
+
+    const statusIdx = columnLetterToIndex_(cfg.statusCol) - 1;
+    const serialIdx = columnLetterToIndex_(cfg.serialCol) - 1;
+    const approvedByIdx = columnLetterToIndex_(cfg.approvedByCol) - 1;
+    const approvedDateIdx = columnLetterToIndex_(cfg.approvedDateCol) - 1;
+
+    const groupsBySerial = {};
+    values.forEach(function (row) {
+      if (String(row[statusIdx]).trim() !== "RELEASED_TO_OUTGOING") return;
+      if (department && String(row[0]).trim().toLowerCase() !== department) return;
+      const serial = row[serialIdx];
+      if (!groupsBySerial[serial]) {
+        groupsBySerial[serial] = { serial: serial, approvedBy: row[approvedByIdx], approvedDate: row[approvedDateIdx], items: [] };
+      }
+      groupsBySerial[serial].items.push({
+        department: row[0], sku: row[1], description: row[2], uom: row[3],
+        expDate: row[4], onHand: row[5], totalOnHand: row[6],
+        cost: row[7], srp: row[8], qty: row[9]
+      });
+    });
+
+    return createJsonResponse({ success: true, groups: Object.keys(groupsBySerial).map(function (k) { return groupsBySerial[k]; }) });
+  } catch (err) {
+    return createJsonResponse({ success: false, error: err.toString() });
+  }
+}
+
+// ------------------------------------------------------------------
+// NOTIFICATIONS — a simple append-only sheet, mirrors the existing
+// mail-badge pattern already used for INCOMING pending items.
+// ------------------------------------------------------------------
+
+function addWorkflowNotification_(ss, notif) {
+  let sheet = ss.getSheetByName(WORKFLOW_NOTIF_SHEET);
+  if (!sheet) {
+    sheet = ss.insertSheet(WORKFLOW_NOTIF_SHEET);
+    sheet.appendRow(["TIMESTAMP", "TYPE", "SERIAL", "FORM_KEY", "DEPARTMENT", "AUDIENCE", "AUDIENCE_DEPT", "ACTOR", "READ"]);
+  }
+  sheet.appendRow([
+    Utilities.formatDate(new Date(), Session.getScriptTimeZone(), "MMMM d, yyyy h:mm:ss a"),
+    notif.type || "", notif.serial || "", notif.formKey || "", notif.department || "",
+    notif.audience || "", notif.audienceDept || "", notif.actor || "", "NO"
+  ]);
+}
+
+/** Unread-count / list for the dashboard mail badge. audience = ADMIN | OUTGOING */
+function handleGetWorkflowNotifications(e) {
+  try {
+    const audience = String(e.parameter.audience || "").trim().toUpperCase();
+    const dept = String(e.parameter.department || "").trim().toLowerCase();
+    const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
+    const sheet = ss.getSheetByName(WORKFLOW_NOTIF_SHEET);
+    if (!sheet) return createJsonResponse({ success: true, notifications: [], count: 0 });
+
+    const lastRow = sheet.getLastRow();
+    if (lastRow < 2) return createJsonResponse({ success: true, notifications: [], count: 0 });
+
+    const values = sheet.getRange(2, 1, lastRow - 1, 9).getDisplayValues();
+    const out = [];
+    values.forEach(function (row, i) {
+      const rowAudience = String(row[5]).trim().toUpperCase();
+      const rowDept = String(row[6]).trim().toLowerCase();
+      const isRead = String(row[8]).trim().toUpperCase() === "YES";
+      if (isRead || rowAudience !== audience) return;
+      if (audience === "OUTGOING" && dept && rowDept !== dept) return;
+      out.push({ rowNum: i + 2, timestamp: row[0], type: row[1], serial: row[2], formKey: row[3], department: row[4], actor: row[7] });
+    });
+
+    return createJsonResponse({ success: true, notifications: out, count: out.length });
+  } catch (err) {
+    return createJsonResponse({ success: false, error: err.toString() });
+  }
+}
+
+function handleMarkWorkflowNotificationsRead(data) {
+  try {
+    const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
+    const sheet = ss.getSheetByName(WORKFLOW_NOTIF_SHEET);
+    if (!sheet) return createJsonResponse({ success: true });
+    const rowNums = data.rowNums || [];
+    rowNums.forEach(function (r) { sheet.getRange(r, 9).setValue("YES"); });
+    return createJsonResponse({ success: true });
+  } catch (err) {
+    return createJsonResponse({ success: false, error: err.toString() });
+  }
+}
+
+// ==========================================
+// INCOMING MODULE — pending fetch + mark-received
+// ==========================================
+
+// Column layout used by the three "outgoing" sheets, expressed as 1-based
+// spreadsheet column numbers (A=1). These mirror exactly what the trimmed
+// REQUEST_AND_RELEASED_FORM / TRANSFER_FORM / PULLOUT_FORM screens now
+// write, and what HISTORY_CONFIGS on the front-end already expects.
+// OUTGOING REMARKS (added) — an optional note captured on the OUTGOING
+// side of each form (REQUEST/TRANSFER/PULLOUT), written directly by the
+// front-end as the last column of each save row. Not read or written
+// anywhere in Code.gs itself, listed here only so the column is documented
+// alongside the rest of the sheet layout:
+//   TRANSFER sheet: column S (one past the MWTF- serial in column R)
+//   REQUEST sheet:  column W (one past the MWRRF- serial in column V)
+//   RTV sheet:       column W (one past the MWPF- serial in column V)
+const INCOMING_SHEET_LAYOUT = {
+  REQUEST: {
+    deptCol: 1,        // A - outgoing/requesting dept
+    skuCol: 2,          // B
+    descCol: 3,         // C
+    uomCol: 4,           // D
+    qtyCol: 10,           // J - requested/transfer qty
+    writeBackStartCol: 15, // O - RECEIVED INFORMATION block (EXP, QTY, UOM, REMARKS)
+    incomingCol: 19,      // S
+    dateCol: 20,          // T
+    statusCol: 21          // U
+  },
+  TRANSFER: {
+    deptCol: 1,
+    skuCol: 2,
+    descCol: 3,
+    uomCol: 4,
+    qtyCol: 10,
+    writeBackStartCol: 11, // K - RECEIVED INFORMATION block (only extra block on TRANSFER)
+    incomingCol: 15,       // O
+    dateCol: 16,           // P
+    statusCol: 17          // Q
+  },
+  RTV: {
+    deptCol: 1,
+    skuCol: 2,
+    descCol: 3,
+    uomCol: 4,
+    qtyCol: 10,
+    writeBackStartCol: 15, // O - RETURN INFORMATION block
+    incomingCol: 19,       // S
+    dateCol: 20,           // T
+    statusCol: 21          // U
+  }
+};
+
+// Loosely compares two date-ish strings by calendar day, so a native
+// <input type="date"> value (2026-09-10) matches the "SEPTEMBER 10, 2026"
+// style string the rest of the app stores in the DATE column.
+function isSameCalendarDate(a, b) {
+  if (!a || !b) return false;
+  const da = new Date(a);
+  const db = new Date(b);
+  if (isNaN(da.getTime()) || isNaN(db.getTime())) {
+    return String(a).trim().toLowerCase() === String(b).trim().toLowerCase();
+  }
+  return da.getFullYear() === db.getFullYear() &&
+         da.getMonth() === db.getMonth() &&
+         da.getDate() === db.getDate();
+}
+
+function handleGetIncomingPending(e) {
+  try {
+    const sheetName = String(e.parameter.sheet || "").trim().toUpperCase();
+    const layout = INCOMING_SHEET_LAYOUT[sheetName];
+    if (!layout) {
+      return createJsonResponse({ success: false, error: "Unknown or unsupported sheet: " + sheetName });
+    }
+
+    const selectDept = String(e.parameter.selectDept || "").trim().toLowerCase();
+    const incomingDeptParam = String(e.parameter.incomingDept || "").trim().toLowerCase();
+    const formDate = String(e.parameter.date || "").trim();
+
+    if (!selectDept) {
+      return createJsonResponse({ success: false, error: "Missing selectDept." });
+    }
+
+    const account = getUserAccount(e.parameter.user);
+    if (!account) {
+      return createJsonResponse({ success: false, error: "Unknown user." });
+    }
+
+    // Admins may leave incomingDept blank to view items incoming to ANY
+    // department (blank = no filter). Non-admins are always locked to
+    // their own client — they cannot widen scope even by supplying a
+    // different value, matching the scoping rule used everywhere else
+    // (getScopedInventory / getFilteredHistory / etc).
+    let incomingDept;
+    if (account.isAdmin) {
+      incomingDept = incomingDeptParam; // '' = ALL departments
+    } else {
+      incomingDept = String(account.client || "").trim().toLowerCase();
+      if (!incomingDept) {
+        return createJsonResponse({ success: false, error: "No client is associated with your account." });
+      }
+    }
+
+    const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
+    const sheet = ss.getSheetByName(sheetName === "RTV" ? "RTV" : sheetName);
+    if (!sheet) {
+      return createJsonResponse({ success: false, error: "'" + sheetName + "' sheet not found." });
+    }
+
+    const lastRow = sheet.getLastRow();
+    if (lastRow < 2) {
+      return createJsonResponse({ success: true, data: [] });
+    }
+
+    const width = layout.statusCol;
+    const values = sheet.getRange(2, 1, lastRow - 1, width).getDisplayValues();
+
+    const pending = [];
+    values.forEach(function (row, i) {
+      const rowDept = row[layout.deptCol - 1] ? String(row[layout.deptCol - 1]).trim().toLowerCase() : "";
+      const rowIncoming = row[layout.incomingCol - 1] ? String(row[layout.incomingCol - 1]).trim().toLowerCase() : "";
+      const rowDate = row[layout.dateCol - 1] ? String(row[layout.dateCol - 1]).trim() : "";
+      const rowStatus = row[layout.statusCol - 1] ? String(row[layout.statusCol - 1]).trim() : "";
+
+      if (rowDept !== selectDept) return;
+      if (incomingDept && rowIncoming !== incomingDept) return; // blank = ALL (admins only)
+      if (formDate && !isSameCalendarDate(rowDate, formDate)) return;
+      if (rowStatus !== "") return; // already RECEIVED / not blank
+
+      pending.push({
+        rowIndex: 2 + i,
+        sku: row[layout.skuCol - 1] || "",
+        description: row[layout.descCol - 1] || "",
+        uom: row[layout.uomCol - 1] || "",
+        qty: row[layout.qtyCol - 1] || ""
+      });
+    });
+
+    return createJsonResponse({ success: true, data: pending });
+  } catch (err) {
+    return createJsonResponse({ success: false, error: err.toString() });
+  }
+}
+
+function handleGetIncomingPendingForDepartment(e) {
+  try {
+    const sheetName = String(e.parameter.sheet || "").trim().toUpperCase();
+    const layout = INCOMING_SHEET_LAYOUT[sheetName];
+    if (!layout) {
+      return createJsonResponse({ success: false, error: "Unsupported incoming form: " + sheetName });
+    }
+
+    const workflowKey = sheetName === "REQUEST"
+      ? "REQUEST_RELEASED"
+      : sheetName === "RTV"
+        ? "PULLOUT"
+        : "TRANSFER";
+    const workflow = WORKFLOW_CONFIG[workflowKey];
+    const account = getUserAccount(e.parameter.user);
+
+    if (!account) {
+      return createJsonResponse({ success: false, error: "Unknown user." });
+    }
+
+    const incomingDept = account.isAdmin
+      ? String(e.parameter.incomingDept || "").trim().toLowerCase()
+      : String(account.client || "").trim().toLowerCase();
+
+    if (!account.isAdmin && !incomingDept) {
+      return createJsonResponse({ success: false, error: "No client is associated with this account." });
+    }
+
+    const sourceSheetName = sheetName === "RTV" ? "RTV" : sheetName;
+    const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
+    const sheet = ss.getSheetByName(sourceSheetName);
+    if (!sheet || sheet.getLastRow() < 2) {
+      return createJsonResponse({ success: true, data: [] });
+    }
+
+    // Approval and received statuses are different columns for REQUEST/RTV.
+    // Read through the workflow status column so approved rows are found.
+    const workflowStatusCol = columnLetterToIndex_(workflow.statusCol);
+    const readWidth = Math.max(layout.incomingCol, layout.qtyCol, workflowStatusCol);
+    const values = sheet.getRange(2, 1, sheet.getLastRow() - 1, readWidth).getDisplayValues();
+    const pending = [];
+
+    values.forEach(function(row, index) {
+      const rowIncoming = String(row[layout.incomingCol - 1] || "").trim().toLowerCase();
+      const approvalStatus = String(row[workflowStatusCol - 1] || "").trim().toUpperCase();
+      const receivedStatus = String(row[layout.statusCol - 1] || "").trim();
+
+      if (approvalStatus !== "RELEASED_TO_OUTGOING") return;
+      if (receivedStatus !== "") return;
+      if (incomingDept && rowIncoming !== incomingDept) return;
+
+      pending.push({
+        rowIndex: index + 2,
+        sku: row[layout.skuCol - 1] || "",
+        description: row[layout.descCol - 1] || "",
+        uom: row[layout.uomCol - 1] || "",
+        qty: row[layout.qtyCol - 1] || ""
+      });
+    });
+
+    return createJsonResponse({ success: true, data: pending });
+  } catch (err) {
+    return createJsonResponse({ success: false, error: err.toString() });
+  }
+}
+
+/**
+ * Lightweight companion to handleGetIncomingPending — just a count, and
+ * with no selectDept requirement, since the "mail popup" cares about
+ * everything incoming to the caller regardless of which department it
+ * came from. Powers the notification shown when the Incoming module opens.
+ */
+function handleGetIncomingPendingCount(e) {
+  try {
+    const sheetName = String(e.parameter.sheet || "").trim().toUpperCase();
+    const layout = INCOMING_SHEET_LAYOUT[sheetName];
+    if (!layout) {
+      return createJsonResponse({ success: false, error: "Unknown or unsupported sheet: " + sheetName });
+    }
+
+    const account = getUserAccount(e.parameter.user);
+    if (!account) {
+      return createJsonResponse({ success: false, error: "Unknown user." });
+    }
+
+    // Admins get a count across ALL departments; non-admins are always
+    // scoped to their own client, regardless of what's requested.
+    const incomingDept = account.isAdmin
+      ? String(e.parameter.incomingDept || "").trim().toLowerCase()
+      : String(account.client || "").trim().toLowerCase();
+
+    if (!account.isAdmin && !incomingDept) {
+      return createJsonResponse({ success: true, count: 0 });
+    }
+
+    const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
+    const sheet = ss.getSheetByName(sheetName === "RTV" ? "RTV" : sheetName);
+    if (!sheet) {
+      return createJsonResponse({ success: false, error: "'" + sheetName + "' sheet not found." });
+    }
+
+    const lastRow = sheet.getLastRow();
+    if (lastRow < 2) {
+      return createJsonResponse({ success: true, count: 0 });
+    }
+
+    const width = layout.statusCol;
+    const values = sheet.getRange(2, 1, lastRow - 1, width).getDisplayValues();
+
+    let count = 0;
+    values.forEach(function (row) {
+      const rowIncoming = row[layout.incomingCol - 1] ? String(row[layout.incomingCol - 1]).trim().toLowerCase() : "";
+      const rowStatus = row[layout.statusCol - 1] ? String(row[layout.statusCol - 1]).trim() : "";
+      if (rowStatus !== "") return; // already processed
+      if (incomingDept && rowIncoming !== incomingDept) return; // blank = ALL (admins only)
+      count++;
+    });
+
+    return createJsonResponse({ success: true, count: count });
+  } catch (err) {
+    return createJsonResponse({ success: false, error: err.toString() });
+  }
+}
+
+// Maps each "outgoing" sheet to the archive sheet its items land on once
+// marked RECEIVED. Resolved entirely server-side from the source sheet
+// name — a client can never choose its own destination sheet or column.
+// serialFormKey/SERIAL_CONFIG.INCOMING_* below are kept for reference but
+// are no longer used to mint a number here — handleMarkIncomingReceived
+// now carries the row's ORIGINAL serial (from the source sheet) forward
+// onto the archive row instead of issuing a new one.
+const INCOMING_RECEIVE_CONFIG = {
+  REQUEST:  { destSheet: 'RECEIVED',   serialFormKey: 'INCOMING_RECEIVED' },
+  TRANSFER: { destSheet: 'TRANSFERED', serialFormKey: 'INCOMING_TRANSFERED' },
+  RTV:      { destSheet: 'RETURN',     serialFormKey: 'INCOMING_RETURN' }
+};
+
+function handleMarkIncomingReceived(data, user, client) {
+  try {
+    // Accept either field name from the frontend
+    const sheetName = String(data.sourceSheet || data.sheetName || "").trim().toUpperCase();
+    const layout = INCOMING_SHEET_LAYOUT[sheetName];
+    const receiveCfg = INCOMING_RECEIVE_CONFIG[sheetName];
+    if (!layout || !receiveCfg) {
+      return createJsonResponse({ success: false, error: "Unknown or unsupported sheet: " + sheetName });
+    }
+
+    const rowIndex = Number(data.rowIndex);
+    if (!rowIndex || rowIndex < 2) {
+      return createJsonResponse({ success: false, error: "Invalid row index." });
+    }
+
+    const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
+    const sourceSheet = ss.getSheetByName(sheetName === "RTV" ? "RTV" : sheetName);
+    if (!sourceSheet) {
+      return createJsonResponse({ success: false, error: "'" + sheetName + "' sheet not found." });
+    }
+    if (rowIndex > sourceSheet.getLastRow()) {
+      return createJsonResponse({ success: false, error: "Row is out of range." });
+    }
+
+    const destSheet = ss.getSheetByName(receiveCfg.destSheet);
+    if (!destSheet) {
+      return createJsonResponse({ success: false, error: "'" + receiveCfg.destSheet + "' sheet not found." });
+    }
+
+    // Double-booking guard: refuse if this row was already processed
+    const currentStatus = sourceSheet.getRange(rowIndex, layout.statusCol).getDisplayValue();
+    if (currentStatus && String(currentStatus).trim() !== "") {
+      return createJsonResponse({ success: false, error: "This item was already marked as received." });
+    }
+
+    // 1. Write EXP DATE / QTY / UOM / REMARKS into the source row
+    sourceSheet.getRange(rowIndex, layout.writeBackStartCol, 1, 4).setValues([[
+      data.expDate || "",
+      data.qty || "",
+      data.uom || "",
+      data.remarks || ""
+    ]]);
+
+    // 2. Flip source row status to TRANSFER
+    sourceSheet.getRange(rowIndex, layout.statusCol).setValue("TRANSFER");
+
+    // 3. FORCE SERIAL FROM COLUMN V (Col 22) FOR REQUEST SHEET
+    // If layout.statusCol + 1 isn't resolving to Column V, we explicitly target 22 for REQUEST
+    let serialCol = layout.statusCol + 1;
+    if (sheetName === "REQUEST") {
+      serialCol = 22; // Column V
+    }
+
+    // Read Serial via getValue() & getDisplayValue() as safety fallback
+    let originalSerial = sourceSheet.getRange(rowIndex, serialCol).getDisplayValue();
+    if (!originalSerial || originalSerial.toString().trim() === "") {
+      originalSerial = sourceSheet.getRange(rowIndex, serialCol).getValue();
+    }
+    originalSerial = String(originalSerial || "").trim();
+
+    // 4. Copy updated source row to archive sheet with original serial from Col V
+    const rowValues = sourceSheet.getRange(rowIndex, 1, 1, layout.statusCol).getValues();
+    const destRow = Math.max(destSheet.getLastRow() + 1, 2);
+    destSheet.getRange(destRow, 1, 1, layout.statusCol).setValues(rowValues);
+    destSheet.getRange(destRow, layout.statusCol).setValue("RECEIVED");
+    
+    // Target column in archive sheet (Column V / Col 22 for REQUEST)
+    destSheet.getRange(destRow, serialCol).setValue(originalSerial);
+
+    recordLoginLog(ss, user, client, "SUCCESS",
+      "MARKED_RECEIVED: " + sheetName + " row " + rowIndex + " -> " + receiveCfg.destSheet + " row " + destRow + " | " + originalSerial);
+
+    return createJsonResponse({
+      success: true,
+      message: "Item marked as received.",
+      serialNumber: originalSerial,
+      destSheet: receiveCfg.destSheet
+    });
+  } catch (err) {
+    return createJsonResponse({ success: false, error: err.toString() });
+  }
+}
+
+// ==========================================
+// MAIL-STYLE INCOMING NOTIFICATION
+// ==========================================
+// Which outgoing sheet backs each notification "category" and the
+// human-readable label used in the popup text (e.g. "PENDING FOR
+// TRANSFER FROM ...").
+const INCOMING_MESSAGE_CATEGORIES = {
+  REQUEST:  { sheet: 'REQUEST',  label: 'REQUEST AND RELEASED' },
+  TRANSFER: { sheet: 'TRANSFER', label: 'TRANSFER' },
+  RTV:      { sheet: 'RTV',      label: 'PULL OUT' }
+};
+
+// Canonical calendar-day key for grouping (independent of whatever
+// string format the DATE column happens to display). Falls back to the
+// raw lowercased string when the value can't be parsed as a date, so
+// two identical unparseable strings still group together.
+function incomingDateKey(dateStr) {
+  const raw = String(dateStr || "").trim();
+  if (!raw) return "";
+  const d = new Date(raw);
+  if (!isNaN(d.getTime())) {
+    return d.getFullYear() + "-" + (d.getMonth() + 1) + "-" + d.getDate();
+  }
+  return raw.toLowerCase();
+}
+
+/**
+ * Powers the mail-envelope notification shown when the Incoming Forms
+ * module opens. For each of the 3 outgoing sheets (REQUEST/TRANSFER/RTV)
+ * this finds PENDING rows (status column blank) addressed to the
+ * caller's department, then counts them as ONE "message" per unique
+ * (sender department, calendar date) pair:
+ *   - Several pending rows from the SAME sender on the SAME date
+ *     collapse into a single message.
+ *   - The SAME sender sending again on a NEW date produces a separate,
+ *     additional message.
+ * Returns a per-category breakdown (grouped by sender, so the popup can
+ * say "(3) PENDING FOR TRANSFER FROM BNB HOTEL") plus a grand totalCount
+ * for the envelope badge itself.
+ */
+function handleGetIncomingMessages(e) {
+  try {
+    const account = getUserAccount(e.parameter.user);
+    if (!account) {
+      return createJsonResponse({ success: false, error: "Unknown user." });
+    }
+
+    // Admins may pass an explicit incomingDept to check a specific
+    // department's mailbox; blank = ALL departments. Non-admins are
+    // always locked to their own client, matching every other
+    // Incoming-module endpoint (they can never widen scope).
+    const incomingDept = account.isAdmin
+      ? String(e.parameter.incomingDept || "").trim().toLowerCase()
+      : String(account.client || "").trim().toLowerCase();
+
+    if (!account.isAdmin && !incomingDept) {
+      return createJsonResponse({ success: true, totalCount: 0, categories: {} });
+    }
+
+    const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
+    const categories = {};
+    let totalCount = 0;
+
+    Object.keys(INCOMING_MESSAGE_CATEGORIES).forEach(function (key) {
+      const meta = INCOMING_MESSAGE_CATEGORIES[key];
+      const layout = INCOMING_SHEET_LAYOUT[key];
+      const sheet = ss.getSheetByName(meta.sheet);
+
+      // senderKey (uppercased, for de-duping) -> { label, dates: {dateKey: true} }
+      const senderDates = {};
+
+      if (sheet) {
+        const lastRow = sheet.getLastRow();
+        if (lastRow >= 2) {
+          const width = layout.statusCol;
+          const values = sheet.getRange(2, 1, lastRow - 1, width).getDisplayValues();
+
+          values.forEach(function (row) {
+            const rowStatus = row[layout.statusCol - 1] ? String(row[layout.statusCol - 1]).trim() : "";
+            if (rowStatus !== "") return; // already RECEIVED / processed
+
+            const rowIncoming = row[layout.incomingCol - 1] ? String(row[layout.incomingCol - 1]).trim().toLowerCase() : "";
+            if (incomingDept && rowIncoming !== incomingDept) return; // blank = ALL (admins only)
+
+            const rowSender = row[layout.deptCol - 1] ? String(row[layout.deptCol - 1]).trim() : "";
+            if (!rowSender) return;
+
+            const rowDateKey = incomingDateKey(row[layout.dateCol - 1]);
+            if (!rowDateKey) return;
+
+            const senderKey = rowSender.toUpperCase();
+            if (!senderDates[senderKey]) {
+              senderDates[senderKey] = { label: rowSender, dates: {} };
+            }
+            senderDates[senderKey].dates[rowDateKey] = true;
+          });
+        }
+      }
+
+      const bySender = Object.keys(senderDates).map(function (senderKey) {
+        const entry = senderDates[senderKey];
+        return { sender: entry.label, count: Object.keys(entry.dates).length };
+      }).sort(function (a, b) { return b.count - a.count; });
+
+      const categoryTotal = bySender.reduce(function (sum, s) { return sum + s.count; }, 0);
+      totalCount += categoryTotal;
+
+      categories[key] = { label: meta.label, total: categoryTotal, bySender: bySender };
+    });
+
+    return createJsonResponse({ success: true, totalCount: totalCount, categories: categories });
+  } catch (err) {
+    return createJsonResponse({ success: false, error: err.toString() });
+  }
+}
+
+function handleUpdateInventoryItem(data, user, client) {
+  try {
+    const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
+    const account = getUserAccount(user);
+
+    if (!account) {
+      return createJsonResponse({ success: false, error: "Unknown user." });
+    }
+
+    const requestedSheetName = String(data.sheetName || "").trim();
+    if (!requestedSheetName) {
+      return createJsonResponse({ success: false, error: "Missing inventory department." });
+    }
+
+    // ADMIN may update any inventory sheet.
+    // NORMAL USER may update only their USERDB client sheet.
+    const allowedSheetName = account.isAdmin
+      ? requestedSheetName
+      : String(account.client || "").trim();
+
+    if (!allowedSheetName) {
+      return createJsonResponse({ success: false, error: "No client is associated with this account." });
+    }
+
+    if (!account.isAdmin && requestedSheetName.toLowerCase() !== allowedSheetName.toLowerCase()) {
+      recordLoginLog(ss, user, account.client, "DENIED", "UNAUTHORIZED_INVENTORY_UPDATE_ATTEMPT: " + requestedSheetName);
+      return createJsonResponse({ success: false, error: "Access denied. You can only update your own client inventory." });
+    }
+
+    const sheet = ss.getSheetByName(allowedSheetName);
+    if (!sheet) {
+      return createJsonResponse({ success: false, error: "Target sheet '" + allowedSheetName + "' not found." });
+    }
+
+    const rowIndex = Number(data.rowIndex);
+    if (!rowIndex || rowIndex < 8 || rowIndex > sheet.getLastRow()) {
+      return createJsonResponse({ success: false, error: "Invalid inventory row." });
+    }
+
+    if (data.colM !== undefined) sheet.getRange(rowIndex, 13).setValue(data.colM);
+    if (data.colN !== undefined) sheet.getRange(rowIndex, 14).setValue(data.colN);
+    if (data.colP !== undefined) sheet.getRange(rowIndex, 16).setValue(data.colP);
+    if (data.colQ !== undefined) sheet.getRange(rowIndex, 17).setValue(data.colQ);
+    
+// Force Google Sheets to compute formulas before reading
+    SpreadsheetApp.flush();
+
+    // Read the calculated formula value from Column AA (Column 27). This
+    // used to be Column Z before a column was deleted from the department
+    // sheets, which shifted this formula column one to the right.
+    const rawZ = sheet.getRange(rowIndex, 27).getValue();
+    const rawZString = String(rawZ || "").trim().toLowerCase();
+    
+    // Check if Column AA explicitly says "EXPIRED"
+    const isExpired = rawZString === "expired";
+
+    // Numeric check for target <= 90 (bypassed if expired)
+    const zValue = Number(rawZ);
+    const isBlank = rawZ === null || rawZ === undefined || rawZString === "";
+    const targetReached = !isExpired && !isBlank && !isNaN(zValue) && zValue <= 90;
+
+    recordLoginLog(ss, user, account.client, "SUCCESS", "UPDATED_INVENTORY_ITEM: " + allowedSheetName);
+
+    return createJsonResponse({ 
+      success: true, 
+      message: "Inventory item updated successfully.",
+      isExpired: isExpired,
+      targetReached: targetReached,
+      cellValue: rawZ,
+      cellNotation: "AA" + rowIndex
+    });
+  } catch (err) {
+    return createJsonResponse({ success: false, error: err.toString() });
+  }
+}
+
+function withScriptLock_(operation) {
+  const lock = LockService.getScriptLock();
+  lock.waitLock(30000);
+  try {
+    return operation();
+  } finally {
+    lock.releaseLock();
+  }
+}
