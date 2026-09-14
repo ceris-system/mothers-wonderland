@@ -2193,6 +2193,8 @@ window.closeInventoryModal = function() {
 // ==========================================
 
 let allFetchedProducts = [];
+let productCatalogCache = null;
+let productCatalogPromise = null;
 
 function escapeHtml(str) {
     if (str === null || str === undefined) return '';
@@ -2225,50 +2227,22 @@ async function openProductListModal() {
 
     const tableBody = document.getElementById('productListTableBody');
     if (tableBody) {
-        tableBody.innerHTML = '<tr><td colspan="7" style="text-align:center; padding:15px; border:1px solid #000;">Loading products...</td></tr>';
+        tableBody.innerHTML = productCatalogCache
+            ? ''
+            : '<tr><td colspan="7" style="text-align:center; padding:15px; border:1px solid #000;">Loading products...</td></tr>';
     }
 
     try {
         if (!window.API) return;
 
         const selectedOutlet = rawOutlet.toLowerCase();
-        // DATA sheet is a separate, narrower sheet from the per-department
-        // inventory tabs — it only goes out to column I (SRP/COST are
-        // optional extra columns beyond the core A-G layout).
-        const url = `${window.API}?sheet=DATA&range=A1:I&token=${encodeURIComponent(window.API_TOKEN)}`;
-        const response = await fetch(url);
-        const result = await response.json();
+        if (productCatalogCache) {
+            allFetchedProducts = productCatalogCache.filter(item => item.outlet === selectedOutlet);
+            renderProductTable(allFetchedProducts);
+        }
 
-        let rawData = Array.isArray(result) ? result : (result.values || result.data || []);
-
-        // Column mapping (0-indexed from column A of the DATA sheet):
-        // A=SKU CODE, B=PRODUCT DESCRIPTION, C=UOM, D=EXPIRATION DATE,
-        // E=QTY ONHAND, F=TOTAL ONHAND, G=LOCATION (outlet match),
-        // H=COST (optional), I=SRP (optional)
-        allFetchedProducts = [];
-        rawData.forEach((row, index) => {
-            if (index === 0) return;
-            
-            let sku = Array.isArray(row) ? (row[0] || '') : '';
-            let description = Array.isArray(row) ? (row[1] || '') : '';
-            let uom = Array.isArray(row) ? (row[2] || '-') : '-';
-            
-            let rawExpDate = Array.isArray(row) ? row[3] : '';
-            let expDate = formatExpirationDate(rawExpDate);
-
-            let qtyOnhand = Array.isArray(row) ? (row[4] || '0') : '0';
-            let totalOnhand = Array.isArray(row) ? (row[5] || '0') : '0';
-            let outletMatch = Array.isArray(row) ? (row[6] || '') : '';
-            let cost = Array.isArray(row) ? (row[7] || '0') : '0';
-            let srp = Array.isArray(row) ? (row[8] || '0') : '0';
-
-            if (String(outletMatch).trim().toLowerCase() === selectedOutlet) {
-                if (sku !== '' || description !== '') {
-                    allFetchedProducts.push({ sku, description, uom, expDate, qtyOnhand, totalOnhand, cost, srp });
-                }
-            }
-        });
-
+        await preloadProductCatalog();
+        allFetchedProducts = productCatalogCache.filter(item => item.outlet === selectedOutlet);
         renderProductTable(allFetchedProducts);
 
     } catch (error) {
@@ -2671,6 +2645,9 @@ async function loadOutgoingModuleCode(container) {
             </div>
         `;
         updateFormCategoryNotificationBadges();
+        preloadProductCatalog().catch(error => {
+            console.error('Product catalog preload failed:', error);
+        });
     } catch (error) {
         console.error(error);
         container.innerHTML = `<p style="padding: 20px; color: red;">Error loading outgoing module.</p>`;
@@ -3921,13 +3898,24 @@ function getMailCacheStorageKey() {
     return 'incomingMailCache_' + user;
 }
 
+function getWorkflowCacheStorageKey() {
+    const user = window.sessionUser || loggedInUser || localStorage.getItem('activeUser') || 'default';
+    return 'workflowMailCache_' + user;
+}
+
 // Fired the moment the dashboard is shown (fresh login OR a page-reload
-// session restore — see showDashboard). The badge is rendered only from the
-// fresh server response so deleted source rows cannot leave a stale local
-// notification visible.
+// session restore — see showDashboard). A cached value paints immediately;
+// the live server response corrects it in the background.
 function primeIncomingMessagesCache() {
     try {
-        localStorage.removeItem(getMailCacheStorageKey());
+        const stored = localStorage.getItem(getMailCacheStorageKey());
+        if (stored) {
+            const parsed = JSON.parse(stored);
+            if (parsed && parsed.totalCount) {
+                incomingMessagesCache = parsed;
+                updateDashboardMailBadge(incomingMessagesCache, { persist: false });
+            }
+        }
     } catch (e) { /* ignore corrupt/blocked local cache */ }
 
     // Prefer the speculative fetch kicked off in parallel with the login
@@ -5183,6 +5171,7 @@ async function resetWorkflowNotifications() {
     incomingMessagesCache = null;
     try {
         localStorage.removeItem(getMailCacheStorageKey());
+        localStorage.removeItem(getWorkflowCacheStorageKey());
     } catch (error) {
         // Ignore blocked local storage; the visible badge is still cleared.
     }
@@ -5216,6 +5205,18 @@ async function resetWorkflowNotifications() {
 async function refreshWorkflowBadge() {
     const scope = getSessionScope();
     const audience = scope.isAdmin ? 'ADMIN' : 'OUTGOING';
+    try {
+        const stored = localStorage.getItem(getWorkflowCacheStorageKey());
+        if (stored) {
+            const parsed = JSON.parse(stored);
+            if (parsed && parsed.count) {
+                workflowMessagesCache = parsed;
+                renderCombinedHeaderBadge();
+            }
+        }
+    } catch (error) {
+        // Ignore corrupt or unavailable local storage.
+    }
     try {
         const notificationUrl = `${window.API}?action=getWorkflowNotifications&audience=${audience}&department=${encodeURIComponent(scope.client || '')}&token=${encodeURIComponent(window.API_TOKEN)}`;
         const notificationResponse = await fetch(notificationUrl);
@@ -5306,4 +5307,56 @@ function updateFormCategoryNotificationBadges() {
         button.style.position = 'relative';
         button.appendChild(badge);
     });
+}
+            try {
+                localStorage.setItem(getWorkflowCacheStorageKey(), JSON.stringify(workflowMessagesCache));
+            } catch (error) {
+                // Ignore unavailable or full local storage.
+            }
+
+async function preloadProductCatalog() {
+            try {
+                localStorage.removeItem(getWorkflowCacheStorageKey());
+            } catch (error) {
+                // Ignore unavailable local storage.
+            }
+    if (productCatalogCache) return productCatalogCache;
+    if (productCatalogPromise) return productCatalogPromise;
+
+    productCatalogPromise = (async () => {
+        const url = `${window.API}?sheet=DATA&range=A1:I&token=${encodeURIComponent(window.API_TOKEN)}`;
+        const response = await fetch(url);
+        const result = await response.json();
+        const rawData = Array.isArray(result) ? result : (result.values || result.data || []);
+
+        productCatalogCache = [];
+        rawData.forEach((row, index) => {
+            if (index === 0 || !Array.isArray(row)) return;
+
+            const sku = row[0] || '';
+            const description = row[1] || '';
+            const uom = row[2] || '-';
+            const outlet = String(row[6] || '').trim().toLowerCase();
+            if (!outlet || (sku === '' && description === '')) return;
+
+            productCatalogCache.push({
+                sku,
+                description,
+                uom,
+                outlet,
+                expDate: formatExpirationDate(row[3]),
+                qtyOnhand: row[4] || '0',
+                totalOnhand: row[5] || '0',
+                cost: row[7] || '0',
+                srp: row[8] || '0'
+            });
+        });
+
+        return productCatalogCache;
+    })().catch(error => {
+        productCatalogPromise = null;
+        throw error;
+    });
+
+    return productCatalogPromise;
 }
