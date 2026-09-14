@@ -5268,8 +5268,18 @@ async function refreshWorkflowBadge() {
                     PULLOUT: 'PULL OUT'
                 }[formKey]))
             };
+            try {
+                localStorage.setItem(getWorkflowCacheStorageKey(), JSON.stringify(workflowMessagesCache));
+            } catch (error) {
+                // Ignore unavailable or full local storage.
+            }
         } else {
             workflowMessagesCache = null;
+            try {
+                localStorage.removeItem(getWorkflowCacheStorageKey());
+            } catch (error) {
+                // Ignore unavailable local storage.
+            }
         }
     } catch (e) {
         workflowMessagesCache = null; // silent - badge is best-effort
@@ -5308,18 +5318,8 @@ function updateFormCategoryNotificationBadges() {
         button.appendChild(badge);
     });
 }
-            try {
-                localStorage.setItem(getWorkflowCacheStorageKey(), JSON.stringify(workflowMessagesCache));
-            } catch (error) {
-                // Ignore unavailable or full local storage.
-            }
 
 async function preloadProductCatalog() {
-            try {
-                localStorage.removeItem(getWorkflowCacheStorageKey());
-            } catch (error) {
-                // Ignore unavailable local storage.
-            }
     if (productCatalogCache) return productCatalogCache;
     if (productCatalogPromise) return productCatalogPromise;
 
