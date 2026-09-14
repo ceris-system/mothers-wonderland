@@ -315,6 +315,11 @@ function showDashboard(clientName, userName) {
     // 1. LEFT SIDE: STRICTLY uses the Client Name
     const clientHeader = document.getElementById('clientHeader');
     if (clientHeader) clientHeader.innerText = (clientName || window.sessionClient || "DASHBOARD").toUpperCase() + " DASHBOARD";
+
+    updateDashboardClock();
+    if (!window.dashboardClockTimer) {
+        window.dashboardClockTimer = setInterval(updateDashboardClock, 1000);
+    }
     
     const hour = new Date().getHours();
     let greeting = "GOOD EVENING";
@@ -337,6 +342,25 @@ function showDashboard(clientName, userName) {
     // forms are waiting for approval, and lets outgoing-department users
     // know a form has just been released to them. See refreshWorkflowBadge().
     if (typeof refreshWorkflowBadge === 'function') refreshWorkflowBadge();
+}
+
+function updateDashboardClock() {
+    const clock = document.getElementById('dashboardClock');
+    if (!clock) return;
+
+    const now = new Date();
+    const date = now.toLocaleDateString('en-US', {
+        month: 'long',
+        day: 'numeric',
+        year: 'numeric'
+    });
+    const time = now.toLocaleTimeString('en-US', {
+        hour: 'numeric',
+        minute: '2-digit',
+        second: '2-digit',
+        hour12: true
+    });
+    clock.textContent = `${date} (${time})`.toUpperCase();
 }
 
 function showModal(title, message, type) {
@@ -1599,13 +1623,12 @@ window.openInventoryModal = function() {
         const deptInput = document.getElementById('inventoryDepartmentSearch');
         if (deptInput) {
             deptInput.addEventListener('change', fetchInventoryByDepartment);
-            // Debounced — firing a fetch on every keystroke is what caused
-            // the race condition where a slow, stale response would land
-            // after the user had already typed further and clobber the field.
+            // Debounced to avoid firing a request for every keystroke while
+            // keeping the department search responsive.
             let deptInputDebounceTimer = null;
             deptInput.addEventListener('input', () => {
                 clearTimeout(deptInputDebounceTimer);
-                deptInputDebounceTimer = setTimeout(fetchInventoryByDepartment, 350);
+                deptInputDebounceTimer = setTimeout(fetchInventoryByDepartment, 100);
             });
         }
     } else {
@@ -1665,7 +1688,6 @@ async function refreshInventoryTable() {
         await fetchInventoryByDepartment();
         clearInterval(interval);
         if (reloadBar) reloadBar.style.width = '100%';
-        await new Promise(r => setTimeout(r, 200));
     } catch (err) {
         clearInterval(interval);
         console.error(err);
@@ -2132,8 +2154,6 @@ async function submitItemUpdate() {
             if (progressBar) progressBar.style.width = '100%';
             if (progressPercent) progressPercent.innerText = '100%';
 
-            await new Promise(r => setTimeout(r, 200));
-
             closeItemDrawer();
 
             if (typeof showModal === 'function') {
@@ -2153,12 +2173,10 @@ async function submitItemUpdate() {
             showModal("ERROR", err.message || "Failed to update inventory.", "error");
         }
     } finally {
-        setTimeout(() => {
-            if (submitBtn) submitBtn.style.display = 'block';
-            if (progressContainer) progressContainer.style.display = 'none';
-            if (progressBar) progressBar.style.width = '0%';
-            if (progressPercent) progressPercent.innerText = '0%';
-        }, 300);
+        if (submitBtn) submitBtn.style.display = 'block';
+        if (progressContainer) progressContainer.style.display = 'none';
+        if (progressBar) progressBar.style.width = '0%';
+        if (progressPercent) progressPercent.innerText = '0%';
     }
 }
 
@@ -2436,7 +2454,7 @@ function addSelectedProducts() {
                 <input type="number" min="1" value="1" style="${inputStyle} text-align: center; font-weight: 600;">
             </td>
             <td style="${tdStyle}">
-                <input type="text" class="row-remarks" placeholder="Remarks" style="${inputStyle}">
+                <input type="text" class="row-remarks" aria-label="Remarks for ${escapeHtml(item.description)}" placeholder="Product remarks" style="${inputStyle}">
             </td>
             <td style="${tdStyle} text-align: center;" class="no-print">
                 <button type="button" onclick="removeTransferRow('${rowId}')" title="Remove Row" style="background: transparent; border: none; color: #ff4d4d; cursor: pointer; font-size: 1.2rem; font-weight: bold; line-height: 1; padding: 2px 5px;">✕</button>
@@ -3173,7 +3191,6 @@ async function fetchHistoryData(forceRefresh = false) {
 
     clearInterval(interval);
     if (progressBar) progressBar.style.width = '100%';
-    await new Promise(r => setTimeout(r, 200));
 
     if (!result.success || !result.data || result.data.length === 0) {
       cachedHistoryRows = [];
