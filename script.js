@@ -5219,15 +5219,15 @@ async function refreshWorkflowBadge() {
     }
     try {
         const notificationUrl = `${window.API}?action=getWorkflowNotifications&audience=${audience}&department=${encodeURIComponent(scope.client || '')}&token=${encodeURIComponent(window.API_TOKEN)}`;
-        const notificationResponse = await fetch(notificationUrl);
-        const notificationResult = await notificationResponse.json();
-
         // Notifications are append-only, so clearing the source form sheets
         // can leave old unread notification rows behind. Verify that at least
         // one matching pending/released form still exists before showing the
-        // dashboard badge.
+        // dashboard badge. Start every validation request together.
         const formKeys = ['REQUEST_RELEASED', 'TRANSFER', 'PULLOUT'];
-        const activeFormResults = await Promise.all(formKeys.map(async formKey => {
+        const notificationPromise = fetch(notificationUrl)
+            .then(response => response.json())
+            .catch(() => null);
+        const activeFormPromises = formKeys.map(async formKey => {
             const action = scope.isAdmin ? 'getPendingApprovals' : 'getReleasedForOutgoing';
             const url = `${window.API}?action=${action}&form=${formKey}`
                 + `&department=${encodeURIComponent(scope.client || '')}`
@@ -5238,7 +5238,11 @@ async function refreshWorkflowBadge() {
             } catch (error) {
                 return null;
             }
-        }));
+        });
+        const [notificationResult, ...activeFormResults] = await Promise.all([
+            notificationPromise,
+            ...activeFormPromises
+        ]);
 
         const activeFormKeys = activeFormResults.reduce((keys, result, index) => {
             if (result && result.success && Array.isArray(result.groups) && result.groups.length) {
