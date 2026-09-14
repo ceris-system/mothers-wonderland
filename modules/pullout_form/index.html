@@ -59,7 +59,10 @@
             
             <!-- Action Buttons Grouped Together -->
             <div style="display: flex; align-items: center; gap: 10px;">
-                <button type="button" class="no-print" onclick="triggerPrintForm()" style="padding: 5px 12px; background: #28a745; color: #fff; border: none; border-radius: 4px; font-family: inherit; font-size: 0.75rem; cursor: pointer; text-transform: uppercase; font-weight: 600; letter-spacing: 0.5px; transition: background 0.2s;">
+                <button type="button" id="workflowActionBtn" class="no-print" onclick="handleWorkflowAction()" style="padding: 5px 12px; background: #28a745; color: #fff; border: none; border-radius: 4px; font-family: inherit; font-size: 0.75rem; cursor: pointer; text-transform: uppercase; font-weight: 600; letter-spacing: 0.5px; transition: background 0.2s;">
+    📤 SUBMIT
+</button>
+<button type="button" id="printFormBtn" class="no-print" onclick="triggerPrintForm()" style="display: none; padding: 5px 12px; background: #444; color: #fff; border: none; border-radius: 4px; font-family: inherit; font-size: 0.75rem; cursor: pointer; text-transform: uppercase; font-weight: 600; letter-spacing: 0.5px; transition: background 0.2s;">
     🖨️ PRINT FORM
 </button>
                 <button type="button" id="productListBtn" onclick="openProductListModal()" style="padding: 5px 12px; background: #111; color: #fff; border: none; border-radius: 4px; font-family: inherit; font-size: 0.75rem; cursor: pointer; text-transform: uppercase; font-weight: 600; letter-spacing: 0.5px; transition: background 0.2s;">
@@ -67,6 +70,23 @@
                 </button>
             </div>
         </div>
+
+        <!-- Workflow Status / Notification Banner -->
+        <div id="formNotificationBanner" class="no-print" style="display: none; padding: 10px 14px; border: 1.5px solid #0d6efd; background: #e7f1ff; color: #0d47a1; border-radius: 6px; font-size: 0.78rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.3px;"></div>
+        <!-- OUTGOING DEPARTMENT REMARKS -- filled in by the requester before
+             SUBMIT; locked (read-only) once the form is submitted. Sent to
+             the backend as part of the row payload (submitOutgoingForApproval). -->
+        <div class="no-print" style="margin-top: 4px;">
+            <label for="outgoingRemarks" style="display:block; font-weight: bold; font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.3px; color: #111; margin-bottom: 4px;">Remarks (Outgoing Department)</label>
+            <textarea id="outgoingRemarks" rows="2" placeholder="Optional remarks from the outgoing department..." style="width: 100%; padding: 6px 10px; border: 1px solid #000; border-radius: 4px; font-family: inherit; font-size: 0.78rem; outline: none; box-sizing: border-box; resize: vertical;"></textarea>
+        </div>
+
+        <!-- ADMIN REMARKS -- rendered/toggled by renderAdminRemarksSlot() in
+             script.js. Editable textarea for the admin while a submission is
+             PENDING_ADMIN_APPROVAL; becomes a read-only display (visible to
+             BOTH admin and the outgoing department) once RELEASED_TO_OUTGOING. -->
+        <div id="adminRemarksSlot" class="no-print"></div>
+
 
         <!-- Table Viewport -->
         <div style="max-height: 480px; overflow-y: auto; border: 1px solid #e0e0e0; border-radius: 6px; box-shadow: 0 2px 6px rgba(0,0,0,0.03);">
@@ -116,10 +136,13 @@
 
         <!-- Approved By -->
         <div style="flex: 1; display: flex; flex-direction: column; align-items: center;">
-            <div style="font-weight: bold; font-size: 0.75rem; text-transform: uppercase; margin-bottom: 45px; letter-spacing: 0.5px;">
+            <div style="font-weight: bold; font-size: 0.75rem; text-transform: uppercase; margin-bottom: 4px; letter-spacing: 0.5px;">
                 APPROVED BY
             </div>
-            <div style="width: 100%; border-bottom: 1.5px solid #000; margin-bottom: 6px;"></div>
+            <!-- Filled by renderApprovedSignature() in script.js. Only rendered
+                 with the e-signature image + name when the logged-in user is
+                 an ADMIN account; everyone else sees a blank line to sign. -->
+            <div id="approvedSignatureSlot" style="width: 100%; min-height: 41px; display: flex; flex-direction: column; align-items: center; justify-content: flex-end;"></div>
             <div style="font-weight: bold; font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.5px;">
                 SIGNATURE OVER PRINTED NAME
             </div>

@@ -332,6 +332,11 @@ function showDashboard(clientName, userName) {
     // paints instantly from a locally-persisted count, then corrects
     // itself once the live fetch resolves — see primeIncomingMessagesCache.
     if (typeof primeIncomingMessagesCache === 'function') primeIncomingMessagesCache();
+
+    // Message notification for the workflow feature — lets admins know
+    // forms are waiting for approval, and lets outgoing-department users
+    // know a form has just been released to them. See refreshWorkflowBadge().
+    if (typeof refreshWorkflowBadge === 'function') refreshWorkflowBadge();
 }
 
 function showModal(title, message, type) {
@@ -2498,7 +2503,7 @@ function setTransferDate() {
 }
 
 async function loadOutletFilterFromConfig() {
-    const datalists = document.querySelectorAll('datalist#outletList, datalist#pulloutIncomingList');
+    const datalists = document.querySelectorAll('datalist#outletList, datalist#incomingOutletList, datalist#pulloutIncomingList');
     if (datalists.length === 0) return;
 
     if (window.cachedOutlets && window.cachedOutlets.length > 0) {
@@ -2545,7 +2550,10 @@ async function loadOutletFilterFromConfig() {
 }
 
 function populateOutletDatalist(outlets) {
-    const datalists = document.querySelectorAll('datalist#outletList');
+    // Populates BOTH the outgoing forms' shared "outletList" datalists AND
+    // the Incoming module's own "incomingOutletList" (see selectIncomingCategory)
+    // so the Incoming Forms filter/search dropdown stays in sync too.
+    const datalists = document.querySelectorAll('datalist#outletList, datalist#incomingOutletList');
     datalists.forEach(datalist => {
         datalist.innerHTML = '';
         outlets.forEach(outlet => {
@@ -2739,6 +2747,7 @@ async function loadRequestAndReleasedFormModuleCode(container) {
         if (typeof setTransferDate === 'function') setTransferDate();
         applyIncomingDeptLockForNonAdmin(container);
         loadNextSerialPreview('mod-REQUEST_AND_RELEASED_FORM', 'REQUEST_RELEASED');
+        initFormWorkflow('mod-REQUEST_AND_RELEASED_FORM');
 
     } catch (error) {
         console.error("Module Load Error:", error);
@@ -2779,6 +2788,7 @@ async function loadTransferFormModuleCode(container) {
         if (typeof setTransferDate === 'function') setTransferDate();
         applyIncomingDeptLockForNonAdmin(container);
         loadNextSerialPreview('mod-TRANSFER_FORM', 'TRANSFER');
+        initFormWorkflow('mod-TRANSFER_FORM');
 
     } catch (error) {
         console.error(error);
@@ -2820,6 +2830,7 @@ async function loadPulloutFormModuleCode(container) {
         applyPulloutOutgoingLockForNonAdmin(container);
         applyPulloutIncomingLockForNonAdmin(container);
         loadNextSerialPreview('mod-PULLOUT_FORM', 'PULLOUT');
+        initFormWorkflow('mod-PULLOUT_FORM');
 
     } catch (error) {
         console.error(error);
@@ -3876,6 +3887,13 @@ let incomingFetchedRows = [];
 // message, but the same sender sending again on a NEW date adds another.
 // ==========================================
 let incomingMessagesCache = null;
+// Pending-workflow-approval / newly-released-form count for the logged-in
+// user (admin sees pending approvals, outgoing-department users see newly
+// released forms). Populated by refreshWorkflowBadge() and merged with
+// incomingMessagesCache into the single #dashboardMailBadge header badge
+// by renderCombinedHeaderBadge(), so the header never shows two competing
+// "NEW MESSAGES" counters.
+let workflowMessagesCache = null;
 
 // Scope the locally-persisted badge cache per user, so switching accounts
 // on the same browser doesn't leak one department's pending count into
@@ -3938,11 +3956,27 @@ function updateDashboardMailBadge(result, options) {
             }
         } catch (e) { /* ignore blocked/full local storage */ }
     }
+    // The actual DOM render is shared with the workflow (pending-approval /
+    // newly-released-form) notification count, so both land on one badge
+    // instead of fighting over it — see renderCombinedHeaderBadge().
+    renderCombinedHeaderBadge();
+}
+
+// Renders #dashboardMailBadge as the SUM of pending incoming-stock
+// messages (incomingMessagesCache) and pending workflow items
+// (workflowMessagesCache — admin's pending approvals, or the outgoing
+// department's newly released forms). Called any time either source
+// changes, so the header always reflects both without one overwriting
+// the other.
+function renderCombinedHeaderBadge() {
+    const incomingCount = (incomingMessagesCache && incomingMessagesCache.totalCount) || 0;
+    const workflowCount = (workflowMessagesCache && workflowMessagesCache.count) || 0;
+    const total = incomingCount + workflowCount;
 
     const wrapper = document.getElementById('dashboardMailBadge');
     if (!wrapper) return;
 
-    if (!result || !result.totalCount) {
+    if (!total) {
         wrapper.style.display = 'none';
         wrapper.innerHTML = '';
         delete wrapper.dataset.count;
@@ -3952,18 +3986,18 @@ function updateDashboardMailBadge(result, options) {
     injectIncomingMailStyles();
 
     const prevCount = wrapper.dataset.count;
-    wrapper.dataset.count = String(result.totalCount);
+    wrapper.dataset.count = String(total);
     wrapper.style.display = 'flex';
 
     // Skip re-rendering (and re-popping the animation) if the count
     // hasn't actually changed since last render.
-    if (prevCount === String(result.totalCount) && wrapper.querySelector('#dashboardMailBadgeBtn')) return;
+    if (prevCount === String(total) && wrapper.querySelector('#dashboardMailBadgeBtn')) return;
 
     wrapper.innerHTML = `
         <button type="button" id="dashboardMailBadgeBtn" onclick="openIncomingMailDetails()" title="You have new messages" style="display: flex; align-items: center; gap: 7px; background: #fff; border: 1.5px solid rgba(0,0,0,0.4); border-radius: 20px; padding: 6px 14px 6px 10px; cursor: pointer; box-shadow: 0 4px 10px rgba(0,0,0,0.2);">
             <i class="fa-solid fa-envelope" style="color: #d81b60; font-size: 1rem;"></i>
             <span style="font-family: 'Roboto Mono', monospace; font-size: 0.7rem; font-weight: 700; color: #111; letter-spacing: 0.5px; white-space: nowrap;">
-                (${result.totalCount}) NEW MESSAGE${result.totalCount > 1 ? 'S' : ''}
+                (${total}) NEW MESSAGE${total > 1 ? 'S' : ''}
             </span>
         </button>
     `;
@@ -4030,28 +4064,48 @@ async function showIncomingMailNotification(container) {
 // "(3) PENDING FOR TRANSFER FROM BNB HOTEL". Built entirely from the
 // last-fetched incomingMessagesCache (no re-fetch needed on click).
 function openIncomingMailDetails() {
-    if (!incomingMessagesCache) return;
-    const data = incomingMessagesCache;
+    if (!incomingMessagesCache && !workflowMessagesCache) return;
 
     const existing = document.getElementById('incomingMailDetailsModal');
     if (existing) existing.remove();
 
     let bodyHtml = '';
-    ['REQUEST', 'TRANSFER', 'RTV'].forEach(key => {
-        const cat = data.categories && data.categories[key];
-        if (!cat || !cat.total) return;
-        (cat.bySender || []).forEach(entry => {
-            if (!entry.count) return;
-            bodyHtml += `
-                <div style="display: flex; align-items: flex-start; gap: 10px; padding: 10px 4px; border-bottom: 1px solid rgba(0,0,0,0.08);">
-                    <i class="fa-solid fa-circle-info" style="color: #00bcd4; margin-top: 2px; flex-shrink: 0;"></i>
-                    <p style="margin: 0; font-size: 0.8rem; color: #222; line-height: 1.5;">
-                        <strong>(${entry.count})</strong> PENDING FOR <strong>${escapeHtml(cat.label)}</strong> FROM "<strong>${escapeHtml(entry.sender)}</strong>"
-                    </p>
-                </div>
-            `;
+
+    if (incomingMessagesCache) {
+        const data = incomingMessagesCache;
+        ['REQUEST', 'TRANSFER', 'RTV'].forEach(key => {
+            const cat = data.categories && data.categories[key];
+            if (!cat || !cat.total) return;
+            (cat.bySender || []).forEach(entry => {
+                if (!entry.count) return;
+                bodyHtml += `
+                    <div style="display: flex; align-items: flex-start; gap: 10px; padding: 10px 4px; border-bottom: 1px solid rgba(0,0,0,0.08);">
+                        <i class="fa-solid fa-circle-info" style="color: #00bcd4; margin-top: 2px; flex-shrink: 0;"></i>
+                        <p style="margin: 0; font-size: 0.8rem; color: #222; line-height: 1.5;">
+                            <strong>(${entry.count})</strong> PENDING FOR <strong>${escapeHtml(cat.label)}</strong> FROM "<strong>${escapeHtml(entry.sender)}</strong>"
+                        </p>
+                    </div>
+                `;
+            });
         });
-    });
+    }
+
+    // Workflow notifications: admin's pending approvals, or newly
+    // released forms for an outgoing-department account.
+    if (workflowMessagesCache && workflowMessagesCache.count) {
+        const scope = getSessionScope();
+        const label = scope.isAdmin
+            ? 'FORM(S) SUBMITTED — AWAITING YOUR APPROVAL'
+            : 'FORM(S) APPROVED & RELEASED TO YOUR DEPARTMENT';
+        bodyHtml += `
+            <div style="display: flex; align-items: flex-start; gap: 10px; padding: 10px 4px; border-bottom: 1px solid rgba(0,0,0,0.08);">
+                <i class="fa-solid fa-file-invoice" style="color: #7c4dff; margin-top: 2px; flex-shrink: 0;"></i>
+                <p style="margin: 0; font-size: 0.8rem; color: #222; line-height: 1.5;">
+                    <strong>(${workflowMessagesCache.count})</strong> ${label}
+                </p>
+            </div>
+        `;
+    }
 
     if (!bodyHtml) {
         bodyHtml = `<p style="text-align:center; color:#888; padding: 24px 0; font-size: 0.8rem;">No pending messages.</p>`;
@@ -4210,7 +4264,7 @@ function selectIncomingCategory(categoryKey) {
                 <div style="display: flex; align-items: center; gap: 20px; flex: 1; min-width: 500px; flex-wrap: wrap;">
                     <div style="display: flex; align-items: center; gap: 8px; flex: 1; min-width: 240px;">
                         <span style="font-weight: bold; color: #111; text-transform: uppercase; white-space: nowrap;">SELECT DEPARTMENT:</span>
-                        <input type="text" id="incSelectDept" placeholder="Type to search outlet..." style="padding: 6px 10px; background: #fff; border: 1px solid #000; border-radius: 4px; color: #000; font-family: inherit; outline: none; flex: 1;" list="outletList">
+                        <input type="text" id="incSelectDept" placeholder="Type to search outlet..." style="padding: 6px 10px; background: #fff; border: 1px solid #000; border-radius: 4px; color: #000; font-family: inherit; outline: none; flex: 1;" list="incomingOutletList">
                     </div>
                     <div style="display: flex; align-items: center; gap: 8px; flex: 1; min-width: 240px;">
                         <span style="font-weight: bold; color: #111; text-transform: uppercase; white-space: nowrap;">INCOMING DEPARTMENT:</span>
@@ -4219,9 +4273,20 @@ function selectIncomingCategory(categoryKey) {
                             value="${escapeHtml(scope.isAdmin ? '' : scope.client)}"
                             ${scope.isAdmin ? '' : 'readonly'}
                             style="padding: 6px 10px; background: ${scope.isAdmin ? '#fff' : '#f4f4f4'}; border: 1px solid #000; border-radius: 4px; color: #000; font-family: inherit; outline: none; flex: 1; cursor: ${scope.isAdmin ? 'text' : 'not-allowed'}; opacity: ${scope.isAdmin ? '1' : '0.85'};"
-                            list="outletList">
+                            list="incomingOutletList">
                     </div>
-                    <datalist id="outletList"></datalist>
+                    <!-- Own id (not "outletList") on purpose: the 3 outgoing
+                         form templates (TRANSFER/PULLOUT/REQUEST) each embed
+                         their own <datalist id="outletList"> and all module
+                         views stay mounted (display:none) instead of being
+                         removed from the DOM, so several elements sharing
+                         id="outletList" exist at once. A browser resolves an
+                         <input list="..."> reference to whichever matching id
+                         it finds first in the document, which could silently
+                         bind this search box to an unrelated/empty datalist
+                         from another module. A dedicated id sidesteps that
+                         collision entirely. See populateOutletDatalist(). -->
+                    <datalist id="incomingOutletList"></datalist>
                 </div>
                 <div style="display: flex; align-items: center; gap: 10px;">
                     <span style="font-weight: bold; color: #111; text-transform: uppercase;">DATE:</span>
@@ -4541,4 +4606,491 @@ async function submitIncomingReceived() {
         console.error("Mark Received Error:", error);
         showIncomingAlert("Error saving record: " + error.message);
     }
+}
+// ==================================================================
+// OUTGOING FORM APPROVAL WORKFLOW (appended)
+// SUBMIT -> ADMIN APPROVED -> RELEASED TO OUTGOING (view/print only)
+// ==================================================================
+// ==================================================================
+// OUTGOING FORM APPROVAL WORKFLOW  (paste into script.js)
+// Applies to: REQUEST_AND_RELEASED_FORM, TRANSFER_FORM, PULLOUT_FORM
+//
+// Flow:
+//   1. Requester fills the form and clicks SUBMIT.
+//        -> status PENDING_ADMIN_APPROVAL, form locked for the requester.
+//   2. Admin opens PENDING APPROVALS, reviews/edits qty, clicks the
+//      button (now labeled ADMIN APPROVED).
+//        -> status RELEASED_TO_OUTGOING, e-signature + name stamped in,
+//           notification sent to the outgoing department.
+//   3. Outgoing department opens RELEASED FORMS: everything is locked,
+//      only the PRINT FORM button is enabled.
+//
+// Where to paste: anywhere after triggerPrintForm()/showCustomAlert()
+// are defined (it calls both), e.g. right after
+// triggerPrintRequestAndReleasedForm() around line ~1155 in script.js.
+//
+// Wiring needed elsewhere in script.js (see WORKFLOW_INTEGRATION_GUIDE.md):
+//   - Call initFormWorkflow('mod-TRANSFER_FORM') etc. every time one of
+//     the 3 module views is opened/loaded, the same place
+//     loadNextSerialPreview(...) is already called.
+//   - Call refreshWorkflowBadge() alongside the existing
+//     updateDashboardMailBadge() polling so admins/outgoing users see an
+//     unread count too.
+// ==================================================================
+
+const ADMIN_APPROVER_NAME = "JASMIN, CLYDIE ANN AICA MANLOGON";
+
+const WORKFLOW_FORM_MAP = {
+    'mod-TRANSFER_FORM': { formKey: 'TRANSFER', tableSel: '#transferTableBody', isTransfer: true },
+    'mod-PULLOUT_FORM': { formKey: 'PULLOUT', tableSel: '#pulloutTableBody', isTransfer: false },
+    'mod-REQUEST_AND_RELEASED_FORM': { formKey: 'REQUEST_RELEASED', tableSel: '#transferTableBody', isTransfer: false }
+};
+
+function getActiveWorkflowModuleId() {
+    for (const id of Object.keys(WORKFLOW_FORM_MAP)) {
+        const el = document.getElementById(id);
+        if (el && el.style.display !== 'none') return id;
+    }
+    return null;
+}
+
+// ---- Call when a form module is opened / reset -------------------
+function initFormWorkflow(moduleId) {
+    const container = document.getElementById(moduleId);
+    if (!container) return;
+    container.dataset.workflowStatus = '';
+    container.dataset.workflowSerial = '';
+    container.dataset.workflowDept = '';
+    renderWorkflowButton(container);
+    renderApprovedSignature(container);
+    renderAdminRemarksSlot(container, '');
+    hideFormNotification(container);
+    setFormLocked(container, false);
+    renderWorkflowSidePanel(container, WORKFLOW_FORM_MAP[moduleId]);
+    // Refresh the header "new messages" badge every time a workflow-enabled
+    // form module is opened, in addition to on dashboard login (see
+    // showDashboard) — covers admins picking up newly submitted forms and
+    // outgoing-department users picking up newly released ones.
+    if (typeof refreshWorkflowBadge === 'function') refreshWorkflowBadge();
+}
+
+// ---- Admin e-signature + printed name -------------------------------
+function renderApprovedSignature(container) {
+    const slot = container.querySelector('#approvedSignatureSlot');
+    if (!slot) return;
+    const status = container.dataset.workflowStatus || '';
+
+    // Shown to EVERYONE viewing the form — admin and the outgoing
+    // department alike — once it has actually been approved/released.
+    // Before that point (still pending, or a fresh unsubmitted form)
+    // everyone just sees the blank signature line.
+    if (status === 'RELEASED_TO_OUTGOING') {
+        slot.innerHTML = `
+            <img src="SIG.PNG" alt="Signature" style="height: 38px; object-fit: contain; margin-bottom: 4px;">
+            <div style="width: 100%; border-bottom: 1.5px solid #000; margin-bottom: 6px;"></div>
+            <div style="font-weight: bold; font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.5px;">${ADMIN_APPROVER_NAME}</div>
+        `;
+    } else {
+        slot.innerHTML = `<div style="width: 100%; border-bottom: 1.5px solid #000; margin-bottom: 6px; height: 38px;"></div>`;
+    }
+}
+
+// ---- Admin remarks -- editable by admin while reviewing a pending
+// submission; read-only and visible to BOTH admin and the outgoing
+// department once the form has been released. `savedRemarks` is passed
+// in when re-loading an existing submission (PENDING or RELEASED) from
+// the side panel / group loader so the field doesn't start blank.
+function renderAdminRemarksSlot(container, savedRemarks) {
+    const slot = container.querySelector('#adminRemarksSlot');
+    if (!slot) return;
+    const scope = getSessionScope();
+    const status = container.dataset.workflowStatus || '';
+    const remarksText = savedRemarks || '';
+
+    if (scope.isAdmin && status === 'PENDING_ADMIN_APPROVAL') {
+        slot.style.display = '';
+        slot.innerHTML = `
+            <label for="adminRemarksInput" style="display:block; font-weight: bold; font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.3px; color: #111; margin-bottom: 4px;">Remarks (Admin)</label>
+            <textarea id="adminRemarksInput" rows="2" placeholder="Optional remarks from admin..." style="width: 100%; padding: 6px 10px; border: 1px solid #000; border-radius: 4px; font-family: inherit; font-size: 0.78rem; outline: none; box-sizing: border-box; resize: vertical;">${escapeHtml(remarksText)}</textarea>
+        `;
+    } else if (status === 'RELEASED_TO_OUTGOING' && remarksText) {
+        // Read-only, visible to admin AND the outgoing department.
+        slot.style.display = '';
+        slot.innerHTML = `
+            <div style="font-weight: bold; font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.3px; color: #111; margin-bottom: 4px;">Remarks (Admin)</div>
+            <div style="width: 100%; padding: 6px 10px; border: 1px solid #ccc; border-radius: 4px; background: #f8f9fa; font-size: 0.78rem; white-space: pre-wrap;">${escapeHtml(remarksText)}</div>
+        `;
+    } else {
+        slot.style.display = 'none';
+        slot.innerHTML = '';
+    }
+}
+
+// ---- SUBMIT / ADMIN APPROVED button label + color ------------------
+function renderWorkflowButton(container) {
+    const btn = container.querySelector('#workflowActionBtn');
+    const printBtn = container.querySelector('#printFormBtn');
+    if (!btn) return;
+    const scope = getSessionScope();
+    const status = container.dataset.workflowStatus || '';
+
+    if (status === 'RELEASED_TO_OUTGOING') {
+        // Released: nothing left to submit/approve — print only.
+        btn.style.display = 'none';
+        if (printBtn) printBtn.style.display = '';
+        return;
+    }
+
+    if (printBtn) printBtn.style.display = 'none';
+    btn.style.display = '';
+
+    if (scope.isAdmin && status === 'PENDING_ADMIN_APPROVAL') {
+        btn.innerText = '✅ ADMIN APPROVED';
+        btn.style.background = '#0d6efd';
+    } else {
+        btn.innerText = '📤 SUBMIT';
+        btn.style.background = '#28a745';
+    }
+}
+
+// ---- Notification banner on the form itself ------------------------
+function showFormNotification(container, message, tone) {
+    const banner = container.querySelector('#formNotificationBanner');
+    if (!banner) return;
+    const colors = {
+        info: { bg: '#e7f1ff', border: '#0d6efd', text: '#0d47a1' },
+        success: { bg: '#e6f7ec', border: '#28a745', text: '#155d27' },
+        warn: { bg: '#fff8e1', border: '#e0a800', text: '#6b5300' }
+    };
+    const c = colors[tone] || colors.info;
+    banner.style.background = c.bg;
+    banner.style.borderColor = c.border;
+    banner.style.color = c.text;
+    banner.innerText = message;
+    banner.style.display = 'block';
+}
+
+function hideFormNotification(container) {
+    const banner = container.querySelector('#formNotificationBanner');
+    if (banner) banner.style.display = 'none';
+}
+
+// ---- Lock everything except PRINT once released --------------------
+function setFormLocked(container, locked) {
+    container.querySelectorAll('input, textarea').forEach(el => {
+        if (el.id !== 'serialNoDisplay' && el.id !== 'formattedDateDisplay') el.disabled = locked;
+    });
+    const addBtn = container.querySelector('#productListBtn');
+    if (addBtn) addBtn.style.display = locked ? 'none' : '';
+    container.querySelectorAll('.no-print button').forEach(b => {
+        if (b.id !== 'printFormBtn') b.disabled = locked;
+    });
+}
+
+// ---- Main button handler -------------------------------------------
+async function handleWorkflowAction() {
+    const moduleId = getActiveWorkflowModuleId();
+    if (!moduleId) return;
+    const container = document.getElementById(moduleId);
+    const map = WORKFLOW_FORM_MAP[moduleId];
+    const scope = getSessionScope();
+    const status = container.dataset.workflowStatus || '';
+
+    if (scope.isAdmin && status === 'PENDING_ADMIN_APPROVAL') {
+        return adminApproveAndRelease(container, map);
+    }
+    return submitFormForApproval(container, map);
+}
+
+// ---- Step 1: requester submits --------------------------------------
+async function submitFormForApproval(container, map) {
+    const outgoingInput = container.querySelector('#outletSearch');
+    const incomingInput = container.querySelector('#incomingOutletSearch');
+    const dateInput = container.querySelector('#formattedDateDisplay');
+    const remarksInput = container.querySelector('#outgoingRemarks');
+
+    const outgoingValue = outgoingInput ? outgoingInput.value.trim() : '';
+    const incomingValue = incomingInput ? incomingInput.value.trim() : '';
+    const formDate = dateInput ? dateInput.value.trim() : '';
+    const remarksValue = remarksInput ? remarksInput.value.trim() : '';
+
+    if (!outgoingValue) return showCustomAlert('Please select or type an OUTGOING DEPARTMENT before submitting.', outgoingInput);
+    if (!incomingValue) return showCustomAlert('Please select or type an INCOMING DEPARTMENT before submitting.', incomingInput);
+
+    const tableBody = container.querySelector(map.tableSel);
+    const rows = tableBody ? tableBody.querySelectorAll('tr') : [];
+    if (rows.length === 0) return showCustomAlert('Please add at least one product before submitting.');
+
+    const rowsToSave = [];
+    rows.forEach(row => {
+        const cells = row.querySelectorAll('td');
+        if (cells.length < 11) return;
+        const getCellText = (idx) => cells[idx] ? cells[idx].innerText.trim() : '';
+        const getInputValue = (idx) => {
+            const input = cells[idx] ? cells[idx].querySelector('input') : null;
+            return input ? input.value.trim() : '';
+        };
+        const itemRemarks = getInputValue(9);
+
+        if (map.isTransfer) {
+            // A..J base cols, K-N blank (received info), O incoming, P date,
+            // Q status flag, R serial(stamped), S remarks, T item remarks
+            rowsToSave.push([
+                outgoingValue, getCellText(0), getCellText(1), getCellText(2), getCellText(3),
+                getCellText(4), getCellText(5), getCellText(6), getCellText(7), getInputValue(8),
+                '', '', '', '', incomingValue, formDate, '', '', remarksValue, itemRemarks
+            ]);
+        } else {
+            // A..J base cols, K-N + O-R blank, S incoming, T date, U status,
+            // V serial(stamped), W remarks, X item remarks
+            rowsToSave.push([
+                outgoingValue, getCellText(0), getCellText(1), getCellText(2), getCellText(3),
+                getCellText(4), getCellText(5), getCellText(6), getCellText(7), getInputValue(8),
+                '', '', '', '', '', '', '', '', incomingValue, formDate, '', '', remarksValue, itemRemarks
+            ]);
+        }
+    });
+
+    if (typeof showSeaWaveLoader === 'function') showSeaWaveLoader("SUBMITTING FOR APPROVAL...");
+    try {
+        const response = await fetch(window.API, {
+            method: "POST",
+            body: JSON.stringify({ action: "submitOutgoingForApproval", formKey: map.formKey, rows: rowsToSave, token: window.API_TOKEN })
+        });
+        const result = await response.json();
+        if (!result.success) throw new Error(result.error || result.message || "Failed to submit.");
+
+        const serialField = container.querySelector('#serialNoDisplay');
+        if (serialField && result.serial) serialField.value = result.serial;
+
+        container.dataset.workflowStatus = 'PENDING_ADMIN_APPROVAL';
+        container.dataset.workflowSerial = result.serial || '';
+        container.dataset.workflowDept = outgoingValue;
+
+        renderWorkflowButton(container);
+        showFormNotification(container, `Submitted as ${result.serial}. Waiting for admin approval of quantities.`, 'info');
+        setFormLocked(container, true);
+        const actionBtn = container.querySelector('#workflowActionBtn');
+        if (actionBtn) actionBtn.style.display = 'none';
+        // Lets the admin's header badge pick up this new submission without
+        // waiting for their next login/dashboard load.
+        if (typeof refreshWorkflowBadge === 'function') refreshWorkflowBadge();
+    } catch (error) {
+        console.error("Submit Error:", error);
+        showCustomAlert("Error submitting record: " + error.message);
+    } finally {
+        if (typeof hideSeaWaveLoader === 'function') hideSeaWaveLoader();
+    }
+}
+
+// ---- Step 2: admin approves qty + releases to outgoing --------------
+async function adminApproveAndRelease(container, map) {
+    const tableBody = container.querySelector(map.tableSel);
+    const rows = tableBody ? tableBody.querySelectorAll('tr') : [];
+    const items = [];
+    rows.forEach(row => {
+        const rowNum = row.dataset.sheetRow;
+        const qtyInput = row.querySelectorAll('td')[8] ? row.querySelectorAll('td')[8].querySelector('input') : null;
+        if (rowNum && qtyInput) items.push({ rowNum: Number(rowNum), qty: qtyInput.value.trim() });
+    });
+
+    if (items.length === 0) return showCustomAlert('Nothing to approve — open a pending submission from PENDING APPROVALS first.');
+
+    const adminRemarksInput = container.querySelector('#adminRemarksInput');
+    const adminRemarksValue = adminRemarksInput ? adminRemarksInput.value.trim() : '';
+
+    if (typeof showSeaWaveLoader === 'function') showSeaWaveLoader("APPROVING & RELEASING...");
+    try {
+        const response = await fetch(window.API, {
+            method: "POST",
+            body: JSON.stringify({
+                action: "adminReleaseForm",
+                formKey: map.formKey,
+                serial: container.dataset.workflowSerial,
+                department: container.dataset.workflowDept || '',
+                items: items,
+                adminRemarks: adminRemarksValue,
+                token: window.API_TOKEN
+            })
+        });
+        const result = await response.json();
+        if (!result.success) throw new Error(result.error || result.message || "Failed to approve.");
+
+        container.dataset.workflowStatus = 'RELEASED_TO_OUTGOING';
+        renderWorkflowButton(container);
+        renderApprovedSignature(container);
+        renderAdminRemarksSlot(container, result.adminRemarks || adminRemarksValue);
+        setFormLocked(container, true);
+        showFormNotification(container, `Approved and released to ${container.dataset.workflowDept || 'the outgoing department'}. Signed by ${result.approvedBy || ADMIN_APPROVER_NAME}.`, 'success');
+        // Lets the outgoing department's header badge pick up this newly
+        // released form without waiting for their next login.
+        if (typeof refreshWorkflowBadge === 'function') refreshWorkflowBadge();
+    } catch (error) {
+        console.error("Approve Error:", error);
+        showCustomAlert("Error approving record: " + error.message);
+    } finally {
+        if (typeof hideSeaWaveLoader === 'function') hideSeaWaveLoader();
+    }
+}
+
+// ---- Side panel: PENDING APPROVALS (admin) / RELEASED FORMS (outgoing)
+// Injected once above the product table so admins can pick a submitted
+// form to review, and outgoing-department users can pick a released form
+// to view + print. Reuses the same table body the rest of the form uses,
+// so once a row is loaded, the normal SUBMIT/ADMIN APPROVED/PRINT button
+// logic above just works on it.
+function renderWorkflowSidePanel(container, map) {
+    let panel = container.querySelector('#workflowSidePanel');
+    const scope = getSessionScope();
+
+    if (!panel) {
+        panel = document.createElement('div');
+        panel.id = 'workflowSidePanel';
+        panel.className = 'no-print';
+        panel.style.cssText = 'margin-bottom: 10px; border: 1px solid #ddd; border-radius: 6px; padding: 8px 10px; font-size: 0.75rem; background: #fafafa;';
+        const tableWrapper = container.querySelector(map.tableSel).closest('div[style*="max-height"]');
+        tableWrapper.parentNode.insertBefore(panel, tableWrapper);
+    }
+
+    if (scope.isAdmin) {
+        panel.innerHTML = `<b>PENDING APPROVALS</b> <span id="workflowPanelList">Loading…</span>`;
+        loadPendingApprovalsList(container, map);
+    } else {
+        panel.innerHTML = `<b>RELEASED FORMS FOR YOUR DEPARTMENT</b> <span id="workflowPanelList">Loading…</span>`;
+        loadReleasedForOutgoingList(container, map);
+    }
+}
+
+async function loadPendingApprovalsList(container, map) {
+    const listEl = container.querySelector('#workflowPanelList');
+    try {
+        const url = `${window.API}?action=getPendingApprovals&form=${encodeURIComponent(map.formKey)}&token=${encodeURIComponent(window.API_TOKEN)}`;
+        const res = await fetch(url);
+        const result = await res.json();
+        const groups = (result && result.success) ? result.groups : [];
+        if (!groups.length) { listEl.innerText = ' None pending.'; return; }
+        listEl.innerHTML = groups.map(g =>
+            `<button type="button" class="workflow-pick-btn" data-serial="${escapeHtml(g.serial)}" style="margin: 2px 4px; padding: 3px 8px; font-size: 0.72rem;">${escapeHtml(g.serial)} — ${escapeHtml(g.items[0].department)}</button>`
+        ).join('');
+        listEl.querySelectorAll('.workflow-pick-btn').forEach(btn => {
+            btn.onclick = () => {
+                const group = groups.find(g => g.serial === btn.dataset.serial);
+                loadGroupIntoTable(container, map, group, 'PENDING_ADMIN_APPROVAL', group.items[0].department, true);
+            };
+        });
+    } catch (e) {
+        listEl.innerText = ' Failed to load.';
+    }
+}
+
+async function loadReleasedForOutgoingList(container, map) {
+    const listEl = container.querySelector('#workflowPanelList');
+    const scope = getSessionScope();
+    try {
+        const url = `${window.API}?action=getReleasedForOutgoing&form=${encodeURIComponent(map.formKey)}&department=${encodeURIComponent(scope.client || '')}&token=${encodeURIComponent(window.API_TOKEN)}`;
+        const res = await fetch(url);
+        const result = await res.json();
+        const groups = (result && result.success) ? result.groups : [];
+        if (!groups.length) { listEl.innerText = ' None released yet.'; return; }
+        listEl.innerHTML = groups.map(g =>
+            `<button type="button" class="workflow-pick-btn" data-serial="${escapeHtml(g.serial)}" style="margin: 2px 4px; padding: 3px 8px; font-size: 0.72rem;">${escapeHtml(g.serial)}</button>`
+        ).join('');
+        listEl.querySelectorAll('.workflow-pick-btn').forEach(btn => {
+            btn.onclick = () => {
+                const group = groups.find(g => g.serial === btn.dataset.serial);
+                loadGroupIntoTable(container, map, group, 'RELEASED_TO_OUTGOING', group.items[0].department, false);
+            };
+        });
+    } catch (e) {
+        listEl.innerText = ' Failed to load.';
+    }
+}
+
+// Renders a fetched group's items into the shared table body. Qty stays
+// editable only while status is PENDING_ADMIN_APPROVAL and the viewer is
+// admin (editableQty flag); otherwise every cell is plain text.
+function loadGroupIntoTable(container, map, group, status, department, editableQty) {
+    const tableBody = container.querySelector(map.tableSel);
+    tableBody.innerHTML = '';
+    const tdStyle = "padding: 6px 8px; border-bottom: 1px solid #e9ecef; vertical-align: middle; box-sizing: border-box;";
+
+    group.items.forEach(item => {
+        const tr = document.createElement('tr');
+        tr.dataset.sheetRow = item.rowNum || '';
+        tr.innerHTML = `
+            <td style="${tdStyle} font-weight:600;">${escapeHtml(item.sku)}</td>
+            <td style="${tdStyle}">${escapeHtml(item.description)}</td>
+            <td style="${tdStyle} text-align:center;">${escapeHtml(item.uom)}</td>
+            <td style="${tdStyle} text-align:center;">${escapeHtml(item.expDate || '-')}</td>
+            <td style="${tdStyle} text-align:center;">${escapeHtml(item.onHand)}</td>
+            <td style="${tdStyle} text-align:center;">${escapeHtml(item.totalOnHand)}</td>
+            <td style="${tdStyle} text-align:center;">${escapeHtml(item.cost || '-')}</td>
+            <td style="${tdStyle} text-align:center;">${escapeHtml(item.srp || '-')}</td>
+            <td style="${tdStyle} text-align:center;">${editableQty
+                ? `<input type="number" min="1" value="${escapeHtml(item.qty)}" style="width:100%; text-align:center; font-weight:600; border:1px solid #ccc; border-radius:4px;">`
+                : escapeHtml(item.qty)}</td>
+            <td style="${tdStyle}"></td>
+            <td class="no-print"></td>
+        `;
+        tableBody.appendChild(tr);
+    });
+
+    container.dataset.workflowStatus = status;
+    container.dataset.workflowSerial = group.serial;
+    container.dataset.workflowDept = department;
+
+    const serialField = container.querySelector('#serialNoDisplay');
+    if (serialField) serialField.value = group.serial;
+    const outgoingInput = container.querySelector('#outletSearch');
+    if (outgoingInput) outgoingInput.value = department;
+
+    // Restore the outgoing department's own remarks (entered at submit
+    // time) and the admin's remarks (if any) so both sides stay visible
+    // when re-opening an already-submitted/released form — expects the
+    // backend's getPendingApprovals/getReleasedForOutgoing group objects
+    // to include `remarks` and `adminRemarks`.
+    const outgoingRemarksField = container.querySelector('#outgoingRemarks');
+    if (outgoingRemarksField) outgoingRemarksField.value = group.remarks || '';
+
+    renderWorkflowButton(container);
+    renderApprovedSignature(container);
+    renderAdminRemarksSlot(container, group.adminRemarks || '');
+    setFormLocked(container, status === 'RELEASED_TO_OUTGOING');
+    if (status === 'RELEASED_TO_OUTGOING') {
+        showFormNotification(container, `Released for pickup/print. Approved by ${group.approvedBy || ADMIN_APPROVER_NAME} on ${group.approvedDate || ''}.`, 'success');
+    } else {
+        showFormNotification(container, `Reviewing ${group.serial}. Adjust quantities if needed, then click ADMIN APPROVED.`, 'warn');
+    }
+}
+
+// ---- Print-only, for the outgoing department's PRINT FORM button.
+// Deliberately does NOT call triggerPrintForm()/the save endpoints — a
+// released form must never create a new row just because someone prints
+// it again.
+function printReleasedForm() {
+    const moduleId = getActiveWorkflowModuleId();
+    if (moduleId) printOnly(moduleId);
+}
+
+// ---- Header mail-badge notification for the workflow feature --------
+// Admin accounts get notified of newly SUBMITTED forms waiting on their
+// approval; outgoing-department accounts get notified once the admin
+// has approved & released a form to them. Merges into the same header
+// badge as the incoming-stock mail notification — see
+// renderCombinedHeaderBadge(). Call this whenever the count might have
+// changed: on dashboard load (showDashboard), whenever a workflow-enabled
+// form module opens (initFormWorkflow), and right after a submit/approve
+// action succeeds.
+async function refreshWorkflowBadge() {
+    const scope = getSessionScope();
+    const audience = scope.isAdmin ? 'ADMIN' : 'OUTGOING';
+    try {
+        const url = `${window.API}?action=getWorkflowNotifications&audience=${audience}&department=${encodeURIComponent(scope.client || '')}&token=${encodeURIComponent(window.API_TOKEN)}`;
+        const res = await fetch(url);
+        const result = await res.json();
+        workflowMessagesCache = (result && result.success && result.count) ? result : null;
+    } catch (e) {
+        workflowMessagesCache = null; // silent - badge is best-effort
+    }
+    if (typeof renderCombinedHeaderBadge === 'function') renderCombinedHeaderBadge();
 }
