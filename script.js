@@ -233,11 +233,19 @@ async function handleAction(action) {
         }
     }
 
+    const loginController = new AbortController();
+    const loginTimeout = setTimeout(() => loginController.abort(), 20000);
+
     try {
         const response = await fetch(API_URL, {
             method: "POST",
-            body: JSON.stringify(body)
+            body: JSON.stringify(body),
+            signal: loginController.signal
         });
+
+        if (!response.ok) {
+            throw new Error(`Server returned HTTP ${response.status}.`);
+        }
 
         const textResponse = await response.text();
         let data;
@@ -245,7 +253,7 @@ async function handleAction(action) {
             data = JSON.parse(textResponse);
         } catch (e) {
             console.error("Non-JSON response from server:", textResponse);
-            throw new Error("Server returned an invalid format.");
+            throw new Error("Server returned an invalid response. Check that the Apps Script Web App is deployed for anyone.");
         }
 
         if (data.success || data.status === "REQUIRE_UPDATE") {
@@ -300,8 +308,12 @@ async function handleAction(action) {
         }
     } catch (error) {
         console.error("Fetch error:", error);
-        showModal("CONNECTION LOST", "Failed to reach server. Check deployment URL.", "error");
+        const message = error.name === 'AbortError'
+            ? 'The server took too long to respond. Check the Apps Script deployment and spreadsheet permissions.'
+            : (error.message || 'Failed to reach the server. Check the deployment URL and browser network access.');
+        showModal("CONNECTION LOST", message, "error");
     } finally {
+        clearTimeout(loginTimeout);
         if (typeof hideSeaWaveLoader === 'function') hideSeaWaveLoader();
     }
 }
@@ -4734,7 +4746,7 @@ function renderApprovedSignature(container) {
         slot.innerHTML = `
             <div style="width: 100%; height: 120px; position: relative; display: flex; align-items: flex-end; justify-content: center; overflow: visible;">
                 <div style="position: absolute; left: 0; right: 0; bottom: 18px; border-bottom: 1.5px solid #000; z-index: 1;"></div>
-                <img src="SIG.PNG" alt="Signature" style="position: absolute; z-index: 3; left: 50%; top: -72px; transform: translateX(-50%); display: block; width: 300px; height: 170px; max-width: none; object-fit: contain;">
+                <img src="SIG.png" alt="Signature" style="position: absolute; z-index: 3; left: 50%; top: -72px; transform: translateX(-50%); display: block; width: 300px; height: 170px; max-width: none; object-fit: contain;">
             </div>
             <div style="margin-top: -2px; font-weight: bold; font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.5px; text-align: center;">${ADMIN_APPROVER_NAME}</div>
         `;
