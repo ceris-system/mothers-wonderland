@@ -2670,6 +2670,7 @@ async function loadOutgoingModuleCode(container) {
                 </div>
             </div>
         `;
+        updateFormCategoryNotificationBadges();
     } catch (error) {
         console.error(error);
         container.innerHTML = `<p style="padding: 20px; color: red;">Error loading outgoing module.</p>`;
@@ -3981,6 +3982,7 @@ function renderCombinedHeaderBadge() {
     const total = incomingCount + workflowCount;
 
     updateNavigationNotificationBadges(incomingCount, workflowCount);
+    updateFormCategoryNotificationBadges();
 
     const wrapper = document.getElementById('dashboardMailBadge');
     if (!wrapper) return;
@@ -4245,6 +4247,7 @@ async function loadIncomingModuleCode(container) {
                 </div>
             </div>
         `;
+        updateFormCategoryNotificationBadges();
 
         // Pop the mail-envelope notification (if any pending items exist)
         // every time the Incoming Forms module is opened. Not awaited —
@@ -5237,6 +5240,12 @@ async function refreshWorkflowBadge() {
             workflowMessagesCache = {
                 ...notificationResult,
                 count: Math.min(notificationResult.count, activeFormCount),
+                formCounts: activeFormResults.reduce((counts, result, index) => {
+                    counts[formKeys[index]] = result && result.success && Array.isArray(result.groups)
+                        ? result.groups.length
+                        : 0;
+                    return counts;
+                }, {}),
                 formLabels: activeFormKeys.map(formKey => ({
                     REQUEST_RELEASED: 'REQUEST & RELEASED',
                     TRANSFER: 'TRANSFER',
@@ -5250,4 +5259,36 @@ async function refreshWorkflowBadge() {
         workflowMessagesCache = null; // silent - badge is best-effort
     }
     if (typeof renderCombinedHeaderBadge === 'function') renderCombinedHeaderBadge();
+}
+
+function updateFormCategoryNotificationBadges() {
+    const incomingCategories = incomingMessagesCache && incomingMessagesCache.categories
+        ? incomingMessagesCache.categories
+        : {};
+    const outgoingCounts = workflowMessagesCache && workflowMessagesCache.formCounts
+        ? workflowMessagesCache.formCounts
+        : {};
+
+    const buttonGroups = [
+        { selector: '[onclick*="selectOutgoingCategory(\'REQUEST_AND_RELEASED_FORM\')"]', count: outgoingCounts.REQUEST_RELEASED || 0 },
+        { selector: '[onclick*="selectOutgoingCategory(\'TRANSFER_FORM\')"]', count: outgoingCounts.TRANSFER || 0 },
+        { selector: '[onclick*="selectOutgoingCategory(\'PULLOUT_FORM\')"]', count: outgoingCounts.PULLOUT || 0 },
+        { selector: '[onclick*="selectIncomingCategory(\'REQUEST\')"]', count: incomingCategories.REQUEST?.total || 0 },
+        { selector: '[onclick*="selectIncomingCategory(\'TRANSFER\')"]', count: incomingCategories.TRANSFER?.total || 0 },
+        { selector: '[onclick*="selectIncomingCategory(\'PULLOUT\')"]', count: incomingCategories.RTV?.total || 0 }
+    ];
+
+    buttonGroups.forEach(({ selector, count }) => {
+        const button = document.querySelector(selector);
+        if (!button) return;
+        button.querySelectorAll('.form-notification-badge').forEach(badge => badge.remove());
+        if (!count) return;
+
+        const badge = document.createElement('span');
+        badge.className = 'form-notification-badge';
+        badge.textContent = `${count} MESSAGE${count > 1 ? 'S' : ''}`;
+        badge.style.cssText = 'position:absolute; top:6px; right:8px; padding:4px 7px; border-radius:10px; background:#d81b60; color:#fff; font:700 0.62rem/1 Roboto Mono, monospace; letter-spacing:0; z-index:2;';
+        button.style.position = 'relative';
+        button.appendChild(badge);
+    });
 }
