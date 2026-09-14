@@ -696,7 +696,7 @@ function injectAppPrintStyles() {
 // Prints ONLY the element with the given id, on portrait Letter/short
 // bond paper, with the readable print styling above — then restores it
 // to its exact original place in the DOM afterward.
-function printOnly(elementId) {
+async function printOnly(elementId) {
     const target = document.getElementById(elementId);
     if (!target) {
         console.error("printOnly: element not found:", elementId);
@@ -740,6 +740,15 @@ function printOnly(elementId) {
 
     window.addEventListener('afterprint', restore);
     setTimeout(restore, 3000); // safety net if afterprint never fires (older Safari)
+
+    const images = Array.from(printRoot.querySelectorAll('img'));
+    await Promise.all(images.map(image => {
+        if (image.complete && image.naturalWidth > 0) return Promise.resolve();
+        return new Promise(resolve => {
+            image.addEventListener('load', resolve, { once: true });
+            image.addEventListener('error', resolve, { once: true });
+        });
+    }));
 
     window.print();
 }
@@ -2734,7 +2743,10 @@ async function loadRequestAndReleasedFormModuleCode(container) {
         const response = await fetch('modules/request_and_released_form/index.html');
         if (!response.ok) throw new Error(`HTTP ${response.status}: Failed to load file.`);
         
-        const htmlContent = await response.text();
+        const htmlContent = (await response.text()).replace(
+            /src=["'](?:LOGO\.PNG|logo\.png)["']/gi,
+            `src="${new URL('logo.png', document.baseURI).href}"`
+        );
         
         container.innerHTML = `
             <div style="position: fixed; top: 0; left: 0; width: 100vw; height: 98%; background: rgba(0, 0, 0, 0.75); backdrop-filter: blur(8px); display: flex; justify-content: center; align-items: center; z-index: 3000; box-sizing: border-box; padding: 20px 50px 20px 20px;">
@@ -2775,7 +2787,10 @@ async function loadTransferFormModuleCode(container) {
         const response = await fetch('modules/transfer_form/index.html');
         if (!response.ok) throw new Error("Failed to load module file.");
         
-        const htmlContent = await response.text();
+        const htmlContent = (await response.text()).replace(
+            /src=["'](?:LOGO\.PNG|logo\.png)["']/gi,
+            `src="${new URL('logo.png', document.baseURI).href}"`
+        );
         
         container.innerHTML = `
             <div style="position: fixed; top: 0; left: 0; width: 100vw; height: 98%; background: rgba(0, 0, 0, 0.75); backdrop-filter: blur(8px); display: flex; justify-content: center; align-items: center; z-index: 3000; box-sizing: border-box; padding: 20px 50px 20px 20px;">
@@ -4746,7 +4761,7 @@ function renderApprovedSignature(container) {
         slot.innerHTML = `
             <div style="width: 100%; height: 120px; position: relative; display: flex; align-items: flex-end; justify-content: center; overflow: visible;">
                 <div style="position: absolute; left: 0; right: 0; bottom: 18px; border-bottom: 1.5px solid #000; z-index: 1;"></div>
-                <img src="SIG.png" alt="Signature" style="position: absolute; z-index: 3; left: 50%; top: -72px; transform: translateX(-50%); display: block; width: 300px; height: 170px; max-width: none; object-fit: contain;">
+                <img src="${new URL('SIG.png', document.baseURI).href}" alt="Signature" style="position: absolute; z-index: 3; left: 50%; top: -72px; transform: translateX(-50%); display: block; width: 300px; height: 170px; max-width: none; object-fit: contain;">
             </div>
             <div style="margin-top: -2px; font-weight: bold; font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.5px; text-align: center;">${ADMIN_APPROVER_NAME}</div>
         `;
