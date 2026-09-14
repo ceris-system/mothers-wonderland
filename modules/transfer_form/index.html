@@ -73,21 +73,6 @@
 
         <!-- Workflow Status / Notification Banner -->
         <div id="formNotificationBanner" class="no-print" style="display: none; padding: 10px 14px; border: 1.5px solid #0d6efd; background: #e7f1ff; color: #0d47a1; border-radius: 6px; font-size: 0.78rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.3px;"></div>
-        <!-- OUTGOING DEPARTMENT REMARKS -- filled in by the requester before
-             SUBMIT; locked (read-only) once the form is submitted. Sent to
-             the backend as part of the row payload (submitOutgoingForApproval). -->
-        <div class="no-print" style="margin-top: 4px;">
-            <label for="outgoingRemarks" style="display:block; font-weight: bold; font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.3px; color: #111; margin-bottom: 4px;">Remarks (Outgoing Department)</label>
-            <textarea id="outgoingRemarks" rows="2" placeholder="Optional remarks from the outgoing department..." style="width: 100%; padding: 6px 10px; border: 1px solid #000; border-radius: 4px; font-family: inherit; font-size: 0.78rem; outline: none; box-sizing: border-box; resize: vertical;"></textarea>
-        </div>
-
-        <!-- ADMIN REMARKS -- rendered/toggled by renderAdminRemarksSlot() in
-             script.js. Editable textarea for the admin while a submission is
-             PENDING_ADMIN_APPROVAL; becomes a read-only display (visible to
-             BOTH admin and the outgoing department) once RELEASED_TO_OUTGOING. -->
-        <div id="adminRemarksSlot" class="no-print"></div>
-
-
         <!-- Table Viewport -->
         <div style="max-height: 480px; overflow-y: auto; border: 1px solid #e0e0e0; border-radius: 6px; box-shadow: 0 2px 6px rgba(0,0,0,0.03);">
             <table style="width: 100%; border-collapse: collapse; font-size: 0.78rem; text-align: left; background: #fff;">

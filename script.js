@@ -3921,27 +3921,17 @@ function getMailCacheStorageKey() {
 }
 
 // Fired the moment the dashboard is shown (fresh login OR a page-reload
-// session restore — see showDashboard). Renders the header badge TWICE:
-// first instantly from whatever was persisted locally last time (no
-// network wait at all — this is what makes it appear immediately instead
-// of popping in late), then again once the fresh fetch resolves, which
-// corrects the count if anything changed since.
+// session restore — see showDashboard). The badge is rendered only from the
+// fresh server response so deleted source rows cannot leave a stale local
+// notification visible.
 function primeIncomingMessagesCache() {
     try {
-        const stored = localStorage.getItem(getMailCacheStorageKey());
-        if (stored) {
-            const parsed = JSON.parse(stored);
-            incomingMessagesCache = (parsed && parsed.totalCount) ? parsed : null;
-            updateDashboardMailBadge(incomingMessagesCache, { persist: false });
-        }
+        localStorage.removeItem(getMailCacheStorageKey());
     } catch (e) { /* ignore corrupt/blocked local cache */ }
 
     // Prefer the speculative fetch kicked off in parallel with the login
-    // request itself (see handleAction) — it was likely started well
-    // before this point and may already be resolved, which is what makes
-    // the badge appear right away instead of after a second, sequential
-    // round trip. Falls back to a normal fetch (e.g. on a page-reload
-    // session restore, where there's no login request to piggyback on).
+    // request itself (see handleAction). Falls back to a normal fetch on
+    // page reload, where there is no login request to piggyback on.
     const speculative = window.__speculativeIncomingPromise;
     window.__speculativeIncomingPromise = null;
     const resultPromise = speculative || fetchIncomingMessages();
@@ -3990,6 +3980,8 @@ function renderCombinedHeaderBadge() {
     const workflowCount = (workflowMessagesCache && workflowMessagesCache.count) || 0;
     const total = incomingCount + workflowCount;
 
+    updateNavigationNotificationBadges(incomingCount, workflowCount);
+
     const wrapper = document.getElementById('dashboardMailBadge');
     if (!wrapper) return;
 
@@ -4006,6 +3998,13 @@ function renderCombinedHeaderBadge() {
     wrapper.dataset.count = String(total);
     wrapper.style.display = 'flex';
 
+    const workflowLabels = workflowMessagesCache && workflowMessagesCache.formLabels
+        ? workflowMessagesCache.formLabels.join(', ')
+        : '';
+    const workflowText = workflowLabels
+        ? ` | ${getSessionScope().isAdmin ? 'APPROVAL' : 'RELEASED'}: ${workflowLabels}`
+        : '';
+
     // Skip re-rendering (and re-popping the animation) if the count
     // hasn't actually changed since last render.
     if (prevCount === String(total) && wrapper.querySelector('#dashboardMailBadgeBtn')) return;
@@ -4014,10 +4013,32 @@ function renderCombinedHeaderBadge() {
         <button type="button" id="dashboardMailBadgeBtn" onclick="openIncomingMailDetails()" title="You have new messages" style="display: flex; align-items: center; gap: 7px; background: #fff; border: 1.5px solid rgba(0,0,0,0.4); border-radius: 20px; padding: 6px 14px 6px 10px; cursor: pointer; box-shadow: 0 4px 10px rgba(0,0,0,0.2);">
             <i class="fa-solid fa-envelope" style="color: #d81b60; font-size: 1rem;"></i>
             <span style="font-family: 'Roboto Mono', monospace; font-size: 0.7rem; font-weight: 700; color: #111; letter-spacing: 0.5px; white-space: nowrap;">
-                (${total}) NEW MESSAGE${total > 1 ? 'S' : ''}
+                (${total}) NEW MESSAGE${total > 1 ? 'S' : ''}${workflowText}
             </span>
         </button>
     `;
+}
+
+function updateNavigationNotificationBadges(incomingCount, workflowCount) {
+    const outgoingButton = document.getElementById('mainOutgoingNavBtn');
+    const incomingButton = document.getElementById('mainIncomingNavBtn');
+
+    [
+        [outgoingButton, workflowCount],
+        [incomingButton, incomingCount]
+    ].forEach(([button, count]) => {
+        if (!button) return;
+        const existing = button.querySelector('.nav-notification-badge');
+        if (existing) existing.remove();
+        if (!count) return;
+
+        const badge = document.createElement('span');
+        badge.className = 'nav-notification-badge';
+        badge.textContent = `${count} MESSAGE${count > 1 ? 'S' : ''}`;
+        badge.style.cssText = 'position:absolute; top:6px; right:8px; padding:4px 7px; border-radius:10px; background:#d81b60; color:#fff; font:700 0.62rem/1 Roboto Mono, monospace; letter-spacing:0; z-index:2;';
+        button.style.position = 'relative';
+        button.appendChild(badge);
+    });
 }
 
 async function fetchIncomingMessages(deptOverride, userOverride) {
@@ -4114,11 +4135,13 @@ function openIncomingMailDetails() {
         const label = scope.isAdmin
             ? 'FORM(S) SUBMITTED — AWAITING YOUR APPROVAL'
             : 'FORM(S) APPROVED & RELEASED TO YOUR DEPARTMENT';
+        const formLabels = workflowMessagesCache.formLabels || [];
         bodyHtml += `
             <div style="display: flex; align-items: flex-start; gap: 10px; padding: 10px 4px; border-bottom: 1px solid rgba(0,0,0,0.08);">
                 <i class="fa-solid fa-file-invoice" style="color: #7c4dff; margin-top: 2px; flex-shrink: 0;"></i>
                 <p style="margin: 0; font-size: 0.8rem; color: #222; line-height: 1.5;">
                     <strong>(${workflowMessagesCache.count})</strong> ${label}
+                        ${formLabels.length ? `<br><strong>FORM TYPE:</strong> ${formLabels.map(escapeHtml).join(', ')}` : ''}
                 </p>
             </div>
         `;
@@ -4703,9 +4726,11 @@ function renderApprovedSignature(container) {
     // everyone just sees the blank signature line.
     if (status === 'RELEASED_TO_OUTGOING') {
         slot.innerHTML = `
-            <img src="SIG.PNG" alt="Signature" style="height: 38px; object-fit: contain; margin-bottom: 4px;">
+            <div style="width: 100%; min-height: 100px; display: flex; align-items: center; justify-content: center; gap: 10px;">
+                <img src="SIG.PNG" alt="Signature" style="height: 100px; max-width: 260px; object-fit: contain;">
+                <span style="font-weight: bold; font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.5px;">${ADMIN_APPROVER_NAME}</span>
+            </div>
             <div style="width: 100%; border-bottom: 1.5px solid #000; margin-bottom: 6px;"></div>
-            <div style="font-weight: bold; font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.5px;">${ADMIN_APPROVER_NAME}</div>
         `;
     } else {
         slot.innerHTML = `<div style="width: 100%; border-bottom: 1.5px solid #000; margin-bottom: 6px; height: 38px;"></div>`;
@@ -4754,11 +4779,17 @@ function renderWorkflowButton(container) {
     if (status === 'RELEASED_TO_OUTGOING') {
         // Released: nothing left to submit/approve — print only.
         btn.style.display = 'none';
-        if (printBtn) printBtn.style.display = '';
+        if (printBtn) {
+            printBtn.style.display = '';
+            printBtn.onclick = printApprovedWorkflowForm;
+        }
         return;
     }
 
-    if (printBtn) printBtn.style.display = 'none';
+    if (printBtn) {
+        printBtn.style.display = 'none';
+        printBtn.onclick = triggerPrintForm;
+    }
     btn.style.display = '';
 
     if (scope.isAdmin && status === 'PENDING_ADMIN_APPROVAL') {
@@ -4795,7 +4826,12 @@ function hideFormNotification(container) {
 // ---- Lock everything except PRINT once released --------------------
 function setFormLocked(container, locked) {
     container.querySelectorAll('input, textarea').forEach(el => {
-        if (el.id !== 'serialNoDisplay' && el.id !== 'formattedDateDisplay') el.disabled = locked;
+        const allowOutgoingRemarks = locked
+            && !getSessionScope().isAdmin
+            && el.classList.contains('row-remarks');
+        if (!allowOutgoingRemarks && el.id !== 'serialNoDisplay' && el.id !== 'formattedDateDisplay') {
+            el.disabled = locked;
+        }
     });
     const addBtn = container.querySelector('#productListBtn');
     if (addBtn) addBtn.style.display = locked ? 'none' : '';
@@ -5046,7 +5082,9 @@ function loadGroupIntoTable(container, map, group, status, department, editableQ
             <td style="${tdStyle} text-align:center;">${editableQty
                 ? `<input type="number" min="1" value="${escapeHtml(item.qty)}" style="width:100%; text-align:center; font-weight:600; border:1px solid #ccc; border-radius:4px;">`
                 : escapeHtml(item.qty)}</td>
-            <td style="${tdStyle}"></td>
+            <td style="${tdStyle}">${editableQty || (status === 'RELEASED_TO_OUTGOING' && !getSessionScope().isAdmin)
+                ? `<input type="text" class="row-remarks" value="${escapeHtml(item.remarks || '')}" aria-label="Remarks for ${escapeHtml(item.description)}" placeholder="Product remarks" style="width:100%; border:1px solid #ccc; border-radius:4px; padding:4px 6px; box-sizing:border-box;">`
+                : escapeHtml(item.remarks || '')}</td>
             <td class="no-print"></td>
         `;
         tableBody.appendChild(tr);
@@ -5086,7 +5124,66 @@ function loadGroupIntoTable(container, map, group, status, department, editableQ
 // it again.
 function printReleasedForm() {
     const moduleId = getActiveWorkflowModuleId();
-    if (moduleId) printOnly(moduleId);
+    if (moduleId) printApprovedWorkflowForm();
+}
+
+async function printApprovedWorkflowForm() {
+    const moduleId = getActiveWorkflowModuleId();
+    if (!moduleId) return;
+
+    printOnly(moduleId);
+    await resetWorkflowNotifications();
+}
+
+async function resetWorkflowNotifications() {
+    let rowNums = workflowMessagesCache && Array.isArray(workflowMessagesCache.notifications)
+        ? workflowMessagesCache.notifications
+            .map(notification => Number(notification.rowNum))
+            .filter(rowNum => Number.isInteger(rowNum) && rowNum > 0)
+        : [];
+
+    if (!rowNums.length && window.API) {
+        try {
+            const scope = getSessionScope();
+            const audience = scope.isAdmin ? 'ADMIN' : 'OUTGOING';
+            const url = `${window.API}?action=getWorkflowNotifications&audience=${audience}`
+                + `&department=${encodeURIComponent(scope.client || '')}`
+                + `&token=${encodeURIComponent(window.API_TOKEN)}`;
+            const response = await fetch(url);
+            const result = await response.json();
+            rowNums = (result && result.success && Array.isArray(result.notifications))
+                ? result.notifications
+                    .map(notification => Number(notification.rowNum))
+                    .filter(rowNum => Number.isInteger(rowNum) && rowNum > 0)
+                : [];
+        } catch (error) {
+            console.error('Failed to load workflow notifications for reset:', error);
+        }
+    }
+
+    workflowMessagesCache = null;
+    incomingMessagesCache = null;
+    try {
+        localStorage.removeItem(getMailCacheStorageKey());
+    } catch (error) {
+        // Ignore blocked local storage; the visible badge is still cleared.
+    }
+    renderCombinedHeaderBadge();
+
+    if (!rowNums.length || !window.API) return;
+
+    try {
+        await fetch(window.API, {
+            method: 'POST',
+            body: JSON.stringify({
+                action: 'markWorkflowNotificationsRead',
+                rowNums: rowNums,
+                token: window.API_TOKEN
+            })
+        });
+    } catch (error) {
+        console.error('Failed to reset workflow notifications:', error);
+    }
 }
 
 // ---- Header mail-badge notification for the workflow feature --------
@@ -5102,10 +5199,53 @@ async function refreshWorkflowBadge() {
     const scope = getSessionScope();
     const audience = scope.isAdmin ? 'ADMIN' : 'OUTGOING';
     try {
-        const url = `${window.API}?action=getWorkflowNotifications&audience=${audience}&department=${encodeURIComponent(scope.client || '')}&token=${encodeURIComponent(window.API_TOKEN)}`;
-        const res = await fetch(url);
-        const result = await res.json();
-        workflowMessagesCache = (result && result.success && result.count) ? result : null;
+        const notificationUrl = `${window.API}?action=getWorkflowNotifications&audience=${audience}&department=${encodeURIComponent(scope.client || '')}&token=${encodeURIComponent(window.API_TOKEN)}`;
+        const notificationResponse = await fetch(notificationUrl);
+        const notificationResult = await notificationResponse.json();
+
+        // Notifications are append-only, so clearing the source form sheets
+        // can leave old unread notification rows behind. Verify that at least
+        // one matching pending/released form still exists before showing the
+        // dashboard badge.
+        const formKeys = ['REQUEST_RELEASED', 'TRANSFER', 'PULLOUT'];
+        const activeFormResults = await Promise.all(formKeys.map(async formKey => {
+            const action = scope.isAdmin ? 'getPendingApprovals' : 'getReleasedForOutgoing';
+            const url = `${window.API}?action=${action}&form=${formKey}`
+                + `&department=${encodeURIComponent(scope.client || '')}`
+                + `&token=${encodeURIComponent(window.API_TOKEN)}`;
+            try {
+                const response = await fetch(url);
+                return await response.json();
+            } catch (error) {
+                return null;
+            }
+        }));
+
+        const activeFormKeys = activeFormResults.reduce((keys, result, index) => {
+            if (result && result.success && Array.isArray(result.groups) && result.groups.length) {
+                keys.push(formKeys[index]);
+            }
+            return keys;
+        }, []);
+        const activeFormCount = activeFormResults.reduce((count, result) => {
+            return count + (result && result.success && Array.isArray(result.groups)
+                ? result.groups.length
+                : 0);
+        }, 0);
+
+        if (notificationResult && notificationResult.success && notificationResult.count && activeFormCount) {
+            workflowMessagesCache = {
+                ...notificationResult,
+                count: Math.min(notificationResult.count, activeFormCount),
+                formLabels: activeFormKeys.map(formKey => ({
+                    REQUEST_RELEASED: 'REQUEST & RELEASED',
+                    TRANSFER: 'TRANSFER',
+                    PULLOUT: 'PULL OUT'
+                }[formKey]))
+            };
+        } else {
+            workflowMessagesCache = null;
+        }
     } catch (e) {
         workflowMessagesCache = null; // silent - badge is best-effort
     }
