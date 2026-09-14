@@ -4726,9 +4726,9 @@ function renderApprovedSignature(container) {
     // everyone just sees the blank signature line.
     if (status === 'RELEASED_TO_OUTGOING') {
         slot.innerHTML = `
-            <div style="width: 100%; min-height: 100px; display: flex; align-items: center; justify-content: center; gap: 10px;">
+            <div style="width: 100%; min-height: 100px; display: flex; flex-direction: column; align-items: center; justify-content: flex-end; gap: 2px;">
                 <img src="SIG.PNG" alt="Signature" style="height: 100px; max-width: 260px; object-fit: contain;">
-                <span style="font-weight: bold; font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.5px;">${ADMIN_APPROVER_NAME}</span>
+                <span style="font-weight: bold; font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.5px; text-align: center;">${ADMIN_APPROVER_NAME}</span>
             </div>
             <div style="width: 100%; border-bottom: 1.5px solid #000; margin-bottom: 6px;"></div>
         `;
