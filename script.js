@@ -182,6 +182,38 @@ if (document.body) {
 }
 
 // ==========================================
+// SERIAL NUMBER DISPLAY STYLING
+// ==========================================
+// #serialNoDisplay (the auto-generated MWRRF-/MWTF-/MWPF- reference
+// number shown near the DATE field on each outgoing form) was rendering
+// at the same small size as every other text input. A serial/reference
+// number needs to be easy to read at a glance and easy to copy down by
+// hand, so this bumps it up to a common "reference number" display size
+// (~1.4rem, bold, wider letter-spacing) — both on screen and, via the
+// print stylesheet override below, on the printed form itself.
+function injectSerialNumberStyles() {
+    if (document.getElementById('serialNumberDisplayStyles')) return;
+    const style = document.createElement('style');
+    style.id = 'serialNumberDisplayStyles';
+    style.textContent = `
+        #serialNoDisplay {
+            font-size: 1.4rem !important;
+            font-weight: 700 !important;
+            letter-spacing: 1.5px !important;
+            padding: 8px 12px !important;
+            text-align: center !important;
+        }
+    `;
+    document.head.appendChild(style);
+}
+
+if (document.head) {
+    injectSerialNumberStyles();
+} else {
+    document.addEventListener('DOMContentLoaded', injectSerialNumberStyles);
+}
+
+// ==========================================
 // AUTHENTICATION & NAVIGATION LOGIC
 // ==========================================
 
@@ -678,6 +710,15 @@ function injectAppPrintStyles() {
                 background: transparent !important;
                 color: #000 !important;
                 padding: 1px 2px !important;
+            }
+
+            /* Serial/reference number stays large and bold on paper too,
+               instead of being shrunk down to the same 12pt as every
+               other field by the generic rule above. */
+            .print-target-active #serialNoDisplay {
+                font-size: 18pt !important;
+                font-weight: 700 !important;
+                letter-spacing: 1.5px !important;
             }
 
             /* Buttons, the close (X) icon, search/filter controls, and
