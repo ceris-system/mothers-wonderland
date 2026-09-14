@@ -2829,9 +2829,12 @@ async function loadPulloutFormModuleCode(container) {
         container.innerHTML = `<p style="padding: 20px; font-family: 'Roboto Mono', monospace; color: #fff;">Loading Pullout Form...</p>`;
         
         const response = await fetch('modules/pullout_form/index.html');
-        if (!response.ok) throw new Error("Failed to load module file.");
+        if (!response.ok) throw new Error(`HTTP ${response.status}: Failed to load Pull Out form.`);
         
-        const htmlContent = await response.text();
+        const htmlContent = (await response.text()).replace(
+            /src=["'](?:LOGO\.PNG|logo\.png)["']/gi,
+            `src="${new URL('logo.png', document.baseURI).href}"`
+        );
         
         container.innerHTML = `
             <div style="position: fixed; top: 0; left: 0; width: 100vw; height: 98%; background: rgba(0, 0, 0, 0.75); backdrop-filter: blur(8px); display: flex; justify-content: center; align-items: center; z-index: 3000; box-sizing: border-box; padding: 20px 50px 20px 20px;">
@@ -2857,7 +2860,7 @@ async function loadPulloutFormModuleCode(container) {
 
     } catch (error) {
         console.error(error);
-        container.innerHTML = `<p style="padding: 20px; color: red;">Error loading pullout form module.</p>`;
+        container.innerHTML = `<p style="padding: 20px; color: red;">Error loading Pull Out form: ${escapeHtml(error.message)}</p>`;
     }
 }
 
