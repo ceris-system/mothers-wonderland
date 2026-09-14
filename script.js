@@ -4306,8 +4306,8 @@ function selectIncomingCategory(categoryKey) {
             <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; font-size: 0.85rem; gap: 15px; flex-wrap: wrap;">
                 <div style="display: flex; align-items: center; gap: 20px; flex: 1; min-width: 500px; flex-wrap: wrap;">
                     <div style="display: flex; align-items: center; gap: 8px; flex: 1; min-width: 240px;">
-                        <span style="font-weight: bold; color: #111; text-transform: uppercase; white-space: nowrap;">SELECT DEPARTMENT:</span>
-                        <input type="text" id="incSelectDept" placeholder="Type to search outlet..." style="padding: 6px 10px; background: #fff; border: 1px solid #000; border-radius: 4px; color: #000; font-family: inherit; outline: none; flex: 1;" list="incomingOutletList">
+                        <span style="font-weight: bold; color: #111; text-transform: uppercase; white-space: nowrap;">SOURCE DEPARTMENT:</span>
+                        <input type="text" id="incSelectDept" value="AUTOMATIC" readonly style="padding: 6px 10px; background: #f4f4f4; border: 1px solid #000; border-radius: 4px; color: #000; font-family: inherit; outline: none; flex: 1;">
                     </div>
                     <div style="display: flex; align-items: center; gap: 8px; flex: 1; min-width: 240px;">
                         <span style="font-weight: bold; color: #111; text-transform: uppercase; white-space: nowrap;">INCOMING DEPARTMENT:</span>
@@ -4335,9 +4335,7 @@ function selectIncomingCategory(categoryKey) {
                     <span style="font-weight: bold; color: #111; text-transform: uppercase;">DATE:</span>
                     <input type="text" id="formattedDateDisplay" readonly style="padding: 6px 10px; background: #f4f4f4; border: 1px solid #000; border-radius: 4px; color: #000; font-family: inherit; outline: none; width: 170px; text-align: center; font-weight: bold;">
                 </div>
-                <button type="button" class="btn-3d" onclick="fetchIncomingRows()" style="padding: 8px 16px; background: #111; color: #fff; border: none; border-radius: 4px; font-family: inherit; font-size: 0.75rem; cursor: pointer; text-transform: uppercase; font-weight: 600; letter-spacing: 0.5px;">
-                    <i class="fa-solid fa-magnifying-glass"></i> UPLOAD
-                </button>
+                <span style="font-size: 0.72rem; font-weight: 700; color: #2e7d32; text-transform: uppercase;">AUTO-LOADED FROM OUTGOING FORMS</span>
             </div>
 
             <!-- Results Table -->
@@ -4374,6 +4372,7 @@ function selectIncomingCategory(categoryKey) {
 
     if (typeof loadOutletFilterFromConfig === 'function') loadOutletFilterFromConfig();
     if (typeof setTransferDate === 'function') setTransferDate();
+    fetchIncomingRowsAutomatically();
 }
 
 function toggleSelectAllIncoming(checkbox) {
@@ -4454,15 +4453,36 @@ function renderIncomingRows(rows, cfg) {
             <td style="padding: 6px 8px; border-bottom: 1px solid #e9ecef; text-align: center;">
                 <input type="date" class="incoming-exp-date" style="width: 100%; border: 1px solid #ccc; border-radius: 6px; padding: 4px 6px; font-family: inherit; font-size: 0.78rem; outline: none; box-sizing: border-box;">
             </td>
-            <td style="padding: 6px 8px; border-bottom: 1px solid #e9ecef; text-align: center;">
-                <input type="number" class="incoming-qty" value="${escapeHtml(item.qty)}" min="0" step="any" style="width: 100%; border: 1px solid #ccc; border-radius: 6px; padding: 4px 6px; font-family: inherit; font-size: 0.78rem; font-weight: 600; text-align: center; outline: none; box-sizing: border-box;">
-            </td>
+            <td style="padding: 6px 8px; border-bottom: 1px solid #e9ecef; text-align: center; font-weight: 600;">${escapeHtml(item.qty)}</td>
             <td style="padding: 6px 8px; border-bottom: 1px solid #e9ecef; text-align: center;">
                 <input type="text" class="incoming-remarks" placeholder="Optional remarks" style="width: 100%; border: 1px solid #ccc; border-radius: 6px; padding: 4px 6px; font-family: inherit; font-size: 0.78rem; outline: none; box-sizing: border-box;">
             </td>
         `;
         tableBody.appendChild(tr);
     });
+}
+
+async function fetchIncomingRowsAutomatically() {
+    const cfg = INCOMING_CONFIGS[activeIncomingKey];
+    const scope = getSessionScope();
+    const tableBody = document.getElementById('incomingTableBody');
+    if (!cfg || (!scope.client && !scope.isAdmin)) return;
+
+    if (tableBody) tableBody.innerHTML = '<tr><td colspan="7" style="padding: 20px; text-align: center; color: #888;">Checking incoming forms...</td></tr>';
+    try {
+        const url = `${window.API}?action=getIncomingPendingForDepartment&sheet=${encodeURIComponent(cfg.sheet)}`
+            + `&incomingDept=${encodeURIComponent(scope.client || '')}`
+            + `&user=${encodeURIComponent(window.sessionUser || '')}`
+            + `&token=${encodeURIComponent(window.API_TOKEN)}`;
+        const response = await fetch(url);
+        const result = await response.json();
+        if (!result.success) throw new Error(result.error || 'Automatic incoming loading is not enabled in the backend.');
+        incomingFetchedRows = Array.isArray(result.data) ? result.data : [];
+        renderIncomingRows(incomingFetchedRows, cfg);
+    } catch (error) {
+        console.error('Automatic Incoming Fetch Error:', error);
+        if (tableBody) tableBody.innerHTML = `<tr><td colspan="7" style="padding: 20px; text-align: center; color: #d9534f;">${escapeHtml(error.message)}</td></tr>`;
+    }
 }
 
 // ==========================================
@@ -4590,14 +4610,9 @@ async function submitIncomingReceived() {
 
             const tr = cb.closest('tr');
             const expDateInput = tr ? tr.querySelector('.incoming-exp-date') : null;
-            const qtyInput = tr ? tr.querySelector('.incoming-qty') : null;
             const remarksInput = tr ? tr.querySelector('.incoming-remarks') : null;
             const expDate = expDateInput ? expDateInput.value : '';
-            // QTY is editable in the table for corrections — send the
-            // (possibly corrected) input value instead of the originally
-            // fetched item.qty. Falls back to the original value if the
-            // field was somehow left blank.
-            const qty = (qtyInput && qtyInput.value.trim() !== '') ? qtyInput.value.trim() : item.qty;
+            const qty = item.qty;
             const remarks = remarksInput ? remarksInput.value.trim() : '';
 
             // Only the source sheet + row/qty/exp/remarks data are sent.
