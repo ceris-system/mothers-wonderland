@@ -4733,10 +4733,10 @@ function renderApprovedSignature(container) {
     if (status === 'RELEASED_TO_OUTGOING') {
         slot.innerHTML = `
             <div style="width: 100%; height: 120px; position: relative; display: flex; align-items: flex-end; justify-content: center;">
-                <div style="position: absolute; left: 0; right: 0; bottom: 0; border-bottom: 1.5px solid #000;"></div>
-                <img src="SIG.PNG" alt="Signature" style="position: relative; z-index: 1; display: block; height: 115px; max-width: 280px; object-fit: contain; margin-bottom: -4px;">
+                <div style="position: absolute; left: 0; right: 0; bottom: 18px; border-bottom: 1.5px solid #000;"></div>
+                <img src="SIG.PNG" alt="Signature" style="position: relative; z-index: 1; display: block; height: 115px; max-width: 280px; object-fit: contain; margin-bottom: 10px;">
             </div>
-            <div style="margin-top: 6px; font-weight: bold; font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.5px; text-align: center;">${ADMIN_APPROVER_NAME}</div>
+            <div style="margin-top: -2px; font-weight: bold; font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.5px; text-align: center;">${ADMIN_APPROVER_NAME}</div>
         `;
     } else {
         slot.innerHTML = `<div style="width: 100%; border-bottom: 1.5px solid #000; margin-bottom: 6px; height: 38px;"></div>`;
