@@ -5538,7 +5538,10 @@ function openBarcodeGeneratorModal() {
                 }
                 #barcodeGenModal .bg-dropdown-list.open { display: block; }
                 #barcodeGenModal .bg-dropdown-item { padding: 9px 12px; cursor: pointer; font-size: 13px; }
-                #barcodeGenModal .bg-dropdown-item:hover { background: #faf1de; }
+                #barcodeGenModal .bg-dropdown-item:hover,
+                #barcodeGenModal .bg-dropdown-item.active { background: #faf1de; }
+                #barcodeGenModal .bg-dropdown-item.active { box-shadow: inset 3px 0 0 var(--bg-amber); }
+                #barcodeGenModal .bg-dropdown-more { padding: 8px 12px; font-size: 11.5px; color: var(--bg-ink-soft); font-style: italic; cursor: default; }
                 #barcodeGenModal .bg-dropdown-item .bg-d-sku { font-weight: 600; font-family: 'IBM Plex Mono', monospace; }
                 #barcodeGenModal .bg-dropdown-item .bg-d-desc { color: var(--bg-ink-soft); }
                 #barcodeGenModal .bg-status-msg { font-size: 12px; color: var(--bg-ink-soft); margin-top: -8px; margin-bottom: 14px; }
@@ -5615,12 +5618,12 @@ function openBarcodeGeneratorModal() {
                     <div class="bg-body-pad">
                         <div class="bg-form-group">
                             <label for="bg-search-sku">Filter by SKU</label>
-                            <input type="text" id="bg-search-sku" placeholder="Start typing to filter..." oninput="bgHandleSkuSearch(this.value)" autocomplete="off">
+                            <input type="text" id="bg-search-sku" placeholder="Click to browse all, or type to filter..." oninput="bgHandleSkuSearch(this.value)" onfocus="bgShowFullDropdown('bg-sku-dropdown')" onkeydown="bgHandleKeyNav(event, 'bg-sku-dropdown')" autocomplete="off">
                             <div id="bg-sku-dropdown" class="bg-dropdown-list"></div>
                         </div>
                         <div class="bg-form-group">
                             <label for="bg-search-desc">Filter by description</label>
-                            <input type="text" id="bg-search-desc" placeholder="Start typing to filter..." oninput="bgHandleDescSearch(this.value)" autocomplete="off">
+                            <input type="text" id="bg-search-desc" placeholder="Click to browse all, or type to filter..." oninput="bgHandleDescSearch(this.value)" onfocus="bgShowFullDropdown('bg-desc-dropdown')" onkeydown="bgHandleKeyNav(event, 'bg-desc-dropdown')" autocomplete="off">
                             <div id="bg-desc-dropdown" class="bg-dropdown-list"></div>
                         </div>
                         <div id="bg-load-status" class="bg-status-msg">Loading inventory...</div>
@@ -5751,13 +5754,20 @@ function bgUpdatePreview(item) {
     bgRenderBarcode(item.sku);
 }
 
+// Rendering every match with no cap is fine for a few hundred SKUs, but
+// a multi-thousand-row pricelist would make each keystroke rebuild a huge
+// DOM list. BG_DROPDOWN_RENDER_CAP keeps the dropdown instant either way —
+// past the cap we show a "+N more" hint instead of more rows, and typing
+// narrows the match set below the cap same as any autocomplete.
+const BG_DROPDOWN_RENDER_CAP = 60;
+
 function bgBuildDropdown(matches, listEl, onPick) {
     listEl.innerHTML = '';
     if (!matches.length) {
         listEl.classList.remove('open');
         return;
     }
-    matches.slice(0, 8).forEach(item => {
+    matches.slice(0, BG_DROPDOWN_RENDER_CAP).forEach(item => {
         const row = document.createElement('div');
         row.className = 'bg-dropdown-item';
         row.innerHTML = `<span class="bg-d-sku">${escapeHtml(item.sku)}</span> — <span class="bg-d-desc">${escapeHtml(item.desc)}</span>`;
@@ -5769,22 +5779,77 @@ function bgBuildDropdown(matches, listEl, onPick) {
         });
         listEl.appendChild(row);
     });
+    if (matches.length > BG_DROPDOWN_RENDER_CAP) {
+        const more = document.createElement('div');
+        more.className = 'bg-dropdown-more';
+        more.textContent = `+${matches.length - BG_DROPDOWN_RENDER_CAP} more — keep typing to narrow it down`;
+        listEl.appendChild(more);
+    }
     listEl.classList.add('open');
+}
+
+// Click/focus on either filter box shows the WHOLE inventory instantly,
+// ignoring whatever text is currently in the box (e.g. left over from a
+// previous pick) — typing then narrows it via bgHandleSkuSearch/Desc below.
+function bgShowFullDropdown(dropdownId) {
+    const listEl = document.getElementById(dropdownId);
+    if (!listEl) return;
+    bgBuildDropdown(bgInventoryData, listEl, bgUpdatePreview);
+}
+
+// Arrow Up/Down move a highlighted row; Enter picks the highlighted row
+// (or the first one, if none is highlighted yet); Escape closes it.
+function bgHandleKeyNav(e, dropdownId) {
+    const listEl = document.getElementById(dropdownId);
+    if (!listEl) return;
+
+    if (!listEl.classList.contains('open')) {
+        if (e.key === 'ArrowDown') {
+            e.preventDefault();
+            bgShowFullDropdown(dropdownId);
+        }
+        return;
+    }
+
+    const items = Array.from(listEl.querySelectorAll('.bg-dropdown-item'));
+    if (!items.length) return;
+
+    const currentIdx = items.findIndex(el => el.classList.contains('active'));
+
+    if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        bgSetActiveDropdownItem(items, (currentIdx + 1) % items.length);
+    } else if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        bgSetActiveDropdownItem(items, currentIdx <= 0 ? items.length - 1 : currentIdx - 1);
+    } else if (e.key === 'Enter') {
+        e.preventDefault();
+        items[currentIdx >= 0 ? currentIdx : 0].click();
+    } else if (e.key === 'Escape') {
+        listEl.classList.remove('open');
+    }
+}
+
+function bgSetActiveDropdownItem(items, idx) {
+    items.forEach(el => el.classList.remove('active'));
+    const target = items[idx];
+    if (target) {
+        target.classList.add('active');
+        target.scrollIntoView({ block: 'nearest' });
+    }
 }
 
 function bgHandleSkuSearch(query) {
     const q = query.toLowerCase().trim();
     const listEl = document.getElementById('bg-sku-dropdown');
-    if (!q) { listEl.classList.remove('open'); return; }
-    const matches = bgInventoryData.filter(item => item.sku.toLowerCase().includes(q));
+    const matches = q ? bgInventoryData.filter(item => item.sku.toLowerCase().includes(q)) : bgInventoryData;
     bgBuildDropdown(matches, listEl, bgUpdatePreview);
 }
 
 function bgHandleDescSearch(query) {
     const q = query.toLowerCase().trim();
     const listEl = document.getElementById('bg-desc-dropdown');
-    if (!q) { listEl.classList.remove('open'); return; }
-    const matches = bgInventoryData.filter(item => item.desc.toLowerCase().includes(q));
+    const matches = q ? bgInventoryData.filter(item => item.desc.toLowerCase().includes(q)) : bgInventoryData;
     bgBuildDropdown(matches, listEl, bgUpdatePreview);
 }
 
