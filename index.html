@@ -348,27 +348,27 @@
                              style: icon on top, label below, uniform fixed-width cards. -->
                         <div class="icon-nav" id="mainNav" style="display: flex; flex-wrap: wrap; justify-content: center; gap: 20px; width: 100%; max-width: 1040px; margin: 0 auto;">
 
-                            <button class="nav-icon-btn btn-3d" onclick="openModule('REPORT')" style="flex: 0 0 240px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; padding: 15px 10px; min-height: 110px; border-radius: 12px; cursor: pointer; background: rgba(144, 168, 168, 0.35); border: 1.5px solid rgba(0, 0, 0, 0.4); color: #111; backdrop-filter: blur(10px); transition: all 0.3s ease;">
+                            <button class="nav-icon-btn btn-3d" onclick="openModule('REPORT')" style="flex: 0 0 240px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; padding: 15px 10px; min-height: 110px; border-radius: 12px; cursor: pointer; background: rgba(144, 168, 168, 0.35); border: 1.5px solid rgba(0, 0, 0, 0.4); color: #111; -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px); transition: all 0.3s ease;">
                                 <i class="fa-solid fa-chart-line icon-3d-anim" style="font-size: 1.8rem; color: #111;"></i>
                                 <span style="font-family: 'Roboto Mono', monospace; font-size: 0.8rem; font-weight: 700; text-align: center; letter-spacing: 1px;">REPORT AND HISTORY</span>
                             </button>
 
                             <!-- OUTGOING: consolidates REQUEST & RELEASED / TRANSFER / PULLOUT
                                  forms behind one 3D animated icon button + category modal. -->
-                            <button id="mainOutgoingNavBtn" class="nav-icon-btn btn-3d" onclick="openModule('OUTGOING')" style="flex: 0 0 240px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; padding: 15px 10px; min-height: 110px; border-radius: 12px; cursor: pointer; background: rgba(144, 168, 168, 0.35); border: 1.5px solid rgba(0, 0, 0, 0.4); color: #111; backdrop-filter: blur(10px); transition: all 0.3s ease;">
+                            <button id="mainOutgoingNavBtn" class="nav-icon-btn btn-3d" onclick="openModule('OUTGOING')" style="flex: 0 0 240px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; padding: 15px 10px; min-height: 110px; border-radius: 12px; cursor: pointer; background: rgba(144, 168, 168, 0.35); border: 1.5px solid rgba(0, 0, 0, 0.4); color: #111; -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px); transition: all 0.3s ease;">
                                 <i class="fa-solid fa-dolly icon-3d-anim" style="font-size: 1.8rem; color: #111;"></i>
                                 <span style="font-family: 'Roboto Mono', monospace; font-size: 0.8rem; font-weight: 700; text-align: center; letter-spacing: 1px;">OUTGOING</span>
                             </button>
 
                             <!-- NEW: INCOMING nav button (icon added) -->
-                            <button id="mainIncomingNavBtn" class="nav-icon-btn btn-3d" onclick="openModule('INCOMING')" style="flex: 0 0 240px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; padding: 15px 10px; min-height: 110px; border-radius: 12px; cursor: pointer; background: rgba(144, 168, 168, 0.35); border: 1.5px solid rgba(0, 0, 0, 0.4); color: #111; backdrop-filter: blur(10px); transition: all 0.3s ease;">
+                            <button id="mainIncomingNavBtn" class="nav-icon-btn btn-3d" onclick="openModule('INCOMING')" style="flex: 0 0 240px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; padding: 15px 10px; min-height: 110px; border-radius: 12px; cursor: pointer; background: rgba(144, 168, 168, 0.35); border: 1.5px solid rgba(0, 0, 0, 0.4); color: #111; -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px); transition: all 0.3s ease;">
                                 <i class="fa-solid fa-truck-ramp-box icon-3d-anim" style="font-size: 1.8rem; color: #111;"></i>
                                 <span style="font-family: 'Roboto Mono', monospace; font-size: 0.8rem; font-weight: 700; text-align: center; letter-spacing: 1px;">INCOMING</span>
                             </button>
 
                             <!-- NEW: BARCODE GENERATOR nav button — opens a self-contained modal,
                                  not a module-view, so it doesn't route through openModule(). -->
-                            <button id="mainBarcodeGenNavBtn" class="nav-icon-btn btn-3d" onclick="openBarcodeGeneratorModal()" style="flex: 0 0 240px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; padding: 15px 10px; min-height: 110px; border-radius: 12px; cursor: pointer; background: rgba(144, 168, 168, 0.35); border: 1.5px solid rgba(0, 0, 0, 0.4); color: #111; backdrop-filter: blur(10px); transition: all 0.3s ease;">
+                            <button id="mainBarcodeGenNavBtn" class="nav-icon-btn btn-3d" onclick="openBarcodeGeneratorModal()" style="flex: 0 0 240px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; padding: 15px 10px; min-height: 110px; border-radius: 12px; cursor: pointer; background: rgba(144, 168, 168, 0.35); border: 1.5px solid rgba(0, 0, 0, 0.4); color: #111; -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px); transition: all 0.3s ease;">
                                 <i class="fa-solid fa-barcode icon-3d-anim" style="font-size: 1.8rem; color: #111;"></i>
                                 <span style="font-family: 'Roboto Mono', monospace; font-size: 0.8rem; font-weight: 700; text-align: center; letter-spacing: 1px;">BARCODE GENERATOR</span>
                             </button>

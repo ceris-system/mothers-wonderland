@@ -614,7 +614,7 @@ function injectAppPrintStyles() {
                 color: #000 !important;
                 box-shadow: none !important;
                 border: none !important;
-                backdrop-filter: none !important;
+                -webkit-backdrop-filter: none !important; backdrop-filter: none !important;
                 overflow: visible !important;
                 font-family: 'Roboto Mono', monospace !important;
                 font-size: 12pt !important;
@@ -639,7 +639,7 @@ function injectAppPrintStyles() {
                 box-shadow: none !important;
                 text-shadow: none !important;
                 filter: none !important;
-                backdrop-filter: none !important;
+                -webkit-backdrop-filter: none !important; backdrop-filter: none !important;
                 min-height: 0 !important;
                 max-height: none !important;
                 /* Neutralizes any fixed pixel width baked into the fetched
@@ -1257,8 +1257,8 @@ async function loadReportModuleCode(container) {
         // which re-checks admin status itself as the real gate) just
         // explains why instead of silently doing nothing.
         const userLogsBtnStyle = scope.isAdmin
-            ? 'flex: 0 0 240px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; padding: 15px 10px; min-height: 110px; border-radius: 12px; cursor: pointer; background: rgba(144, 168, 168, 0.35); border: 1.5px solid rgba(0, 0, 0, 0.4); color: #111; backdrop-filter: blur(10px); transition: all 0.3s ease;'
-            : 'flex: 0 0 240px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; padding: 15px 10px; min-height: 110px; border-radius: 12px; cursor: not-allowed; background: rgba(144, 168, 168, 0.15); border: 1.5px solid rgba(0, 0, 0, 0.2); color: #666; backdrop-filter: blur(10px); opacity: 0.6;';
+            ? 'flex: 0 0 240px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; padding: 15px 10px; min-height: 110px; border-radius: 12px; cursor: pointer; background: rgba(144, 168, 168, 0.35); border: 1.5px solid rgba(0, 0, 0, 0.4); color: #111; -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px); transition: all 0.3s ease;'
+            : 'flex: 0 0 240px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; padding: 15px 10px; min-height: 110px; border-radius: 12px; cursor: not-allowed; background: rgba(144, 168, 168, 0.15); border: 1.5px solid rgba(0, 0, 0, 0.2); color: #666; -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px); opacity: 0.6;';
         const userLogsBtnTitle = scope.isAdmin ? '' : 'title="Admins only"';
 
         container.innerHTML = `
@@ -1276,24 +1276,24 @@ async function loadReportModuleCode(container) {
 
                 <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; width: 100%; gap: 20px; margin: auto 0;">
                     <div style="display: flex; justify-content: center; gap: 20px; width: 100%; max-width: 800px;">
-                        <button class="nav-icon-btn" onclick="selectReportCategory('INVENTORY')" style="flex: 0 0 240px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; padding: 15px 10px; min-height: 110px; border-radius: 12px; cursor: pointer; background: rgba(144, 168, 168, 0.35); border: 1.5px solid rgba(0, 0, 0, 0.4); color: #111; backdrop-filter: blur(10px); transition: all 0.3s ease;">
+                        <button class="nav-icon-btn" onclick="selectReportCategory('INVENTORY')" style="flex: 0 0 240px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; padding: 15px 10px; min-height: 110px; border-radius: 12px; cursor: pointer; background: rgba(144, 168, 168, 0.35); border: 1.5px solid rgba(0, 0, 0, 0.4); color: #111; -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px); transition: all 0.3s ease;">
                             <i class="fa-solid fa-boxes-stacked" style="font-size: 1.8rem; color: #111;"></i>
                             <span style="font-family: 'Roboto Mono', monospace; font-size: 0.8rem; font-weight: 700; text-align: center; letter-spacing: 1px;">INVENTORY</span>
                         </button>
 
-                        <button class="nav-icon-btn" onclick="selectReportCategory('REQUEST_RELEASED')" style="flex: 0 0 240px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; padding: 15px 10px; min-height: 110px; border-radius: 12px; cursor: pointer; background: rgba(144, 168, 168, 0.35); border: 1.5px solid rgba(0, 0, 0, 0.4); color: #111; backdrop-filter: blur(10px); transition: all 0.3s ease;">
+                        <button class="nav-icon-btn" onclick="selectReportCategory('REQUEST_RELEASED')" style="flex: 0 0 240px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; padding: 15px 10px; min-height: 110px; border-radius: 12px; cursor: pointer; background: rgba(144, 168, 168, 0.35); border: 1.5px solid rgba(0, 0, 0, 0.4); color: #111; -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px); transition: all 0.3s ease;">
                             <i class="fa-solid fa-file-invoice" style="font-size: 1.8rem; color: #111;"></i>
                             <span style="font-family: 'Roboto Mono', monospace; font-size: 0.8rem; font-weight: 700; text-align: center; letter-spacing: 1px;">REQUEST & RELEASED HISTORY</span>
                         </button>
 
-                        <button class="nav-icon-btn" onclick="selectReportCategory('TRANSFER')" style="flex: 0 0 240px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; padding: 15px 10px; min-height: 110px; border-radius: 12px; cursor: pointer; background: rgba(144, 168, 168, 0.35); border: 1.5px solid rgba(0, 0, 0, 0.4); color: #111; backdrop-filter: blur(10px); transition: all 0.3s ease;">
+                        <button class="nav-icon-btn" onclick="selectReportCategory('TRANSFER')" style="flex: 0 0 240px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; padding: 15px 10px; min-height: 110px; border-radius: 12px; cursor: pointer; background: rgba(144, 168, 168, 0.35); border: 1.5px solid rgba(0, 0, 0, 0.4); color: #111; -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px); transition: all 0.3s ease;">
                             <i class="fa-solid fa-right-left" style="font-size: 1.8rem; color: #111;"></i>
                             <span style="font-family: 'Roboto Mono', monospace; font-size: 0.8rem; font-weight: 700; text-align: center; letter-spacing: 1px;">TRANSFER HISTORY</span>
                         </button>
                     </div>
 
                     <div style="display: flex; justify-content: center; gap: 20px; width: 100%; max-width: 800px;">
-                        <button class="nav-icon-btn" onclick="selectReportCategory('PULL_OUT')" style="flex: 0 0 240px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; padding: 15px 10px; min-height: 110px; border-radius: 12px; cursor: pointer; background: rgba(144, 168, 168, 0.35); border: 1.5px solid rgba(0, 0, 0, 0.4); color: #111; backdrop-filter: blur(10px); transition: all 0.3s ease;">
+                        <button class="nav-icon-btn" onclick="selectReportCategory('PULL_OUT')" style="flex: 0 0 240px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; padding: 15px 10px; min-height: 110px; border-radius: 12px; cursor: pointer; background: rgba(144, 168, 168, 0.35); border: 1.5px solid rgba(0, 0, 0, 0.4); color: #111; -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px); transition: all 0.3s ease;">
                             <i class="fa-solid fa-file-arrow-down" style="font-size: 1.8rem; color: #111;"></i>
                             <span style="font-family: 'Roboto Mono', monospace; font-size: 0.8rem; font-weight: 700; text-align: center; letter-spacing: 1px;">PULL OUT HISTORY</span>
                         </button>
@@ -1613,7 +1613,7 @@ window.openInventoryModal = function() {
     
     if (!modal) {
         const modalHTML = `
-            <div id="inventoryModal" style="display: flex; position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; background: rgba(0, 0, 0, 0.85); backdrop-filter: blur(8px); z-index: 9999; justify-content: center; align-items: center;">
+            <div id="inventoryModal" style="display: flex; position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; background: rgba(0, 0, 0, 0.85); -webkit-backdrop-filter: blur(8px); backdrop-filter: blur(8px); z-index: 9999; justify-content: center; align-items: center;">
                 <div style="background: rgba(18, 24, 38, 0.98); border: 1.5px solid rgba(0, 219, 255, 0.4); box-shadow: 0 0 25px rgba(0, 219, 255, 0.2); border-radius: 0; padding: 30px; width: 100vw; height: 100vh; color: #fff; text-align: left; font-family: 'Roboto Mono', monospace; position: relative; display: flex; flex-direction: column; box-sizing: border-box;">
                     
                     <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid rgba(0, 219, 255, 0.3); padding-bottom: 15px; margin-bottom: 20px;">
@@ -1670,7 +1670,7 @@ window.openInventoryModal = function() {
 
                 </div>
 
-            <div id="reloadProgressModal" style="display: none; position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; background: rgba(0, 0, 0, 0.7); backdrop-filter: blur(5px); z-index: 10002; justify-content: center; align-items: center;">
+            <div id="reloadProgressModal" style="display: none; position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; background: rgba(0, 0, 0, 0.7); -webkit-backdrop-filter: blur(5px); backdrop-filter: blur(5px); z-index: 10002; justify-content: center; align-items: center;">
                 <div style="background: #0c101a; border: 1.5px solid #00dbff; border-radius: 8px; padding: 25px 30px; width: 320px; text-align: center; color: #fff; font-family: 'Roboto Mono', monospace;">
                     <i class="fa-solid fa-spinner fa-spin" style="font-size: 2rem; color: #00dbff; margin-bottom: 15px;"></i>
                     <div style="font-size: 0.9rem; font-weight: bold; color: #00dbff; margin-bottom: 10px;">RELOADING TABLE DATA...</div>
@@ -1801,7 +1801,7 @@ function viewItemDetails(skuCode, rowIdx) {
     let overlay = document.getElementById('drawerOverlay');
 
     if (!drawer) {
-        const overlayHTML = `<div id="drawerOverlay" style="display: none; position: fixed; top: 20px; left: 0; bottom: 20px; width: 100vw; max-height: calc(100vh - 40px); overflow-y: auto; height: auto; background: rgba(0, 0, 0, 0.65); backdrop-filter: blur(5px); z-index: 10000; transition: opacity 0.3s ease;"></div>`;
+        const overlayHTML = `<div id="drawerOverlay" style="display: none; position: fixed; top: 20px; left: 0; bottom: 20px; width: 100vw; max-height: calc(100vh - 40px); overflow-y: auto; height: auto; background: rgba(0, 0, 0, 0.65); -webkit-backdrop-filter: blur(5px); backdrop-filter: blur(5px); z-index: 10000; transition: opacity 0.3s ease;"></div>`;
 
         const drawerStyles = `
         <style id="itemDrawerStyles">
@@ -2688,17 +2688,17 @@ async function loadOutgoingModuleCode(container) {
 
                 <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; width: 100%; gap: 20px; margin: auto 0;">
                     <div style="display: flex; justify-content: center; gap: 20px; width: 100%; max-width: 900px; flex-wrap: wrap;">
-                        <button class="nav-icon-btn btn-3d" onclick="selectOutgoingCategory('REQUEST_AND_RELEASED_FORM')" style="flex: 1 1 0px; min-width: 220px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; padding: 15px 10px; min-height: 110px; border-radius: 12px; cursor: pointer; background: rgba(144, 168, 168, 0.35); border: 1.5px solid rgba(0, 0, 0, 0.4); color: #111; backdrop-filter: blur(10px);">
+                        <button class="nav-icon-btn btn-3d" onclick="selectOutgoingCategory('REQUEST_AND_RELEASED_FORM')" style="flex: 1 1 0px; min-width: 220px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; padding: 15px 10px; min-height: 110px; border-radius: 12px; cursor: pointer; background: rgba(144, 168, 168, 0.35); border: 1.5px solid rgba(0, 0, 0, 0.4); color: #111; -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px);">
                             <i class="fa-solid ${OUTGOING_CONFIGS.REQUEST_AND_RELEASED_FORM.icon} icon-3d-anim" style="font-size: 1.8rem; color: #111;"></i>
                             <span style="font-family: 'Roboto Mono', monospace; font-size: 0.8rem; font-weight: 700; text-align: center; letter-spacing: 1px;">${OUTGOING_CONFIGS.REQUEST_AND_RELEASED_FORM.label}</span>
                         </button>
 
-                        <button class="nav-icon-btn btn-3d" onclick="selectOutgoingCategory('TRANSFER_FORM')" style="flex: 1 1 0px; min-width: 220px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; padding: 15px 10px; min-height: 110px; border-radius: 12px; cursor: pointer; background: rgba(144, 168, 168, 0.35); border: 1.5px solid rgba(0, 0, 0, 0.4); color: #111; backdrop-filter: blur(10px);">
+                        <button class="nav-icon-btn btn-3d" onclick="selectOutgoingCategory('TRANSFER_FORM')" style="flex: 1 1 0px; min-width: 220px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; padding: 15px 10px; min-height: 110px; border-radius: 12px; cursor: pointer; background: rgba(144, 168, 168, 0.35); border: 1.5px solid rgba(0, 0, 0, 0.4); color: #111; -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px);">
                             <i class="fa-solid ${OUTGOING_CONFIGS.TRANSFER_FORM.icon} icon-3d-anim" style="font-size: 1.8rem; color: #111;"></i>
                             <span style="font-family: 'Roboto Mono', monospace; font-size: 0.8rem; font-weight: 700; text-align: center; letter-spacing: 1px;">${OUTGOING_CONFIGS.TRANSFER_FORM.label}</span>
                         </button>
 
-                        <button class="nav-icon-btn btn-3d" onclick="selectOutgoingCategory('PULLOUT_FORM')" style="flex: 1 1 0px; min-width: 220px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; padding: 15px 10px; min-height: 110px; border-radius: 12px; cursor: pointer; background: rgba(144, 168, 168, 0.35); border: 1.5px solid rgba(0, 0, 0, 0.4); color: #111; backdrop-filter: blur(10px);">
+                        <button class="nav-icon-btn btn-3d" onclick="selectOutgoingCategory('PULLOUT_FORM')" style="flex: 1 1 0px; min-width: 220px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; padding: 15px 10px; min-height: 110px; border-radius: 12px; cursor: pointer; background: rgba(144, 168, 168, 0.35); border: 1.5px solid rgba(0, 0, 0, 0.4); color: #111; -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px);">
                             <i class="fa-solid ${OUTGOING_CONFIGS.PULLOUT_FORM.icon} icon-3d-anim" style="font-size: 1.8rem; color: #111;"></i>
                             <span style="font-family: 'Roboto Mono', monospace; font-size: 0.8rem; font-weight: 700; text-align: center; letter-spacing: 1px;">${OUTGOING_CONFIGS.PULLOUT_FORM.label}</span>
                         </button>
@@ -2790,7 +2790,7 @@ async function loadRequestAndReleasedFormModuleCode(container) {
         );
         
         container.innerHTML = `
-            <div style="position: fixed; top: 0; left: 0; width: 100vw; height: 98%; background: rgba(0, 0, 0, 0.75); backdrop-filter: blur(8px); display: flex; justify-content: center; align-items: center; z-index: 3000; box-sizing: border-box; padding: 20px 50px 20px 20px;">
+            <div style="position: fixed; top: 0; left: 0; width: 100vw; height: 98%; background: rgba(0, 0, 0, 0.75); -webkit-backdrop-filter: blur(8px); backdrop-filter: blur(8px); display: flex; justify-content: center; align-items: center; z-index: 3000; box-sizing: border-box; padding: 20px 50px 20px 20px;">
                 <div class="glass-card" style="position: relative; width: 100%; height:100%; max-width: none; max-height: none; overflow-y: auto; background: rgba(20, 20, 25, 0.95); border: 1px solid rgba(255, 255, 255, 0.2); border-radius: 16px; padding: 60px; box-sizing: border-box; display: flex; flex-direction: column; align-items: stretch; box-shadow: 0 30px 60px rgba(0,0,0,0.7);">
                     <div style="position: absolute; top: 18px; right: 25px; z-index: 10; display: flex; gap: 12px; align-items: center;">
                         <button class="app-close-btn" onclick="closeRequestAndReleasedFormModal()" title="Close">
@@ -2834,7 +2834,7 @@ async function loadTransferFormModuleCode(container) {
         );
         
         container.innerHTML = `
-            <div style="position: fixed; top: 0; left: 0; width: 100vw; height: 98%; background: rgba(0, 0, 0, 0.75); backdrop-filter: blur(8px); display: flex; justify-content: center; align-items: center; z-index: 3000; box-sizing: border-box; padding: 20px 50px 20px 20px;">
+            <div style="position: fixed; top: 0; left: 0; width: 100vw; height: 98%; background: rgba(0, 0, 0, 0.75); -webkit-backdrop-filter: blur(8px); backdrop-filter: blur(8px); display: flex; justify-content: center; align-items: center; z-index: 3000; box-sizing: border-box; padding: 20px 50px 20px 20px;">
                 <div class="glass-card" style="position: relative; width: 100%; height:100%; max-width: none; max-height: none; overflow-y: auto; background: rgba(20, 20, 25, 0.95); border: 1px solid rgba(255, 255, 255, 0.2); border-radius: 16px; padding: 60px; box-sizing: border-box; display: flex; flex-direction: column; align-items: stretch; box-shadow: 0 30px 60px rgba(0,0,0,0.7);">
                     <div style="position: absolute; top: 18px; right: 25px; z-index: 10; display: flex; gap: 12px; align-items: center;">
                         <button class="app-close-btn" onclick="closeTransferModal()" title="Close">
@@ -2878,7 +2878,7 @@ async function loadPulloutFormModuleCode(container) {
         );
         
         container.innerHTML = `
-            <div style="position: fixed; top: 0; left: 0; width: 100vw; height: 98%; background: rgba(0, 0, 0, 0.75); backdrop-filter: blur(8px); display: flex; justify-content: center; align-items: center; z-index: 3000; box-sizing: border-box; padding: 20px 50px 20px 20px;">
+            <div style="position: fixed; top: 0; left: 0; width: 100vw; height: 98%; background: rgba(0, 0, 0, 0.75); -webkit-backdrop-filter: blur(8px); backdrop-filter: blur(8px); display: flex; justify-content: center; align-items: center; z-index: 3000; box-sizing: border-box; padding: 20px 50px 20px 20px;">
                 <div class="glass-card" style="position: relative; width: 100%; height:100%; max-width: none; max-height: none; overflow-y: auto; background: rgba(20, 20, 25, 0.95); border: 1px solid rgba(255, 255, 255, 0.2); border-radius: 16px; padding: 60px; box-sizing: border-box; display: flex; flex-direction: column; align-items: stretch; box-shadow: 0 30px 60px rgba(0,0,0,0.7);">
                     <div style="position: absolute; top: 18px; right: 25px; z-index: 10; display: flex; gap: 12px; align-items: center;">
                         <button class="app-close-btn" onclick="closePulloutModal()" title="Close">
@@ -3014,7 +3014,7 @@ function openHistoryModal(categoryKey) {
 
   if (!modal) {
     const modalHTML = `
-      <div id="historyModal" style="display: flex; position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; background: rgba(0, 0, 0, 0.85); backdrop-filter: blur(8px); z-index: 9999; justify-content: center; align-items: center;">
+      <div id="historyModal" style="display: flex; position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; background: rgba(0, 0, 0, 0.85); -webkit-backdrop-filter: blur(8px); backdrop-filter: blur(8px); z-index: 9999; justify-content: center; align-items: center;">
         <div id="historyPrintableArea" style="background: rgba(18, 24, 38, 0.98); border: 1.5px solid rgba(0, 219, 255, 0.4); box-shadow: 0 0 25px rgba(0, 219, 255, 0.2); padding: 25px; width: 95vw; height: 90vh; color: #fff; font-family: 'Roboto Mono', monospace; display: flex; flex-direction: column; box-sizing: border-box; position: relative;">
           
           <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid rgba(0, 219, 255, 0.3); padding-bottom: 12px; margin-bottom: 15px;">
@@ -3065,7 +3065,7 @@ function openHistoryModal(categoryKey) {
         </div>
       </div>
 
-      <div id="historyProgressModal" style="display: none; position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; background: rgba(0, 0, 0, 0.7); backdrop-filter: blur(5px); z-index: 10002; justify-content: center; align-items: center;">
+      <div id="historyProgressModal" style="display: none; position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; background: rgba(0, 0, 0, 0.7); -webkit-backdrop-filter: blur(5px); backdrop-filter: blur(5px); z-index: 10002; justify-content: center; align-items: center;">
         <div style="background: #0c101a; border: 1.5px solid #00dbff; border-radius: 8px; padding: 25px 30px; width: 320px; text-align: center; color: #fff; font-family: 'Roboto Mono', monospace;">
           <i class="fa-solid fa-spinner fa-spin" style="font-size: 2rem; color: #00dbff; margin-bottom: 15px;"></i>
           <div id="historyProgressText" style="font-size: 0.9rem; font-weight: bold; color: #00dbff; margin-bottom: 10px;">RELOADING TABLE DATA...</div>
@@ -3367,7 +3367,7 @@ function openUserLogsModal() {
 
     if (!modal) {
         const modalHTML = `
-        <div id="userLogsModal" style="display: flex; position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; background: rgba(0, 0, 0, 0.85); backdrop-filter: blur(8px); z-index: 9999; justify-content: center; align-items: center;">
+        <div id="userLogsModal" style="display: flex; position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; background: rgba(0, 0, 0, 0.85); -webkit-backdrop-filter: blur(8px); backdrop-filter: blur(8px); z-index: 9999; justify-content: center; align-items: center;">
             <div id="userLogsPrintableArea" style="background: rgba(18, 24, 38, 0.98); border: 1.5px solid rgba(0, 219, 255, 0.4); box-shadow: 0 0 25px rgba(0, 219, 255, 0.2); padding: 25px; width: 95vw; height: 90vh; color: #fff; font-family: 'Roboto Mono', monospace; display: flex; flex-direction: column; box-sizing: border-box; position: relative;">
 
                 <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid rgba(0, 219, 255, 0.3); padding-bottom: 12px; margin-bottom: 15px;">
@@ -3533,7 +3533,7 @@ function checkAndShowNearExpiryModal() {
                 }
                 #nearExpiryModal .blink-alert { animation: nearExpiryBlink 1.1s ease-in-out infinite; }
             </style>
-            <div id="nearExpiryModal" style="display: none; position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; background: rgba(0, 0, 0, 0.75); backdrop-filter: blur(6px); z-index: 10500; justify-content: center; align-items: center;">
+            <div id="nearExpiryModal" style="display: none; position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; background: rgba(0, 0, 0, 0.75); -webkit-backdrop-filter: blur(6px); backdrop-filter: blur(6px); z-index: 10500; justify-content: center; align-items: center;">
                 <div style="background: linear-gradient(180deg, #1a0d0d 0%, #120a0a 100%); border: 1px solid rgba(255, 77, 77, 0.35); box-shadow: 0 20px 50px rgba(0,0,0,0.6); border-radius: 10px; padding: 24px; width: 92vw; max-width: 760px; max-height: 80vh; color: #fff; font-family: 'Roboto Mono', monospace; display: flex; flex-direction: column; box-sizing: border-box;">
                     <div style="display: flex; justify-content: space-between; align-items: flex-start; border-bottom: 1px solid rgba(255, 77, 77, 0.25); padding-bottom: 14px; margin-bottom: 16px;">
                         <div>
@@ -3631,7 +3631,7 @@ function checkAndShowStockAvailabilityModal() {
 
     if (!modal) {
         const modalHTML = `
-            <div id="stockAvailabilityModal" style="display: none; position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; background: rgba(0, 0, 0, 0.75); backdrop-filter: blur(6px); z-index: 10500; justify-content: center; align-items: center;">
+            <div id="stockAvailabilityModal" style="display: none; position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; background: rgba(0, 0, 0, 0.75); -webkit-backdrop-filter: blur(6px); backdrop-filter: blur(6px); z-index: 10500; justify-content: center; align-items: center;">
                 <div style="background: linear-gradient(180deg, #12161f 0%, #0a0e17 100%); border: 1px solid rgba(0, 219, 255, 0.25); box-shadow: 0 20px 50px rgba(0,0,0,0.6); border-radius: 10px; padding: 24px; width: 92vw; max-width: 900px; max-height: 82vh; color: #fff; font-family: 'Roboto Mono', monospace; display: flex; flex-direction: column; box-sizing: border-box;">
                     <div style="display: flex; justify-content: space-between; align-items: flex-start; border-bottom: 1px solid rgba(0, 219, 255, 0.2); padding-bottom: 14px; margin-bottom: 16px;">
                         <div>
@@ -3820,7 +3820,7 @@ function showExpiredPopup(expiredItems) {
                 }
                 #expiredAlertModal .blink-alert { animation: expiredAlertBlink 1.1s ease-in-out infinite; }
             </style>
-            <div id="expiredAlertModal" style="display: flex; position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; background: rgba(0, 0, 0, 0.85); backdrop-filter: blur(6px); z-index: 10005; justify-content: center; align-items: center;">
+            <div id="expiredAlertModal" style="display: flex; position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; background: rgba(0, 0, 0, 0.85); -webkit-backdrop-filter: blur(6px); backdrop-filter: blur(6px); z-index: 10005; justify-content: center; align-items: center;">
                 <div style="background: #121826; border: 1.5px solid #ff4d4d; box-shadow: 0 0 30px rgba(255, 77, 77, 0.35); border-radius: 10px; padding: 25px; width: 90%; max-width: 650px; max-height: 80vh; color: #fff; font-family: 'Roboto Mono', monospace; display: flex; flex-direction: column; box-sizing: border-box;">
                     
                     <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid rgba(255, 77, 77, 0.3); padding-bottom: 12px; margin-bottom: 15px;">
@@ -4288,17 +4288,17 @@ async function loadIncomingModuleCode(container) {
 
                 <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; width: 100%; gap: 20px; margin: auto 0;">
                     <div style="display: flex; justify-content: center; gap: 20px; width: 100%; max-width: 900px; flex-wrap: wrap;">
-                        <button class="nav-icon-btn btn-3d" onclick="selectIncomingCategory('REQUEST')" style="flex: 1 1 0px; min-width: 220px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; padding: 15px 10px; min-height: 110px; border-radius: 12px; cursor: pointer; background: rgba(144, 168, 168, 0.35); border: 1.5px solid rgba(0, 0, 0, 0.4); color: #111; backdrop-filter: blur(10px);">
+                        <button class="nav-icon-btn btn-3d" onclick="selectIncomingCategory('REQUEST')" style="flex: 1 1 0px; min-width: 220px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; padding: 15px 10px; min-height: 110px; border-radius: 12px; cursor: pointer; background: rgba(144, 168, 168, 0.35); border: 1.5px solid rgba(0, 0, 0, 0.4); color: #111; -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px);">
                             <i class="fa-solid fa-file-invoice icon-3d-anim" style="font-size: 1.8rem; color: #111;"></i>
                             <span style="font-family: 'Roboto Mono', monospace; font-size: 0.8rem; font-weight: 700; text-align: center; letter-spacing: 1px;">INCOMING REQUEST &amp; RELEASED FORM</span>
                         </button>
 
-                        <button class="nav-icon-btn btn-3d" onclick="selectIncomingCategory('TRANSFER')" style="flex: 1 1 0px; min-width: 220px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; padding: 15px 10px; min-height: 110px; border-radius: 12px; cursor: pointer; background: rgba(144, 168, 168, 0.35); border: 1.5px solid rgba(0, 0, 0, 0.4); color: #111; backdrop-filter: blur(10px);">
+                        <button class="nav-icon-btn btn-3d" onclick="selectIncomingCategory('TRANSFER')" style="flex: 1 1 0px; min-width: 220px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; padding: 15px 10px; min-height: 110px; border-radius: 12px; cursor: pointer; background: rgba(144, 168, 168, 0.35); border: 1.5px solid rgba(0, 0, 0, 0.4); color: #111; -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px);">
                             <i class="fa-solid fa-right-left icon-3d-anim" style="font-size: 1.8rem; color: #111;"></i>
                             <span style="font-family: 'Roboto Mono', monospace; font-size: 0.8rem; font-weight: 700; text-align: center; letter-spacing: 1px;">INCOMING TRANSFER FORM</span>
                         </button>
 
-                        <button class="nav-icon-btn btn-3d" onclick="selectIncomingCategory('PULLOUT')" style="flex: 1 1 0px; min-width: 220px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; padding: 15px 10px; min-height: 110px; border-radius: 12px; cursor: pointer; background: rgba(144, 168, 168, 0.35); border: 1.5px solid rgba(0, 0, 0, 0.4); color: #111; backdrop-filter: blur(10px);">
+                        <button class="nav-icon-btn btn-3d" onclick="selectIncomingCategory('PULLOUT')" style="flex: 1 1 0px; min-width: 220px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; padding: 15px 10px; min-height: 110px; border-radius: 12px; cursor: pointer; background: rgba(144, 168, 168, 0.35); border: 1.5px solid rgba(0, 0, 0, 0.4); color: #111; -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px);">
                             <i class="fa-solid fa-file-arrow-down icon-3d-anim" style="font-size: 1.8rem; color: #111;"></i>
                             <span style="font-family: 'Roboto Mono', monospace; font-size: 0.8rem; font-weight: 700; text-align: center; letter-spacing: 1px;">INCOMING PULL OUT / GATE PASS FORM</span>
                         </button>
@@ -5576,6 +5576,23 @@ function openBarcodeGeneratorModal() {
                     body.bg-printing-labels > *:not(#barcodeGenModal) { display: none !important; }
                     body.bg-printing-labels #barcodeGenModal { position: static !important; background: none !important; }
                     body.bg-printing-labels #barcodeGenModal > *:not(.bg-container) { display: none !important; }
+                    /* .bg-container itself is the rounded white "card" that wraps
+                       the whole modal (background, border-radius, box-shadow).
+                       The rule below only hides its CONTENTS — without also
+                       resetting the container's own box styling here, that
+                       card frame prints behind the label. */
+                    body.bg-printing-labels .bg-container {
+                        background: none !important;
+                        border: none !important;
+                        border-radius: 0 !important;
+                        box-shadow: none !important;
+                        max-width: none !important;
+                        max-height: none !important;
+                        overflow: visible !important;
+                        width: auto !important;
+                        padding: 0 !important;
+                        margin: 0 !important;
+                    }
                     body.bg-printing-labels .bg-container * { visibility: hidden !important; }
                     body.bg-printing-labels #bg-print-area,
                     body.bg-printing-labels #bg-print-area * { visibility: visible !important; }
@@ -5587,7 +5604,7 @@ function openBarcodeGeneratorModal() {
                     @page { size: 40mm 30mm; margin: 0; }
                 }
             </style>
-            <div id="barcodeGenModal" class="modal-overlay" style="display: none; position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; background: rgba(0, 0, 0, 0.75); backdrop-filter: blur(6px); z-index: 10500; justify-content: center; align-items: center;">
+            <div id="barcodeGenModal" class="modal-overlay" style="display: none; position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; background: rgba(0, 0, 0, 0.75); -webkit-backdrop-filter: blur(6px); backdrop-filter: blur(6px); z-index: 10500; justify-content: center; align-items: center;">
                 <div class="bg-container">
                     <button type="button" class="app-close-btn" onclick="closeBarcodeGeneratorModal()" title="Close" style="position: absolute; top: 12px; right: 12px; z-index: 2;"><i class="fa-solid fa-xmark"></i></button>
                     <div class="bg-brand-strip">
