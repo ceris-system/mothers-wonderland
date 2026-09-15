@@ -197,7 +197,7 @@ function injectSerialNumberStyles() {
     style.id = 'serialNumberDisplayStyles';
     style.textContent = `
         #serialNoDisplay {
-            font-size: 1.75rem !important;
+            font-size: 1.25rem !important;
             font-weight: 700 !important;
             letter-spacing: 1.5px !important;
             padding: 8px 12px !important;
