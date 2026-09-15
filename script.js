@@ -5441,3 +5441,364 @@ async function preloadProductCatalog() {
 
     return productCatalogPromise;
 }
+// ==========================================
+// BARCODE GENERATOR MODAL
+// Self-contained modal (not a module-view — doesn't route through
+// openModule()). Pulls SKU/DESCRIPTION/SRP from the BARCODE tab via the
+// getBarcodeInventory GAS action and prints 40mm x 30mm thermal labels.
+// Everything below is namespaced with a "bg" (Barcode Generator) prefix
+// and scoped under #barcodeGenModal so it can never bleed into, or be
+// affected by, the rest of the app's global button/input/label styling.
+// ==========================================
+
+let bgInventoryData = [];
+let bgCurrentItem = null;
+let bgInventoryLoaded = false;
+
+const BG_BARCODE_OPTS = {
+    format: "CODE128",
+    lineColor: "#000",
+    background: "#ffffff",
+    width: 2,          // module (bar) width, tuned for a crisp 203dpi print
+    height: 80,
+    margin: 6,         // quiet zone so the scanner reads the start/stop bars
+    displayValue: false // SKU text is rendered as a separate HTML element instead,
+                         // so stretching the bars to fill the label never warps the font
+};
+
+function openBarcodeGeneratorModal() {
+    let modal = document.getElementById('barcodeGenModal');
+
+    if (!modal) {
+        const modalHTML = `
+            <style id="barcodeGenModalStyles">
+                #barcodeGenModal {
+                    --bg-ink: #24211c;
+                    --bg-ink-soft: #6b6558;
+                    --bg-paper: #f2ead9;
+                    --bg-card: #fffdf8;
+                    --bg-amber: #e0982f;
+                    --bg-amber-dark: #b9761a;
+                    --bg-border: #e5dcc4;
+                    --bg-border-strong: #d8cba3;
+                }
+                #barcodeGenModal * { box-sizing: border-box; }
+                #barcodeGenModal .bg-container {
+                    max-width: 420px;
+                    width: 92vw;
+                    max-height: 88vh;
+                    overflow-y: auto;
+                    margin: 0 auto;
+                    background: var(--bg-card);
+                    border-radius: 18px;
+                    border: 1px solid var(--bg-border);
+                    box-shadow: 0 18px 40px -20px rgba(36, 33, 28, 0.45);
+                    font-family: 'Poppins', Arial, sans-serif;
+                    color: var(--bg-ink);
+                    position: relative;
+                }
+                #barcodeGenModal .bg-brand-strip { display: flex; gap: 2px; height: 14px; padding: 0 24px; align-items: stretch; }
+                #barcodeGenModal .bg-brand-strip span { background: var(--bg-ink); }
+                #barcodeGenModal .bg-brand-strip span:nth-child(3n) { background: var(--bg-amber); }
+                #barcodeGenModal .bg-brand-strip span:nth-child(1) { width: 3px; }
+                #barcodeGenModal .bg-brand-strip span:nth-child(2) { width: 1px; }
+                #barcodeGenModal .bg-brand-strip span:nth-child(3) { width: 2px; }
+                #barcodeGenModal .bg-brand-strip span:nth-child(4) { width: 1px; }
+                #barcodeGenModal .bg-brand-strip span:nth-child(5) { width: 4px; }
+                #barcodeGenModal .bg-brand-strip span:nth-child(6) { width: 1px; }
+                #barcodeGenModal .bg-brand-strip span:nth-child(7) { width: 2px; }
+                #barcodeGenModal .bg-brand-strip span:nth-child(8) { width: 3px; }
+                #barcodeGenModal .bg-brand-strip span:nth-child(9) { width: 1px; }
+                #barcodeGenModal .bg-brand-strip span:nth-child(10) { width: 2px; }
+                #barcodeGenModal .bg-header { padding: 20px 24px 4px; display: flex; justify-content: space-between; align-items: flex-start; }
+                #barcodeGenModal .bg-header h2 { margin: 0; font-size: 19px; font-weight: 600; letter-spacing: -0.2px; }
+                #barcodeGenModal .bg-body-pad { padding: 20px 24px 24px; }
+                #barcodeGenModal .bg-form-group { margin-bottom: 16px; position: relative; }
+                #barcodeGenModal .bg-form-group label { display: block; font-weight: 500; font-size: 12.5px; color: var(--bg-ink-soft); margin-bottom: 6px; }
+                #barcodeGenModal .bg-form-group input {
+                    width: 100%; padding: 10px 12px; font-family: inherit; font-size: 14px;
+                    color: var(--bg-ink); background: #fff; border: 1px solid var(--bg-border-strong);
+                    border-radius: 10px; outline: none; transition: border-color 0.15s, box-shadow 0.15s;
+                }
+                #barcodeGenModal .bg-form-group input:focus {
+                    border-color: var(--bg-amber); box-shadow: 0 0 0 3px rgba(224, 152, 47, 0.18);
+                }
+                #barcodeGenModal .bg-print-btn {
+                    width: 100%; padding: 13px; background: var(--bg-amber); color: #2b1a03;
+                    border: none; border-radius: 10px; font-family: inherit; font-weight: 600;
+                    font-size: 14.5px; cursor: pointer; transition: background 0.15s, transform 0.05s;
+                }
+                #barcodeGenModal .bg-print-btn:hover { background: var(--bg-amber-dark); }
+                #barcodeGenModal .bg-print-btn:active { transform: scale(0.98); }
+                #barcodeGenModal .bg-dropdown-list {
+                    display: none; position: absolute; top: calc(100% + 4px); left: 0; right: 0;
+                    background: #fff; border: 1px solid var(--bg-border-strong); border-radius: 10px;
+                    max-height: 220px; overflow-y: auto; z-index: 10;
+                    box-shadow: 0 10px 24px -10px rgba(36, 33, 28, 0.25);
+                }
+                #barcodeGenModal .bg-dropdown-list.open { display: block; }
+                #barcodeGenModal .bg-dropdown-item { padding: 9px 12px; cursor: pointer; font-size: 13px; }
+                #barcodeGenModal .bg-dropdown-item:hover { background: #faf1de; }
+                #barcodeGenModal .bg-dropdown-item .bg-d-sku { font-weight: 600; font-family: 'IBM Plex Mono', monospace; }
+                #barcodeGenModal .bg-dropdown-item .bg-d-desc { color: var(--bg-ink-soft); }
+                #barcodeGenModal .bg-status-msg { font-size: 12px; color: var(--bg-ink-soft); margin-top: -8px; margin-bottom: 14px; }
+                #barcodeGenModal #bg-print-area { display: flex; flex-direction: column; align-items: center; margin-top: 22px; }
+                #barcodeGenModal .bg-preview-frame {
+                    position: relative; padding: 14px; background: var(--bg-paper); border-radius: 12px;
+                    border: 1px dashed var(--bg-border-strong);
+                }
+                #barcodeGenModal .bg-preview-frame::before {
+                    content: ""; position: absolute; top: -6px; left: 50%; transform: translateX(-50%);
+                    width: 12px; height: 12px; background: var(--bg-paper);
+                    border: 1px dashed var(--bg-border-strong); border-radius: 50%;
+                }
+                #barcodeGenModal .bg-preview-label { font-size: 11px; color: var(--bg-ink-soft); text-align: center; margin-top: 10px; }
+                #barcodeGenModal .bg-label-card {
+                    width: 40mm; height: 30mm; padding: 2mm; box-sizing: border-box; border: 1px solid #ccc;
+                    background: #fff; display: flex; flex-direction: column; justify-content: space-between;
+                    align-items: flex-start; text-align: left;
+                }
+                #barcodeGenModal .bg-store-title { font-family: Arial, sans-serif; font-size: 12px; font-weight: bold; margin: 0; line-height: 1.15; }
+                #barcodeGenModal .bg-item-price { font-family: Arial, sans-serif; font-size: 11px; margin: 1px 0; line-height: 1.15; }
+                #barcodeGenModal .bg-item-desc { font-family: Arial, sans-serif; font-size: 10px; text-transform: uppercase; margin: 1px 0; line-height: 1.15; }
+                #barcodeGenModal .bg-barcode-container { width: 100%; text-align: left; }
+                #barcodeGenModal .bg-barcode-container svg { width: 34mm; height: 9mm; display: block; margin: 0; }
+                #barcodeGenModal .bg-barcode-sku {
+                    font-family: Arial, sans-serif; font-weight: normal; font-size: 11px;
+                    text-align: left; width: 34mm; margin-top: 1mm;
+                }
+
+                /* Thermal print — active ONLY while body.bg-printing-labels is set
+                   (toggled by bgPrintLabels below), so it never affects any other
+                   print job in the app (the shared printOnly() letter/portrait rules
+                   live in a separate stylesheet and stay untouched). */
+                @media print {
+                    body.bg-printing-labels > *:not(#barcodeGenModal) { display: none !important; }
+                    body.bg-printing-labels #barcodeGenModal { position: static !important; background: none !important; }
+                    body.bg-printing-labels #barcodeGenModal > *:not(.bg-container) { display: none !important; }
+                    body.bg-printing-labels .bg-container * { visibility: hidden !important; }
+                    body.bg-printing-labels #bg-print-area,
+                    body.bg-printing-labels #bg-print-area * { visibility: visible !important; }
+                    body.bg-printing-labels #bg-print-area { position: absolute; left: 0; top: 0; width: 100%; }
+                    body.bg-printing-labels .bg-preview-frame { border: none !important; padding: 0 !important; background: none !important; }
+                    body.bg-printing-labels .bg-preview-frame::before,
+                    body.bg-printing-labels .bg-preview-label { display: none !important; }
+                    body.bg-printing-labels .bg-label-card { border: none !important; page-break-after: always; margin: 0; }
+                    @page { size: 40mm 30mm; margin: 0; }
+                }
+            </style>
+            <div id="barcodeGenModal" class="modal-overlay" style="display: none; position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; background: rgba(0, 0, 0, 0.75); backdrop-filter: blur(6px); z-index: 10500; justify-content: center; align-items: center;">
+                <div class="bg-container">
+                    <button type="button" class="app-close-btn" onclick="closeBarcodeGeneratorModal()" title="Close" style="position: absolute; top: 12px; right: 12px; z-index: 2;"><i class="fa-solid fa-xmark"></i></button>
+                    <div class="bg-brand-strip">
+                        <span></span><span></span><span></span><span></span><span></span>
+                        <span></span><span></span><span></span><span></span><span></span>
+                    </div>
+                    <div class="bg-header"><h2>Barcode generator</h2></div>
+                    <div class="bg-body-pad">
+                        <div class="bg-form-group">
+                            <label for="bg-search-sku">Filter by SKU</label>
+                            <input type="text" id="bg-search-sku" placeholder="Start typing to filter..." oninput="bgHandleSkuSearch(this.value)" autocomplete="off">
+                            <div id="bg-sku-dropdown" class="bg-dropdown-list"></div>
+                        </div>
+                        <div class="bg-form-group">
+                            <label for="bg-search-desc">Filter by description</label>
+                            <input type="text" id="bg-search-desc" placeholder="Start typing to filter..." oninput="bgHandleDescSearch(this.value)" autocomplete="off">
+                            <div id="bg-desc-dropdown" class="bg-dropdown-list"></div>
+                        </div>
+                        <div id="bg-load-status" class="bg-status-msg">Loading inventory...</div>
+                        <div class="bg-form-group">
+                            <label for="bg-qty">Quantity</label>
+                            <input type="number" id="bg-qty" value="1" min="1">
+                        </div>
+                        <button type="button" class="bg-print-btn" onclick="bgPrintLabels()">Print to XP-470B</button>
+                        <div id="bg-print-area">
+                            <div class="bg-preview-frame">
+                                <div class="bg-label-card" id="bg-label-template">
+                                    <div class="bg-store-title" id="bg-lbl-store">Mother's Wonderland</div>
+                                    <div class="bg-item-price" id="bg-lbl-price">250.00php</div>
+                                    <div class="bg-item-desc" id="bg-lbl-desc">SELECT AN ITEM ABOVE</div>
+                                    <div class="bg-barcode-container"><svg id="bg-barcode"></svg></div>
+                                    <div class="bg-barcode-sku" id="bg-lbl-sku"></div>
+                                </div>
+                                <div class="bg-preview-label">Live preview — actual size 40mm × 30mm</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>`;
+        document.body.insertAdjacentHTML('beforeend', modalHTML);
+        modal = document.getElementById('barcodeGenModal');
+
+        // Close dropdowns when clicking elsewhere inside this modal
+        modal.addEventListener('click', (e) => {
+            if (!e.target.closest('.bg-form-group')) {
+                modal.querySelectorAll('.bg-dropdown-list').forEach(el => el.classList.remove('open'));
+            }
+        });
+    }
+
+    modal.style.display = 'flex';
+
+    if (!bgInventoryLoaded) {
+        bgLoadInventory();
+    }
+
+    if (typeof logButtonClick === 'function') {
+        logButtonClick('BARCODE_GENERATOR_BUTTON_CLICKED');
+    }
+}
+
+function closeBarcodeGeneratorModal() {
+    const modal = document.getElementById('barcodeGenModal');
+    if (modal) modal.style.display = 'none';
+}
+
+async function bgLoadInventory() {
+    const statusEl = document.getElementById('bg-load-status');
+    try {
+        const url = `${window.API}?action=getBarcodeInventory&token=${encodeURIComponent(window.API_TOKEN)}`;
+        const res = await fetch(url);
+        const result = await res.json();
+
+        if (!result.success) {
+            throw new Error(result.error || 'Unknown error');
+        }
+
+        bgInventoryData = result.data || [];
+        bgInventoryLoaded = true;
+
+        if (statusEl) statusEl.textContent = `Loaded ${bgInventoryData.length} item${bgInventoryData.length === 1 ? '' : 's'}.`;
+        if (bgInventoryData.length) {
+            bgUpdatePreview(bgInventoryData[0]);
+        }
+    } catch (err) {
+        console.error('[Barcode Generator] Failed to load inventory:', err);
+        bgInventoryLoaded = false;
+        if (statusEl) statusEl.textContent = 'Could not load inventory. Please try again.';
+    }
+}
+
+function bgRenderBarcode(sku) {
+    const svg = document.getElementById('bg-barcode');
+    if (!svg || typeof JsBarcode === 'undefined') return;
+    JsBarcode(svg, sku, BG_BARCODE_OPTS);
+    // Default SVG scaling fits inside width/height while keeping aspect ratio,
+    // which leaves blank space on the sides. Force it to fill the box
+    // edge-to-edge so the preview matches the printed label exactly.
+    svg.setAttribute('preserveAspectRatio', 'none');
+    bgJustifySkuText(document.getElementById('bg-lbl-sku'), sku);
+}
+
+// Spreads the SKU number's letter-spacing so the text fills the exact same
+// width as the barcode bars above it.
+function bgJustifySkuText(el, text) {
+    if (!el) return;
+    el.style.letterSpacing = '0px';
+    el.textContent = text;
+    const targetWidth = el.clientWidth;
+
+    const temp = document.createElement('span');
+    temp.style.visibility = 'hidden';
+    temp.style.position = 'absolute';
+    temp.style.whiteSpace = 'nowrap';
+    temp.style.font = getComputedStyle(el).font;
+    temp.textContent = text;
+    document.body.appendChild(temp);
+    const naturalWidth = temp.offsetWidth;
+    document.body.removeChild(temp);
+
+    if (text.length > 1 && naturalWidth < targetWidth) {
+        const extra = (targetWidth - naturalWidth) / (text.length - 1);
+        el.style.letterSpacing = extra + 'px';
+    }
+}
+
+// Sheet rows aren't always typed consistently (e.g. "380", "250.00php",
+// "250 php"). Strip everything but digits/decimal and re-format the same
+// way every time so every label matches.
+function bgFormatPrice(raw) {
+    const num = parseFloat(String(raw).replace(/[^0-9.]/g, ''));
+    if (isNaN(num)) return String(raw).trim(); // fallback if it's truly unparseable
+    return num.toFixed(2) + 'php';
+}
+
+function bgUpdatePreview(item) {
+    bgCurrentItem = item;
+    const storeEl = document.getElementById('bg-lbl-store');
+    const priceEl = document.getElementById('bg-lbl-price');
+    const descEl = document.getElementById('bg-lbl-desc');
+    if (storeEl) storeEl.innerText = item.store;
+    if (priceEl) priceEl.innerText = bgFormatPrice(item.price);
+    if (descEl) descEl.innerText = item.desc;
+    bgRenderBarcode(item.sku);
+}
+
+function bgBuildDropdown(matches, listEl, onPick) {
+    listEl.innerHTML = '';
+    if (!matches.length) {
+        listEl.classList.remove('open');
+        return;
+    }
+    matches.slice(0, 8).forEach(item => {
+        const row = document.createElement('div');
+        row.className = 'bg-dropdown-item';
+        row.innerHTML = `<span class="bg-d-sku">${escapeHtml(item.sku)}</span> — <span class="bg-d-desc">${escapeHtml(item.desc)}</span>`;
+        row.addEventListener('click', () => {
+            document.getElementById('bg-search-sku').value = item.sku;
+            document.getElementById('bg-search-desc').value = item.desc;
+            onPick(item);
+            listEl.classList.remove('open');
+        });
+        listEl.appendChild(row);
+    });
+    listEl.classList.add('open');
+}
+
+function bgHandleSkuSearch(query) {
+    const q = query.toLowerCase().trim();
+    const listEl = document.getElementById('bg-sku-dropdown');
+    if (!q) { listEl.classList.remove('open'); return; }
+    const matches = bgInventoryData.filter(item => item.sku.toLowerCase().includes(q));
+    bgBuildDropdown(matches, listEl, bgUpdatePreview);
+}
+
+function bgHandleDescSearch(query) {
+    const q = query.toLowerCase().trim();
+    const listEl = document.getElementById('bg-desc-dropdown');
+    if (!q) { listEl.classList.remove('open'); return; }
+    const matches = bgInventoryData.filter(item => item.desc.toLowerCase().includes(q));
+    bgBuildDropdown(matches, listEl, bgUpdatePreview);
+}
+
+function bgPrintLabels() {
+    if (!bgCurrentItem) {
+        if (typeof showCustomAlert === 'function') {
+            showCustomAlert('Pick an item first.');
+        }
+        return;
+    }
+
+    const qty = parseInt(document.getElementById('bg-qty').value) || 1;
+    const printArea = document.getElementById('bg-print-area');
+    const originalCard = document.getElementById('bg-label-template').outerHTML;
+
+    printArea.innerHTML = '';
+    for (let i = 0; i < qty; i++) {
+        printArea.innerHTML += originalCard;
+    }
+
+    const svgList = printArea.querySelectorAll('svg');
+    svgList.forEach(svg => {
+        JsBarcode(svg, bgCurrentItem.sku, BG_BARCODE_OPTS);
+        svg.setAttribute('preserveAspectRatio', 'none');
+    });
+
+    document.body.classList.add('bg-printing-labels');
+    window.print();
+    document.body.classList.remove('bg-printing-labels');
+
+    // Reset back to single preview state
+    printArea.innerHTML = originalCard;
+    bgRenderBarcode(bgCurrentItem.sku);
+}
