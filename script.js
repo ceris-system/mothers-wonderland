@@ -450,11 +450,21 @@ function showModal(title, message, type) {
     modal.style.display = 'flex';
 }
 
-function logoutSystem() {
-    // Record the logout in LOGIN_LOGS before wiping the session. We use
-    // sendBeacon (falls back to a fire-and-forget fetch with keepalive)
-    // so the request is still delivered even though we reload/navigate
-    // away immediately afterward.
+async function logoutSystem() {
+    // Record the logout in LOGIN_LOGS before wiping the session.
+    //
+    // Previously this used navigator.sendBeacon (falling back to a
+    // fire-and-forget fetch with keepalive) so the reload right after
+    // wouldn't get cancelled. In practice this silently dropped almost
+    // every logout entry: Apps Script web apps always answer with an
+    // HTTP redirect to the actual execution URL, and neither sendBeacon
+    // nor a keepalive fetch reliably follows that redirect before the
+    // page navigates away — so the log request never actually completed.
+    // login/other actions never had this problem because they use a
+    // normal `await fetch(...)`, which follows the redirect properly.
+    // Doing the same here (and waiting for it before reloading) fixes it,
+    // at the small cost of a brief pause on the logout click instead of
+    // an instant one.
     const user = window.sessionUser || loggedInUser || localStorage.getItem("activeUser") || "";
     if (user && window.API) {
         const payload = JSON.stringify({
@@ -464,13 +474,18 @@ function logoutSystem() {
             token: window.API_TOKEN
         });
         try {
-            if (navigator.sendBeacon) {
-                navigator.sendBeacon(window.API, new Blob([payload], { type: 'text/plain;charset=UTF-8' }));
-            } else {
-                fetch(window.API, { method: "POST", body: payload, keepalive: true });
-            }
+            const controller = new AbortController();
+            const timeout = setTimeout(() => controller.abort(), 5000);
+            await fetch(window.API, {
+                method: "POST",
+                body: payload,
+                signal: controller.signal
+            });
+            clearTimeout(timeout);
         } catch (err) {
             console.error("[LOGIN_LOGS] Failed to log logout:", err);
+            // Fall through — logout should still proceed locally even if
+            // the log entry couldn't be recorded (e.g. offline).
         }
     }
 
