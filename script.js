@@ -725,8 +725,39 @@ function injectAppPrintStyles() {
                 border-collapse: collapse !important;
                 font-size: 12pt !important;
                 white-space: normal !important;
-                table-layout: auto !important;
+                /* THE FIX: the on-screen header row hard-codes px widths
+                   for 9 of the 10 TRANSFER/PULLOUT/REQUEST table columns
+                   (they add up to 740px), leaving PRODUCT DESCRIPTION with
+                   no width at all. That budget only works on a wide
+                   screen — a printed Letter page has roughly 600-650px of
+                   usable width after margins, so table-layout:auto used
+                   to honor every OTHER column's fixed px width first and
+                   then crush whatever was left into PRODUCT DESCRIPTION,
+                   which is why it printed as one letter per line and
+                   inflated the header row tall enough to shove the
+                   signature block onto a second, mostly-blank page.
+                   table-layout:fixed + the percentage widths below (set
+                   on the header cells, which fixed layout then applies to
+                   every column) replace those px widths for print only —
+                   the on-screen pixel widths are untouched. */
+                table-layout: fixed !important;
             }
+            /* Percentages sized for the shared 10-visible-column layout
+               used by the TRANSFER, PULLOUT, and REQUEST & RELEASED
+               forms (SKU CODE, PRODUCT DESCRIPTION, UOM, EXP. DATE,
+               ON HAND, TOTAL ON HAND, COST, SRP, TRANSFER QTY, REMARKS —
+               in that order); the trailing no-print action column is
+               already hidden by the .no-print rule below. Sums to 100%. */
+            .print-target-active thead tr:last-child th:nth-child(1)  { width: 11% !important; } /* SKU CODE */
+            .print-target-active thead tr:last-child th:nth-child(2)  { width: 24% !important; } /* PRODUCT DESCRIPTION */
+            .print-target-active thead tr:last-child th:nth-child(3)  { width: 6%  !important; } /* UOM */
+            .print-target-active thead tr:last-child th:nth-child(4)  { width: 10% !important; } /* EXP. DATE */
+            .print-target-active thead tr:last-child th:nth-child(5)  { width: 7%  !important; } /* ON HAND */
+            .print-target-active thead tr:last-child th:nth-child(6)  { width: 8%  !important; } /* TOTAL ON HAND */
+            .print-target-active thead tr:last-child th:nth-child(7)  { width: 7%  !important; } /* COST */
+            .print-target-active thead tr:last-child th:nth-child(8)  { width: 7%  !important; } /* SRP */
+            .print-target-active thead tr:last-child th:nth-child(9)  { width: 9%  !important; } /* TRANSFER QTY */
+            .print-target-active thead tr:last-child th:nth-child(10) { width: 11% !important; } /* REMARKS */
             .print-target-active thead {
                 display: table-header-group !important; /* repeat header on every page */
             }
