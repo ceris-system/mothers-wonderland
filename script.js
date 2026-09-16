@@ -1542,6 +1542,18 @@ async function fetchInventoryByDepartment() {
         }
 window.currentFetchedRows = rawData;
 
+        // Stock availability (Critical / Low in Stock / Out of Stock) used to
+        // only run as a side effect of the user manually closing the
+        // near-expiry modal (see closeNearExpiryModal()). That meant on any
+        // load where a near-expiry item ALSO existed, this check silently
+        // never ran unless that specific popup got closed by its own X
+        // button. Calling it directly here guarantees it always runs,
+        // regardless of whether the near-expiry modal is open or how/when
+        // it gets closed.
+        if (typeof checkAndShowStockAvailabilityModal === 'function') {
+            checkAndShowStockAvailabilityModal();
+        }
+
         // Check for expired items and trigger popup alert
         if (typeof checkAndShowExpiredAlert === 'function') {
             checkAndShowExpiredAlert(rawData);
@@ -3557,7 +3569,7 @@ function checkAndShowNearExpiryModal() {
                 }
                 #nearExpiryModal .blink-alert { animation: nearExpiryBlink 1.1s ease-in-out infinite; }
             </style>
-            <div id="nearExpiryModal" style="display: none; position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; background: rgba(0, 0, 0, 0.75); -webkit-backdrop-filter: blur(6px); backdrop-filter: blur(6px); z-index: 10500; justify-content: center; align-items: center;">
+            <div id="nearExpiryModal" style="display: none; position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; background: rgba(0, 0, 0, 0.75); -webkit-backdrop-filter: blur(6px); backdrop-filter: blur(6px); z-index: 10600; justify-content: center; align-items: center;">
                 <div style="background: linear-gradient(180deg, #1a0d0d 0%, #120a0a 100%); border: 1px solid rgba(255, 77, 77, 0.35); box-shadow: 0 20px 50px rgba(0,0,0,0.6); border-radius: 10px; padding: 24px; width: 92vw; max-width: 760px; max-height: 80vh; color: #fff; font-family: 'Roboto Mono', monospace; display: flex; flex-direction: column; box-sizing: border-box;">
                     <div style="display: flex; justify-content: space-between; align-items: flex-start; border-bottom: 1px solid rgba(255, 77, 77, 0.25); padding-bottom: 14px; margin-bottom: 16px;">
                         <div>
