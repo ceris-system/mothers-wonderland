@@ -748,14 +748,14 @@ function injectAppPrintStyles() {
                ON HAND, TOTAL ON HAND, COST, SRP, TRANSFER QTY, REMARKS —
                in that order); the trailing no-print action column is
                already hidden by the .no-print rule below. Sums to 100%. */
-            .print-target-active thead tr:last-child th:nth-child(1)  { width: 11% !important; } /* SKU CODE */
-            .print-target-active thead tr:last-child th:nth-child(2)  { width: 24% !important; } /* PRODUCT DESCRIPTION */
-            .print-target-active thead tr:last-child th:nth-child(3)  { width: 6%  !important; } /* UOM */
-            .print-target-active thead tr:last-child th:nth-child(4)  { width: 10% !important; } /* EXP. DATE */
+            .print-target-active thead tr:last-child th:nth-child(1)  { width: 14% !important; } /* SKU CODE */
+            .print-target-active thead tr:last-child th:nth-child(2)  { width: 22% !important; } /* PRODUCT DESCRIPTION */
+            .print-target-active thead tr:last-child th:nth-child(3)  { width: 5%  !important; } /* UOM */
+            .print-target-active thead tr:last-child th:nth-child(4)  { width: 11% !important; } /* EXP. DATE */
             .print-target-active thead tr:last-child th:nth-child(5)  { width: 7%  !important; } /* ON HAND */
-            .print-target-active thead tr:last-child th:nth-child(6)  { width: 8%  !important; } /* TOTAL ON HAND */
-            .print-target-active thead tr:last-child th:nth-child(7)  { width: 7%  !important; } /* COST */
-            .print-target-active thead tr:last-child th:nth-child(8)  { width: 7%  !important; } /* SRP */
+            .print-target-active thead tr:last-child th:nth-child(6)  { width: 9%  !important; } /* TOTAL ON HAND */
+            .print-target-active thead tr:last-child th:nth-child(7)  { width: 6%  !important; } /* COST */
+            .print-target-active thead tr:last-child th:nth-child(8)  { width: 6%  !important; } /* SRP */
             .print-target-active thead tr:last-child th:nth-child(9)  { width: 9%  !important; } /* TRANSFER QTY */
             .print-target-active thead tr:last-child th:nth-child(10) { width: 11% !important; } /* REMARKS */
             .print-target-active thead {
@@ -764,7 +764,20 @@ function injectAppPrintStyles() {
             .print-target-active tr {
                 page-break-inside: avoid !important;
             }
-            .print-target-active th,
+            /* Header labels get their own smaller size so multi-word
+               headers ("PRODUCT DESCRIPTION", "TOTAL ON HAND") wrap
+               cleanly at the space between words instead of forcing
+               mid-word letter fragments the way 12pt did in the
+               narrower columns above. Data cells keep the larger,
+               easier-to-read 12pt. */
+            .print-target-active th {
+                font-size: 8.5pt !important;
+                padding: 4px 4px !important;
+                border: 1px solid #000 !important;
+                white-space: normal !important;
+                word-break: break-word !important;
+                line-height: 1.25 !important;
+            }
             .print-target-active td {
                 font-size: 12pt !important;
                 padding: 5px 6px !important;
