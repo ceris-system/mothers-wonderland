@@ -202,6 +202,7 @@ function injectSerialNumberStyles() {
             letter-spacing: 1.5px !important;
             padding: 8px 12px !important;
             text-align: center !important;
+            transform: translateX(-10px) !important;
         }
     `;
     document.head.appendChild(style);
