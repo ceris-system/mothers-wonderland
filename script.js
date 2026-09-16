@@ -244,11 +244,15 @@ async function handleAction(action) {
         body.rowIndex = window.pendingRowIndex;
     }
     else if (action === 'forgotPassword') {
+        const client = document.getElementById('forgotClientInput')?.value;
+        if (!client) return showModal("REQUIRED", "Please enter your Department / Client name.", "error");
+
         const newPass = document.getElementById('forgotNewPassInput')?.value;
         const confirmPass = document.getElementById('forgotConfirmPassInput')?.value;
         if (!newPass || newPass.length < 8) return showModal("REQUIRED", "New password must be at least 8 characters.", "error");
         if (newPass !== confirmPass) return showModal("MISMATCH", "New password and confirmation do not match.", "error");
 
+        body.client = client;
         body.newPass = newPass;
     }
 
@@ -450,21 +454,11 @@ function showModal(title, message, type) {
     modal.style.display = 'flex';
 }
 
-async function logoutSystem() {
-    // Record the logout in LOGIN_LOGS before wiping the session.
-    //
-    // Previously this used navigator.sendBeacon (falling back to a
-    // fire-and-forget fetch with keepalive) so the reload right after
-    // wouldn't get cancelled. In practice this silently dropped almost
-    // every logout entry: Apps Script web apps always answer with an
-    // HTTP redirect to the actual execution URL, and neither sendBeacon
-    // nor a keepalive fetch reliably follows that redirect before the
-    // page navigates away — so the log request never actually completed.
-    // login/other actions never had this problem because they use a
-    // normal `await fetch(...)`, which follows the redirect properly.
-    // Doing the same here (and waiting for it before reloading) fixes it,
-    // at the small cost of a brief pause on the logout click instead of
-    // an instant one.
+function logoutSystem() {
+    // Record the logout in LOGIN_LOGS before wiping the session. We use
+    // sendBeacon (falls back to a fire-and-forget fetch with keepalive)
+    // so the request is still delivered even though we reload/navigate
+    // away immediately afterward.
     const user = window.sessionUser || loggedInUser || localStorage.getItem("activeUser") || "";
     if (user && window.API) {
         const payload = JSON.stringify({
@@ -474,18 +468,13 @@ async function logoutSystem() {
             token: window.API_TOKEN
         });
         try {
-            const controller = new AbortController();
-            const timeout = setTimeout(() => controller.abort(), 5000);
-            await fetch(window.API, {
-                method: "POST",
-                body: payload,
-                signal: controller.signal
-            });
-            clearTimeout(timeout);
+            if (navigator.sendBeacon) {
+                navigator.sendBeacon(window.API, new Blob([payload], { type: 'text/plain;charset=UTF-8' }));
+            } else {
+                fetch(window.API, { method: "POST", body: payload, keepalive: true });
+            }
         } catch (err) {
             console.error("[LOGIN_LOGS] Failed to log logout:", err);
-            // Fall through — logout should still proceed locally even if
-            // the log entry couldn't be recorded (e.g. offline).
         }
     }
 
@@ -725,59 +714,15 @@ function injectAppPrintStyles() {
                 border-collapse: collapse !important;
                 font-size: 12pt !important;
                 white-space: normal !important;
-                /* THE FIX: the on-screen header row hard-codes px widths
-                   for 9 of the 10 TRANSFER/PULLOUT/REQUEST table columns
-                   (they add up to 740px), leaving PRODUCT DESCRIPTION with
-                   no width at all. That budget only works on a wide
-                   screen — a printed Letter page has roughly 600-650px of
-                   usable width after margins, so table-layout:auto used
-                   to honor every OTHER column's fixed px width first and
-                   then crush whatever was left into PRODUCT DESCRIPTION,
-                   which is why it printed as one letter per line and
-                   inflated the header row tall enough to shove the
-                   signature block onto a second, mostly-blank page.
-                   table-layout:fixed + the percentage widths below (set
-                   on the header cells, which fixed layout then applies to
-                   every column) replace those px widths for print only —
-                   the on-screen pixel widths are untouched. */
-                table-layout: fixed !important;
+                table-layout: auto !important;
             }
-            /* Percentages sized for the shared 10-visible-column layout
-               used by the TRANSFER, PULLOUT, and REQUEST & RELEASED
-               forms (SKU CODE, PRODUCT DESCRIPTION, UOM, EXP. DATE,
-               ON HAND, TOTAL ON HAND, COST, SRP, TRANSFER QTY, REMARKS —
-               in that order); the trailing no-print action column is
-               already hidden by the .no-print rule below. Sums to 100%. */
-            .print-target-active thead tr:last-child th:nth-child(1)  { width: 14% !important; } /* SKU CODE */
-            .print-target-active thead tr:last-child th:nth-child(2)  { width: 22% !important; } /* PRODUCT DESCRIPTION */
-            .print-target-active thead tr:last-child th:nth-child(3)  { width: 5%  !important; } /* UOM */
-            .print-target-active thead tr:last-child th:nth-child(4)  { width: 11% !important; } /* EXP. DATE */
-            .print-target-active thead tr:last-child th:nth-child(5)  { width: 7%  !important; } /* ON HAND */
-            .print-target-active thead tr:last-child th:nth-child(6)  { width: 9%  !important; } /* TOTAL ON HAND */
-            .print-target-active thead tr:last-child th:nth-child(7)  { width: 6%  !important; } /* COST */
-            .print-target-active thead tr:last-child th:nth-child(8)  { width: 6%  !important; } /* SRP */
-            .print-target-active thead tr:last-child th:nth-child(9)  { width: 9%  !important; } /* TRANSFER QTY */
-            .print-target-active thead tr:last-child th:nth-child(10) { width: 11% !important; } /* REMARKS */
             .print-target-active thead {
                 display: table-header-group !important; /* repeat header on every page */
             }
             .print-target-active tr {
                 page-break-inside: avoid !important;
             }
-            /* Header labels get their own smaller size so multi-word
-               headers ("PRODUCT DESCRIPTION", "TOTAL ON HAND") wrap
-               cleanly at the space between words instead of forcing
-               mid-word letter fragments the way 12pt did in the
-               narrower columns above. Data cells keep the larger,
-               easier-to-read 12pt. */
-            .print-target-active th {
-                font-size: 8.5pt !important;
-                padding: 4px 4px !important;
-                border: 1px solid #000 !important;
-                white-space: normal !important;
-                word-break: break-word !important;
-                line-height: 1.25 !important;
-            }
+            .print-target-active th,
             .print-target-active td {
                 font-size: 12pt !important;
                 padding: 5px 6px !important;
@@ -1600,18 +1545,6 @@ async function fetchInventoryByDepartment() {
             checkAndShowNearExpiryModal();
         }
 window.currentFetchedRows = rawData;
-
-        // Stock availability (Critical / Low in Stock / Out of Stock) used to
-        // only run as a side effect of the user manually closing the
-        // near-expiry modal (see closeNearExpiryModal()). That meant on any
-        // load where a near-expiry item ALSO existed, this check silently
-        // never ran unless that specific popup got closed by its own X
-        // button. Calling it directly here guarantees it always runs,
-        // regardless of whether the near-expiry modal is open or how/when
-        // it gets closed.
-        if (typeof checkAndShowStockAvailabilityModal === 'function') {
-            checkAndShowStockAvailabilityModal();
-        }
 
         // Check for expired items and trigger popup alert
         if (typeof checkAndShowExpiredAlert === 'function') {
@@ -3628,7 +3561,7 @@ function checkAndShowNearExpiryModal() {
                 }
                 #nearExpiryModal .blink-alert { animation: nearExpiryBlink 1.1s ease-in-out infinite; }
             </style>
-            <div id="nearExpiryModal" style="display: none; position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; background: rgba(0, 0, 0, 0.75); -webkit-backdrop-filter: blur(6px); backdrop-filter: blur(6px); z-index: 10600; justify-content: center; align-items: center;">
+            <div id="nearExpiryModal" style="display: none; position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; background: rgba(0, 0, 0, 0.75); -webkit-backdrop-filter: blur(6px); backdrop-filter: blur(6px); z-index: 10500; justify-content: center; align-items: center;">
                 <div style="background: linear-gradient(180deg, #1a0d0d 0%, #120a0a 100%); border: 1px solid rgba(255, 77, 77, 0.35); box-shadow: 0 20px 50px rgba(0,0,0,0.6); border-radius: 10px; padding: 24px; width: 92vw; max-width: 760px; max-height: 80vh; color: #fff; font-family: 'Roboto Mono', monospace; display: flex; flex-direction: column; box-sizing: border-box;">
                     <div style="display: flex; justify-content: space-between; align-items: flex-start; border-bottom: 1px solid rgba(255, 77, 77, 0.25); padding-bottom: 14px; margin-bottom: 16px;">
                         <div>
