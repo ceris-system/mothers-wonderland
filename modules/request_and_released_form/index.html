@@ -3,7 +3,7 @@
 
     <!-- Header with Centered Logo & Form Title -->
     <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; margin-bottom: 20px; margin-top: 5px;">
-        <img src="logo.png" alt="Logo" style="height: 45px; object-fit: contain; margin-bottom: 8px;">
+        <img src="LOGO.PNG" alt="Logo" style="height: 45px; object-fit: contain; margin-bottom: 8px;">
         <h3 style="margin: 0; color: #000; font-size: 1.1rem; letter-spacing: 2px; text-transform: uppercase;">REQUEST AND RELEASED FORM</h3>
     </div>
 
@@ -73,6 +73,7 @@
 
         <!-- Workflow Status / Notification Banner -->
         <div id="formNotificationBanner" class="no-print" style="display: none; padding: 10px 14px; border: 1.5px solid #0d6efd; background: #e7f1ff; color: #0d47a1; border-radius: 6px; font-size: 0.78rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.3px;"></div>
+
         <!-- Table Viewport -->
         <div style="max-height: 480px; overflow-y: auto; border: 1px solid #e0e0e0; border-radius: 6px; box-shadow: 0 2px 6px rgba(0,0,0,0.03);">
             <table style="width: 100%; border-collapse: collapse; font-size: 0.78rem; text-align: left; background: #fff;">
@@ -106,7 +107,7 @@
     </div>
 
     <!-- Signatures & Approval Footer Block -->
-    <div class="no-print" style="margin-top: 55px; margin-bottom: 20px; display: flex; justify-content: space-between; align-items: flex-end; width: 100%; gap: 30px;">
+    <div style="margin-top: 55px; margin-bottom: 20px; display: flex; justify-content: space-between; align-items: flex-end; width: 100%; gap: 30px;">
         
         <!-- Requested By -->
         <div style="flex: 1; display: flex; flex-direction: column; align-items: center;">
@@ -127,7 +128,10 @@
             <!-- Filled by renderApprovedSignature() in script.js. Only rendered
                  with the e-signature image + name when the logged-in user is
                  an ADMIN account; everyone else sees a blank line to sign. -->
-            <div id="approvedSignatureSlot" style="width: 100%; min-height: 145px; display: flex; flex-direction: column; align-items: center; justify-content: flex-end;"></div>
+            <div id="approvedSignatureSlot" style="width: 100%; min-height: 41px; display: flex; flex-direction: column; align-items: center; justify-content: flex-end;"></div>
+            <div style="font-weight: bold; font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.5px;">
+                SIGNATURE OVER PRINTED NAME
+            </div>
         </div>
 
         <!-- Received By -->
