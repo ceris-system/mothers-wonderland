@@ -1,113 +1,158 @@
+/* ==========================================
+   GLOBAL RESET / BASE
+   ========================================== */
+* {
+    box-sizing: border-box;
+}
+
 :root {
-            --glass: rgba(255, 255, 255, 0.05);
-            --border: 1px solid rgba(255, 255, 255, 0.15);
-            --accent: #6366f1;
-        }
+    --glass: rgba(255, 255, 255, 0.05);
+    --border: 1px solid rgba(255, 255, 255, 0.15);
+    --accent: #6366f1;
+}
 
-        body {
-            margin: 0; padding: 0;
-            width: 100%; height: 100vh;
-            display: flex; justify-content: center; align-items: center;
-            background: #0a0a0c; font-family: 'Roboto Mono', monospace;
-            overflow: hidden; color: rgb(10, 10, 10);
-            font-weight: bold;
-        }
+html {
+    height: 100%;
+    /* Prevents iOS Safari from auto-zooming when an input is focused,
+       which is what usually breaks a "fixed" layout on mobile. */
+    -webkit-text-size-adjust: 100%;
+}
 
-        #bg-video {
-            position: fixed; top: 0; left: 0; width: 100%; height: 100%;
-            object-fit: cover; z-index: -1; opacity: 0.6;
-        }
+body {
+    margin: 0; padding: 0;
+    width: 100%;
+    height: 100vh;
+    height: 100dvh; /* modern browsers: accounts for mobile browser chrome */
+    display: flex; justify-content: center; align-items: center;
+    background: #0a0a0c; font-family: 'Roboto Mono', monospace;
+    overflow: hidden; color: rgb(10, 10, 10);
+    font-weight: bold;
+    padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
+}
 
-        .flip-container { perspective: 1000px; width: 400px; height: 500px; }
-        .card-inner {
-            position: relative; width: 100%; height: 100%;
-            transition: transform 0.8s cubic-bezier(0.4, 0, 0.2, 1);
-            transform-style: preserve-3d;
-        }
-        .flipped { transform: rotateY(180deg); }
+/* Safety net: nothing (image, video, table, iframe) should ever be
+   wider than its container regardless of any fixed px width set
+   inline elsewhere in the app. */
+img, video, table, iframe {
+    max-width: 100%;
+}
 
-        .glass-card {
-            position: absolute; width: 100%; height: 100%;
-            backface-visibility: hidden;
-            background: var(--glass);
-            backdrop-filter: blur(0.1px);
-            border: var(--border);
-            border-radius: 24px;
-            padding: 40px; box-sizing: border-box;
-            display: flex; flex-direction: column; align-items: center;
-            box-shadow: 0 25px 50px rgba(0,0,0,0.5);
-        }
+#bg-video {
+    position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+    object-fit: cover; z-index: -1; opacity: 0.6;
+}
 
-        .register-face { transform: rotateY(180deg); }
+/* ==========================================
+   AUTH CARD (fluid instead of fixed 400x500)
+   ========================================== */
+.flip-container {
+    perspective: 1000px;
+    width: min(400px, 92vw);
+    height: min(500px, 88vh);
+}
+.card-inner {
+    position: relative; width: 100%; height: 100%;
+    transition: transform 0.8s cubic-bezier(0.4, 0, 0.2, 1);
+    transform-style: preserve-3d;
+}
+.flipped { transform: rotateY(180deg); }
 
-        .modal-overlay {
-            position: fixed; top: 0; left: 0; width: 100%; height: 100%;
-            background: rgba(0, 0, 0, 0.7); backdrop-filter: blur(12px);
-            display: none; justify-content: center; align-items: center; z-index: 2000;
-        }
+.glass-card {
+    position: absolute; width: 100%; height: 100%;
+    backface-visibility: hidden;
+    background: var(--glass);
+    backdrop-filter: blur(0.1px);
+    border: var(--border);
+    border-radius: 24px;
+    padding: clamp(20px, 5vw, 40px);
+    box-sizing: border-box;
+    display: flex; flex-direction: column; align-items: center;
+    box-shadow: 0 25px 50px rgba(0,0,0,0.5);
+}
 
-        .modal-content {
-            width: 350px !important; height: auto !important; padding: 40px !important;
-            position: relative !important; background: rgba(255, 255, 255, 0.03) !important;
-            border: 1px solid rgba(255, 255, 255, 0.15) !important;
-            border-radius: 10px !important; text-align: center;
-        }
+.register-face { transform: rotateY(180deg); }
 
-        #modalIconContainer i { font-size: 50px; margin-bottom: 20px; display: block; }
-        .icon-error { color: #ff4d4d; }
-        .icon-lock { color: #f1c40f; }
-        .icon-success { color: #2ecc71; }
+.modal-overlay {
+    position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+    background: rgba(0, 0, 0, 0.7); backdrop-filter: blur(12px);
+    display: none; justify-content: center; align-items: center; z-index: 2000;
+}
 
-        .logo-container img { width: 220px; margin-bottom: 15px; }
-        h2 { font-size: 1.2rem; letter-spacing: 2px; margin-bottom: 30px;}
-        .input-group { width: 100%; margin-bottom: 20px; }
-        .field-header { font-size: 12px; opacity: 0.8; margin-bottom: 5px; text-transform: uppercase; font-weight: bold; color: #2503e6; }
-        
-        input {
-            width: 100%; padding: 14px; background: rgba(255,255,255,0.08);
-            border: 1px solid rgb(8, 8, 8); border-radius: 12px;
-            color: rgb(14, 1, 1); outline: none; box-sizing: border-box; font-family: inherit;
-        }
+.modal-content {
+    width: min(350px, 90vw) !important;
+    height: auto !important;
+    padding: clamp(20px, 5vw, 40px) !important;
+    position: relative !important; background: rgba(255, 255, 255, 0.03) !important;
+    border: 1px solid rgba(255, 255, 255, 0.15) !important;
+    border-radius: 10px !important; text-align: center;
+}
 
-        .password-wrapper { position: relative; width: 100%; }
-        .toggle-password { position: absolute; right: 15px; top: 50%; transform: translateY(-50%); cursor: pointer; opacity: 0.5; }
+#modalIconContainer i { font-size: clamp(36px, 8vw, 50px); margin-bottom: 20px; display: block; }
+.icon-error { color: #ff4d4d; }
+.icon-lock { color: #f1c40f; }
+.icon-success { color: #2ecc71; }
 
-        button {
-            padding: 15px; background: var(--accent);
-            border: none; border-radius: 12px; color: white;
-            font-weight: bold; cursor: pointer; transition: 0.3s;
-            font-family: inherit; letter-spacing: 1px;
-        }
-        button:hover { background: #4f46e5; transform: translateY(-2px); }
+.logo-container img { width: min(220px, 55vw); max-width: 100%; margin-bottom: 15px; }
+h2 { font-size: clamp(1rem, 4vw, 1.2rem); letter-spacing: 2px; margin-bottom: 30px; text-align: center; }
+.input-group { width: 100%; margin-bottom: 20px; }
+.field-header { font-size: 12px; opacity: 0.8; margin-bottom: 5px; text-transform: uppercase; font-weight: bold; color: #2503e6; }
 
-/* Updated Dashboard Styles */
+input {
+    width: 100%; padding: 14px; background: rgba(255,255,255,0.08);
+    border: 1px solid rgb(8, 8, 8); border-radius: 12px;
+    color: rgb(14, 1, 1); outline: none; box-sizing: border-box; font-family: inherit;
+    font-size: 16px; /* keeps iOS from auto-zooming on focus */
+}
+
+.password-wrapper { position: relative; width: 100%; }
+.toggle-password { position: absolute; right: 15px; top: 50%; transform: translateY(-50%); cursor: pointer; opacity: 0.5; }
+
+button {
+    padding: 15px; background: var(--accent);
+    border: none; border-radius: 12px; color: white;
+    font-weight: bold; cursor: pointer; transition: 0.3s;
+    font-family: inherit; letter-spacing: 1px;
+}
+button:hover { background: #4f46e5; transform: translateY(-2px); }
+
+/* ==========================================
+   DASHBOARD
+   ========================================== */
 #dashboard {
-    display: none; 
-    position: fixed; 
-    top: 0; left: 0; 
-    width: 100vw; height: 100vh; 
-    background: rgba(10, 10, 12, 0.1); 
+    display: none;
+    position: fixed;
+    top: 0; left: 0;
+    width: 100vw; height: 100vh;
+    height: 100dvh;
+    background: rgba(10, 10, 12, 0.1);
     backdrop-filter: blur(1px);
     -webkit-backdrop-filter: blur(1px);
-    z-index: 200; 
-    flex-direction: column; 
+    z-index: 200;
+    flex-direction: column;
     box-sizing: border-box;
 }
 
 .dash-header {
-    background: rgba(255, 255, 255, 0.03); 
+    background: rgba(255, 255, 255, 0.03);
     border-bottom: 1px solid rgba(255, 255, 255, 0.1);
     padding: 10px 20px;
     display: flex;
     align-items: center;
     justify-content: space-between;
+    flex-wrap: wrap;
+    row-gap: 6px;
     z-index: -1;
 }
 
 .system-title { font-weight: bold; font-size: 14px; color: rgb(45, 3, 231); white-space: nowrap; }
 
-/* Navigation Icons */
-.icon-nav { display: flex; justify-content: center; gap: 7px; }
+.user-session-wrapper {
+    flex-wrap: wrap;
+}
+
+/* Navigation Icons (legacy .nav-btn tooltip nav, kept for anything that
+   still uses it) */
+.icon-nav { display: flex; justify-content: center; gap: 7px; flex-wrap: wrap; }
 
 .nav-btn {
     cursor: pointer;
@@ -122,22 +167,22 @@
     transition: all 0.3s ease;
 }
 
-.nav-btn small { 
-    display: block; 
+.nav-btn small {
+    display: block;
     position: absolute;
     top: 100%;
     left: 50%;
     transform: translateX(-50%) translateY(-10px);
-    background: rgba(0, 0, 0, 0.85); 
+    background: rgba(0, 0, 0, 0.85);
     color: #fff;
     padding: 6px 12px;
     border-radius: 6px;
     font-size: 0.50rem;
     font-weight: 700;
     text-transform: uppercase;
-    white-space: nowrap; 
+    white-space: nowrap;
     opacity: 0;
-    pointer-events: none; 
+    pointer-events: none;
     transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
     z-index: 10;
 }
@@ -146,18 +191,13 @@
 .nav-btn:hover small { opacity: 1; transform: translateX(-50%) translateY(-40px); }
 .nav-btn.active { background: rgba(243, 5, 17, 0.3); border: 1px solid #f30511; }
 
-@media (max-width: 600px) {
-    .system-title { display: none; }
-    .dash-header { padding: 5px 10px; }
-}
-
 .logout-pill {
     display: inline-flex;
     align-items: center;
     justify-content: center;
     padding: 8px 16px;
     margin-left: 15px;
-    background: rgb(240, 236, 236); 
+    background: rgb(240, 236, 236);
     backdrop-filter: blur(8px);
     -webkit-backdrop-filter: blur(8px);
     border: 1px solid rgba(255, 77, 77, 0.3);
@@ -168,6 +208,7 @@
     transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
     position: relative;
     overflow: hidden;
+    white-space: nowrap;
 }
 
 .logout-pill:hover {
@@ -194,32 +235,32 @@
     height: auto;
 }
 
-#tableView { justify-items: center; }
-
-#dashboard {
-    width: 100vw;
-    display: flex;
-    flex-direction: column;
-}
-
 .main-body {
     flex: 1;
     height: 100%;
     width: 100%;
     box-sizing: border-box;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
 }
 
+/* Any data table gets a horizontally-scrollable wrapper instead of
+   forcing the whole page to be 1000px wide. */
 #tableView {
     margin: 0;
-    width: 100vw;
-    height: 100vh;
+    width: 100%;
+    max-width: 100vw;
+    height: 100%;
     box-sizing: border-box;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    justify-items: center;
 }
 
 #tableView table {
     width: 100% !important;
     border-collapse: collapse;
-    min-width: 1000px;
+    min-width: 700px; /* scrolls sideways on phones instead of squashing columns unreadably */
 }
 
 .update-box {
@@ -251,6 +292,7 @@
     border-radius: 4px;
     width: 100%;
     box-sizing: border-box;
+    font-size: 16px;
 }
 
 .update-btn {
@@ -301,11 +343,91 @@
     100% { transform: translateX(100%); }
 }
 
-@media screen and (max-width: 600px) {
-    .info-box { min-width: 100%; }
-    .detail-section { padding: 10px; }
-}
-
 #modalTitle, #modalMessage {
     color: #ffffff !important;
+}
+
+/* ==========================================
+   RESPONSIVE OVERRIDES FOR JS-GENERATED UI
+   (script.js builds these with inline styles at runtime; overriding
+   them here avoids hand-editing thousands of lines of generated
+   markup, and CSS always wins over non-!important inline styles.)
+   ========================================== */
+
+/* Dashboard home screen icon buttons (#mainNav .nav-icon-btn are given
+   a fixed "flex: 0 0 240px" inline in index.html) */
+@media (max-width: 700px) {
+    #mainNav .nav-icon-btn {
+        flex: 1 1 calc(50% - 20px) !important;
+        min-width: 130px !important;
+        min-height: 90px !important;
+        padding: 12px 8px !important;
+    }
+}
+@media (max-width: 380px) {
+    #mainNav .nav-icon-btn {
+        flex: 1 1 100% !important;
+    }
+}
+
+/* Login/auth buttons (index.html gives #authContainer button a fixed
+   min-width: 220px, which is wider than very small phone screens) */
+@media (max-width: 420px) {
+    #authContainer button {
+        min-width: 0 !important;
+        width: 100% !important;
+    }
+}
+
+/* Item detail drawer (script.js slides in a fixed 600px-wide panel
+   from the right — full-width sheet is the usable pattern on phones) */
+@media (max-width: 700px) {
+    #itemDrawer {
+        width: 100vw !important;
+        max-width: 100vw !important;
+        padding: 18px !important;
+    }
+}
+
+/* Small "please wait / progress" popups built at a fixed 320px */
+@media (max-width: 400px) {
+    [style*="width: 320px"] {
+        width: 90vw !important;
+        max-width: 320px !important;
+    }
+}
+
+/* ==========================================
+   BREAKPOINTS
+   ========================================== */
+
+/* Tablet */
+@media screen and (max-width: 768px) {
+    .info-box { min-width: 45%; }
+}
+
+/* Phone */
+@media screen and (max-width: 600px) {
+    .system-title { display: none; }
+    .dash-header { padding: 5px 10px; }
+    .logout-pill { padding: 6px 12px; font-size: 14px; margin-left: 8px; }
+    .icon-nav { gap: 4px; }
+    .glass-card { border-radius: 16px; }
+    h2 { margin-bottom: 20px; }
+}
+
+@media screen and (max-width: 480px) {
+    .info-box { min-width: 100%; }
+    .detail-section { padding: 10px; }
+    .detail-grid { gap: 10px; }
+}
+
+/* Short / landscape phone screens: let the auth card shrink further
+   vertically instead of getting clipped */
+@media screen and (max-height: 480px) {
+    .flip-container { height: 94vh; }
+    .glass-card { padding: 14px; justify-content: flex-start; }
+    .logo-container img { width: min(140px, 30vw); margin-bottom: 6px; }
+    h2 { margin-bottom: 12px; }
+    .input-group { margin-bottom: 10px; }
 }

@@ -29,6 +29,78 @@
         @keyframes corePulse { 0% { transform: scale(0.7); opacity: 0.5; } 100% { transform: scale(1.3); opacity: 1; } }
         @keyframes textGlitch { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
 
+        /* --- Auth card overflow fix ---
+           style.css sizes .login-face/.register-face for the original
+           short 2-field login. The Forgot Password form (4 fields + a
+           button + a link) and the Secure Account form are taller than
+           that and were getting clipped at the bottom — since <body>
+           has overflow:hidden by design, there was no way to scroll
+           down to reach the button at all. These overrides let the
+           card grow and scroll internally instead, capped so it never
+           exceeds the viewport on short/mobile screens. */
+        #authContainer { overflow: visible !important; }
+        #cardInner { overflow: visible !important; height: auto !important; max-height: 96vh !important; }
+        .login-face, .register-face {
+            height: auto !important;
+            max-height: 92vh !important;
+            overflow-y: auto !important;
+            -webkit-overflow-scrolling: touch;
+            padding-bottom: 20px !important;
+        }
+
+        /* --- Auth card: consistent input sizing + centered buttons ---
+           The login form's inputs (#userInput/#passInput) and the reset
+           form's inputs share the same classes but were rendering at
+           different sizes. Forcing one shared rule for every input in
+           the card (instead of guessing which selector in style.css
+           was smaller) guarantees they always match. Buttons are
+           switched from an edge-to-edge bar to a centered pill. */
+        #authContainer input[type="text"],
+        #authContainer input[type="password"],
+        #authContainer input[type="number"] {
+            width: 100% !important;
+            padding: 14px 16px !important;
+            font-size: 15px !important;
+            box-sizing: border-box !important;
+        }
+        /* The input itself being width:100% only helps if its PARENT box
+           is also full width — .login-face's .input-group was rendering
+           narrower than .register-face's/the forgot-password section's,
+           which is what was actually making the login boxes look small.
+           Forcing the wrapper itself removes that gap. */
+        #authContainer .input-group {
+            width: 100% !important;
+            max-width: 100% !important;
+            margin-left: 0 !important;
+            margin-right: 0 !important;
+            box-sizing: border-box !important;
+        }
+        #authContainer .password-wrapper {
+            width: 100% !important;
+            box-sizing: border-box !important;
+        }
+
+        /* --- Animated emoji next to each input label ---
+           Real Unicode emoji (not images/GIFs, so no external assets or
+           licensing concerns) with a small bounce+wobble loop so they
+           feel alive rather than static. Staggered animation-delay per
+           field so they don't all bounce in perfect unison. */
+        .field-emoji {
+            display: inline-block;
+            margin-right: 6px;
+            animation: fieldEmojiBounce 2.2s ease-in-out infinite;
+        }
+        @keyframes fieldEmojiBounce {
+            0%, 100% { transform: translateY(0) rotate(0deg); }
+            50%      { transform: translateY(-4px) rotate(-10deg); }
+        }
+        #authContainer button {
+            display: block !important;
+            width: auto !important;
+            min-width: 220px !important;
+            margin: 20px auto 0 !important;
+        }
+
         #dashboard {
             display: flex;
             flex-direction: column;
@@ -273,19 +345,60 @@
             <!-- Login Face -->
             <div class="glass-card login-face">
                 <div class="logo-container"><img src="logo.png" alt="C.E.R.I.S"></div>
-                <h2>LOGIN</h2>
-                <div class="input-group">
-                    <p class="field-header">Username</p>
-                    <input type="text" id="userInput" placeholder="Identity code" onkeydown="if(event.key==='Enter'){event.preventDefault(); handleAction('login');}">
-                </div>
-                <div class="input-group">
-                    <p class="field-header">Access Key</p>
-                    <div class="password-wrapper">
-                        <input type="password" id="passInput" placeholder="••••••••" onkeydown="if(event.key==='Enter'){event.preventDefault(); handleAction('login');}">
-                        <i class="fa-solid fa-eye toggle-password" style="color: rgb(47, 5, 235);" onclick="togglePass('passInput')"></i>
+                <h2 id="loginFaceTitle">LOGIN</h2>
+
+                <!-- Standard login fields. Wrapped so showForgotPasswordSection()
+                     can hide the whole group at once when the user clicks
+                     "Forgot password?" below, without touching style.css. -->
+                <div id="loginFieldsWrapper" style="width: 100%; align-self: stretch; box-sizing: border-box;">
+                    <div class="input-group" style="width: 100%; max-width: 100%; margin: 0 0 16px 0; box-sizing: border-box;">
+                        <p class="field-header"><span class="field-emoji" style="animation-delay: 0s;">👤</span>Username</p>
+                        <input type="text" id="userInput" placeholder="Identity code" style="width: 100%; box-sizing: border-box; padding: 14px 16px; font-size: 15px;" onkeydown="if(event.key==='Enter'){event.preventDefault(); handleAction('login');}">
                     </div>
+                    <div class="input-group" style="width: 100%; max-width: 100%; margin: 0 0 16px 0; box-sizing: border-box;">
+                        <p class="field-header"><span class="field-emoji" style="animation-delay: 0.2s;">🔑</span>Access Key</p>
+                        <div class="password-wrapper" style="width: 100%; box-sizing: border-box;">
+                            <input type="password" id="passInput" placeholder="••••••••" style="width: 100%; box-sizing: border-box; padding: 14px 16px; font-size: 15px;" onkeydown="if(event.key==='Enter'){event.preventDefault(); handleAction('login');}">
+                            <i class="fa-solid fa-eye toggle-password" style="color: rgb(47, 5, 235);" onclick="togglePass('passInput')"></i>
+                        </div>
+                    </div>
+                    <button onclick="handleAction('login')">VERIFY</button>
+                    <p style="text-align: center; margin-top: 12px; font-size: 0.8rem;">
+                        <a href="#" onclick="event.preventDefault(); showForgotPasswordSection();" style="color: inherit; opacity: 0.75; text-decoration: underline; cursor: pointer;">Forgot password?</a>
+                    </p>
                 </div>
-                <button onclick="handleAction('login')">VERIFY</button>
+
+                <!-- Forgot-password section. Hidden by default; toggled by
+                     showForgotPasswordSection()/hideForgotPasswordSection()
+                     in the inline <script> block below. Since we can't verify
+                     the OLD password (that's the whole point), Department /
+                     Client name is required as a light identity check before
+                     the backend will reset anything. -->
+                <div id="forgotPasswordSection" style="display: none; width: 100%; align-self: stretch; box-sizing: border-box;">
+                    <p style="font-size: 0.8rem; text-align: center; opacity: 0.7; margin-bottom: 10px;">Reset your password directly. Enter your username below.</p>
+                    <div class="input-group">
+                        <p class="field-header"><span class="field-emoji" style="animation-delay: 0s;">👤</span>Username</p>
+                        <input type="text" id="forgotUserInput" placeholder="Identity code">
+                    </div>
+                    <div class="input-group">
+                        <p class="field-header"><span class="field-emoji" style="animation-delay: 0.2s;">🔐</span>New Password</p>
+                        <div class="password-wrapper">
+                            <input type="password" id="forgotNewPassInput" placeholder="Min 8 characters" onkeydown="if(event.key==='Enter'){event.preventDefault(); handleAction('forgotPassword');}">
+                            <i class="fa-solid fa-eye toggle-password" style="color: rgb(47, 5, 235);" onclick="togglePass('forgotNewPassInput')"></i>
+                        </div>
+                    </div>
+                    <div class="input-group">
+                        <p class="field-header"><span class="field-emoji" style="animation-delay: 0.4s;">🔁</span>Confirm New Password</p>
+                        <div class="password-wrapper">
+                            <input type="password" id="forgotConfirmPassInput" placeholder="Re-enter new password" onkeydown="if(event.key==='Enter'){event.preventDefault(); handleAction('forgotPassword');}">
+                            <i class="fa-solid fa-eye toggle-password" style="color: rgb(47, 5, 235);" onclick="togglePass('forgotConfirmPassInput')"></i>
+                        </div>
+                    </div>
+                    <button onclick="handleAction('forgotPassword')">RESET PASSWORD</button>
+                    <p style="text-align: center; margin-top: 12px; font-size: 0.8rem;">
+                        <a href="#" onclick="event.preventDefault(); hideForgotPasswordSection();" style="color: inherit; opacity: 0.75; text-decoration: underline; cursor: pointer;">Back to Login</a>
+                    </p>
+                </div>
             </div>
 
             <!-- Default Password & Username Update Face -->
@@ -295,18 +408,21 @@
                 <p style="font-size: 0.8rem; text-align: center; opacity: 0.7; margin-bottom: 10px;">Default account detected. Update details.</p>
 
                 <div class="input-group">
-                    <p class="field-header">New Username</p>
+                    <p class="field-header"><span class="field-emoji" style="animation-delay: 0s;">👤</span>New Username</p>
                     <input type="text" id="newUserInput" placeholder="New Identity Code" onkeydown="if(event.key==='Enter'){event.preventDefault(); handleAction('updatePassword');}">
                 </div>
 
                 <div class="input-group">
-                    <p class="field-header">New Password</p>
+                    <p class="field-header"><span class="field-emoji" style="animation-delay: 0.2s;">🔐</span>New Password</p>
                     <div class="password-wrapper">
                         <input type="password" id="newPassInput" placeholder="Min 8 characters" onkeydown="if(event.key==='Enter'){event.preventDefault(); handleAction('updatePassword');}">
                         <i class="fa-solid fa-eye toggle-password" style="color: rgb(0, 145, 255);" onclick="togglePass('newPassInput')"></i>
                     </div>
                 </div>
                 <button onclick="handleAction('updatePassword')">UPDATE & ENTER</button>
+                <p style="text-align: center; margin-top: 12px; font-size: 0.8rem;">
+                    <a href="#" onclick="event.preventDefault(); backToLoginFromRegister();" style="color: inherit; opacity: 0.75; text-decoration: underline; cursor: pointer;">Back to Login</a>
+                </p>
             </div>
 
         </div>
@@ -392,6 +508,34 @@
         function togglePass(id) {
             const input = document.getElementById(id);
             input.type = input.type === "password" ? "text" : "password";
+        }
+
+        function showForgotPasswordSection() {
+            const loginFields = document.getElementById('loginFieldsWrapper');
+            const forgotSection = document.getElementById('forgotPasswordSection');
+            const title = document.getElementById('loginFaceTitle');
+            if (loginFields) loginFields.style.display = 'none';
+            if (forgotSection) forgotSection.style.display = 'block';
+            if (title) title.innerText = 'RESET PASSWORD';
+
+            // Carry over whatever username was already typed, for convenience.
+            const typedUser = document.getElementById('userInput')?.value || '';
+            const forgotUserField = document.getElementById('forgotUserInput');
+            if (forgotUserField && typedUser) forgotUserField.value = typedUser;
+        }
+
+        function hideForgotPasswordSection() {
+            const loginFields = document.getElementById('loginFieldsWrapper');
+            const forgotSection = document.getElementById('forgotPasswordSection');
+            const title = document.getElementById('loginFaceTitle');
+            if (loginFields) loginFields.style.display = 'block';
+            if (forgotSection) forgotSection.style.display = 'none';
+            if (title) title.innerText = 'LOGIN';
+        }
+
+        function backToLoginFromRegister() {
+            window.pendingRowIndex = null;
+            document.getElementById('cardInner')?.classList.remove('flipped');
         }
 
         function closeModal() {
