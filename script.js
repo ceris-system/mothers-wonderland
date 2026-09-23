@@ -1331,6 +1331,11 @@ async function loadReportModuleCode(container) {
                             <i class="fa-solid fa-user-clock" style="font-size: 1.8rem; color: ${scope.isAdmin ? '#111' : '#666'};"></i>
                             <span style="font-family: 'Roboto Mono', monospace; font-size: 0.8rem; font-weight: 700; text-align: center; letter-spacing: 1px;">USER LOGS HISTORY${scope.isAdmin ? '' : ' <i class=\'fa-solid fa-lock\' style=\'font-size: 0.7rem; margin-left: 4px;\'></i>'}</span>
                         </button>
+
+                        <button class="nav-icon-btn" onclick="selectReportCategory('SUMMARY')" style="flex: 0 0 240px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; padding: 15px 10px; min-height: 110px; border-radius: 12px; cursor: pointer; background: rgba(144, 168, 168, 0.35); border: 1.5px solid rgba(0, 0, 0, 0.4); color: #111; -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px); transition: all 0.3s ease;">
+                            <i class="fa-solid fa-chart-pie" style="font-size: 1.8rem; color: #111;"></i>
+                            <span style="font-family: 'Roboto Mono', monospace; font-size: 0.8rem; font-weight: 700; text-align: center; letter-spacing: 1px;">SUMMARY REPORT</span>
+                        </button>
                     </div>
                 </div>
             </div>
@@ -1360,6 +1365,9 @@ function selectReportCategory(category) {
         }
         logButtonClick('USER_LOGS_HISTORY_BUTTON_CLICKED');
         openUserLogsModal();
+    } else if (category === 'SUMMARY') {
+        logButtonClick('SUMMARY_REPORT_BUTTON_CLICKED');
+        openSummaryReportModal();
     } else if (HISTORY_CONFIGS[category]) {
         const logLabel = (HISTORY_CONFIGS[category].title || category).toUpperCase().replace(/\s+/g, '_') + '_BUTTON_CLICKED';
         logButtonClick(logLabel);
@@ -1367,6 +1375,14 @@ function selectReportCategory(category) {
     } else {
         console.warn("Unknown report category:", category);
     }
+}
+
+// SUMMARY REPORT — placeholder entry point. The button and routing are
+// wired up; the actual summary content/layout isn't defined yet, so this
+// just opens a simple notice for now. Replace this body once the summary
+// report's data/design is decided.
+function openSummaryReportModal() {
+    showCustomAlert('Summary Report is coming soon.');
 }
 
 // ==========================================
