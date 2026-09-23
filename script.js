@@ -1285,10 +1285,10 @@ async function loadReportModuleCode(container) {
         // greyed out and clicking it (still wired to selectReportCategory,
         // which re-checks admin status itself as the real gate) just
         // explains why instead of silently doing nothing.
-        const userLogsBtnStyle = scope.isAdmin
+        const adminOnlyBtnStyle = scope.isAdmin
             ? 'flex: 0 0 240px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; padding: 15px 10px; min-height: 110px; border-radius: 12px; cursor: pointer; background: rgba(144, 168, 168, 0.35); border: 1.5px solid rgba(0, 0, 0, 0.4); color: #111; -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px); transition: all 0.3s ease;'
             : 'flex: 0 0 240px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; padding: 15px 10px; min-height: 110px; border-radius: 12px; cursor: not-allowed; background: rgba(144, 168, 168, 0.15); border: 1.5px solid rgba(0, 0, 0, 0.2); color: #666; -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px); opacity: 0.6;';
-        const userLogsBtnTitle = scope.isAdmin ? '' : 'title="Admins only"';
+        const adminOnlyBtnTitle = scope.isAdmin ? '' : 'title="Admins only"';
 
         container.innerHTML = `
             <div style="width: 100%; height: 100%; padding: 25px; box-sizing: border-box; display: flex; flex-direction: column; align-items: stretch;">
@@ -1327,14 +1327,14 @@ async function loadReportModuleCode(container) {
                             <span style="font-family: 'Roboto Mono', monospace; font-size: 0.8rem; font-weight: 700; text-align: center; letter-spacing: 1px;">PULL OUT HISTORY</span>
                         </button>
 
-                        <button class="nav-icon-btn" onclick="selectReportCategory('USER_LOGS')" ${userLogsBtnTitle} style="${userLogsBtnStyle}">
+                        <button class="nav-icon-btn" onclick="selectReportCategory('USER_LOGS')" ${adminOnlyBtnTitle} style="${adminOnlyBtnStyle}">
                             <i class="fa-solid fa-user-clock" style="font-size: 1.8rem; color: ${scope.isAdmin ? '#111' : '#666'};"></i>
                             <span style="font-family: 'Roboto Mono', monospace; font-size: 0.8rem; font-weight: 700; text-align: center; letter-spacing: 1px;">USER LOGS HISTORY${scope.isAdmin ? '' : ' <i class=\'fa-solid fa-lock\' style=\'font-size: 0.7rem; margin-left: 4px;\'></i>'}</span>
                         </button>
 
-                        <button class="nav-icon-btn" onclick="selectReportCategory('SUMMARY')" style="flex: 0 0 240px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; padding: 15px 10px; min-height: 110px; border-radius: 12px; cursor: pointer; background: rgba(144, 168, 168, 0.35); border: 1.5px solid rgba(0, 0, 0, 0.4); color: #111; -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px); transition: all 0.3s ease;">
-                            <i class="fa-solid fa-chart-pie" style="font-size: 1.8rem; color: #111;"></i>
-                            <span style="font-family: 'Roboto Mono', monospace; font-size: 0.8rem; font-weight: 700; text-align: center; letter-spacing: 1px;">SUMMARY REPORT</span>
+                        <button class="nav-icon-btn" onclick="selectReportCategory('SUMMARY')" ${adminOnlyBtnTitle} style="${adminOnlyBtnStyle}">
+                            <i class="fa-solid fa-chart-pie" style="font-size: 1.8rem; color: ${scope.isAdmin ? '#111' : '#666'};"></i>
+                            <span style="font-family: 'Roboto Mono', monospace; font-size: 0.8rem; font-weight: 700; text-align: center; letter-spacing: 1px;">SUMMARY REPORT${scope.isAdmin ? '' : ' <i class=\'fa-solid fa-lock\' style=\'font-size: 0.7rem; margin-left: 4px;\'></i>'}</span>
                         </button>
                     </div>
                 </div>
@@ -1366,6 +1366,10 @@ function selectReportCategory(category) {
         logButtonClick('USER_LOGS_HISTORY_BUTTON_CLICKED');
         openUserLogsModal();
     } else if (category === 'SUMMARY') {
+        if (!getSessionScope().isAdmin) {
+            showCustomAlert('Summary Report is restricted to admin accounts.');
+            return;
+        }
         logButtonClick('SUMMARY_REPORT_BUTTON_CLICKED');
         openSummaryReportModal();
     } else if (HISTORY_CONFIGS[category]) {
@@ -1380,8 +1384,13 @@ function selectReportCategory(category) {
 // SUMMARY REPORT — placeholder entry point. The button and routing are
 // wired up; the actual summary content/layout isn't defined yet, so this
 // just opens a simple notice for now. Replace this body once the summary
-// report's data/design is decided.
+// report's data/design is decided. Admin-only (also gated in
+// selectReportCategory and in the button's own greyed-out state above).
 function openSummaryReportModal() {
+    if (!getSessionScope().isAdmin) {
+        showCustomAlert('Summary Report is restricted to admin accounts.');
+        return;
+    }
     showCustomAlert('Summary Report is coming soon.');
 }
 
