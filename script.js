@@ -1430,6 +1430,23 @@ function selectReportCategory(category) {
 const SR_SALES_COL = { DEPT: 0, SKU: 1, DESC: 2, SRP: 8, QTY_RELEASED: 11, DATE: 20 };
 const SR_REFRESH_MS = 60000;
 
+// DAILY SALES tab source: the "sales" sheet, read through the same generic
+// ?sheet=&range= GET endpoint the SUMMARY tab uses (no backend change).
+//   Row 1, G1:DC1  = the dates (today + historical). Each date owns a block:
+//                    its own column = QTY RELEASED, the column right after
+//                    it = TOTAL AMOUNT (G = qty, H = total amount for the
+//                    first date, and so on). A date header directly followed
+//                    by another date header is treated as a qty-only column
+//                    and its amount falls back to qty x SRP.
+//   Row 3 down     = A: SKU, B: DESCRIPTION, E: SRP.
+// Indexes below are 0-based (A = 0).
+const SR_DS_SHEET_NAME = 'sales';
+const SR_DS_RANGE = 'A1:DH'; // (DC = last date column; DF:DH = the department list/totals) // open-ended: Apps Script stops at the sheet's last row, so this works whatever the row count
+// DEPT = 0-based column of the department name on each SKU row. null = auto-detect
+// (a header containing "DEPT" in rows 1-2 of A:F, else the A:F column whose values
+// match the department names listed in DF3:DF). Set a number to force it (C = 2).
+const SR_DS = { DEPT: null, DEPT_LIST_COL: 109 /* DF */, SKU: 0, DESC: 1, SRP: 4, FIRST_DATE_COL: 6 /* G */, LAST_DATE_COL: 106 /* DC */, FIRST_DATA_ROW: 2 /* row 3 */ };
+
 // Real "SUMMARY" tab in the spreadsheet, fetched as-is via the generic
 // ?sheet=&range= GET endpoint in Code.gs (SUMMARY isn't in
 // BLOCKED_READ_SHEETS, so it's already reachable there \u2014 no backend
@@ -1441,6 +1458,9 @@ const SR_SUMMARY_RANGE = 'A1:BZ5000';
 const srState = {
     inventoryRows: [],
     salesRows: [],
+    dailySalesRows: [],   // flattened from the "sales" sheet (see srParseDailySalesSheet)
+    dailySalesError: null,
+    topRank: { mode: 'MONTH', day: '', month: '' },   // Top Rank period picker ('' = today / this month)
     summaryHeaders: [],
     summaryRows: [],
     lastUpdated: null,
@@ -1454,7 +1474,7 @@ const srState = {
 // rgb = the same accent as "r,g,b" so CSS can do rgba(var(--x-rgb), .2).
 const SR_TABS = [
     { id: 'DAILY_SALES', label: 'DAILY SALES VS LAST WEEK', icon: 'fa-calendar-day', group: 'SALES', color: '#22d3ee', light: '#a5f3fc', rgb: '34,211,238' },
-    { id: 'TOP_RANK', label: 'TOP RANK', icon: 'fa-ranking-star', group: 'SALES', color: '#a78bfa', light: '#ddd6fe', rgb: '167,139,250' },
+    { id: 'TOP_RANK', label: 'TOP RANK', icon: 'fa-crown', group: 'SALES', color: '#a78bfa', light: '#ddd6fe', rgb: '167,139,250' },
     { id: 'MONTH_COMPARE', label: 'MONTH VS LAST MONTH', icon: 'fa-calendar-week', group: 'SALES', color: '#2dd4bf', light: '#99f6e4', rgb: '45,212,191' },
     { id: 'CRITICAL_STOCK', label: 'CRITICAL STOCK', icon: 'fa-triangle-exclamation', group: 'STOCK HEALTH', color: '#ff5c8a', light: '#ffb3c9', rgb: '255,92,138' },
     { id: 'OUT_OF_STOCK', label: 'OUT OF STOCK', icon: 'fa-ban', group: 'STOCK HEALTH', color: '#ff8a3d', light: '#ffc59a', rgb: '255,138,61' },
@@ -1819,6 +1839,16 @@ function openSummaryReportModal() {
             .sr-hero-body { width: 100%; margin-top: 18px; }
             .sr-hero-body .sr-cards { margin-bottom: 18px; }
             /* stat cards live in the hero's title row, next to the title */
+            .sr-period { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin: 0 0 14px; }
+            .sr-period-label { font-size: 0.68rem; font-weight: 700; letter-spacing: 0.14em; color: var(--sr-muted); }
+            .sr-select {
+                background: rgba(var(--sr-primary-rgb), 0.14); color: var(--sr-ink);
+                border: 1px solid rgba(var(--sr-primary-rgb), 0.5); border-radius: 8px;
+                padding: 8px 12px; font: 700 0.78rem 'Roboto Mono', monospace;
+                cursor: pointer; outline: none; color-scheme: dark; max-width: 100%;
+            }
+            .sr-select:focus { box-shadow: 0 0 0 2px rgba(var(--sr-primary-rgb), 0.45); }
+            .sr-select option { background: #1a1633; color: #f6f4ff; }
             .sr-hero-top .sr-cards { flex: 1 1 0; min-width: 280px; margin: 0 !important; gap: 12px; }
             .sr-hero-top .sr-card { min-width: 130px; padding: 10px 12px 9px; }
             .sr-hero-top .sr-cards > .sr-card:only-child { flex: 0 1 280px; }
@@ -2078,7 +2108,7 @@ async function srRefreshAll(showSpinner) {
     if (statusEl && showSpinner) statusEl.textContent = 'Refreshing live data...';
 
     try {
-        await Promise.all([srFetchInventoryAll(), srFetchSalesAll(), srFetchSummarySheetAll()]);
+        await Promise.all([srFetchInventoryAll(), srFetchSalesAll(), srFetchDailySalesAll(), srFetchSummarySheetAll()]);
         srState.lastUpdated = new Date();
         if (statusEl) statusEl.textContent = `Live \u00b7 last updated ${srState.lastUpdated.toLocaleTimeString()} \u00b7 auto-refreshes every 60s`;
         srRenderActiveTab();
@@ -2122,6 +2152,112 @@ async function srFetchSalesAll() {
     } catch (e) {
         console.error('[Summary Report] sales fetch failed:', e);
         srState.salesRows = [];
+    }
+}
+
+// Date header parser for the "sales" sheet's row 1. Stricter than
+// srParseDate on purpose: a header like "TOTAL AMOUNT" or "Sales 1" must NOT
+// be mistaken for a date (JS's Date() will happily parse the latter).
+function srParseSheetDate(val) {
+    if (val === undefined || val === null) return null;
+    const str = String(val).trim();
+    if (!str) return null;
+    const now = new Date();
+    if (/^\d{4}-\d{1,2}-\d{1,2}/.test(str) || /^\d{5}(\.\d+)?$/.test(str)) return srParseDate(str);
+    const m = str.match(/^(\d{1,2})[\/\-.](\d{1,2})(?:[\/\-.](\d{2,4}))?$/);
+    if (m) {
+        let y = m[3] ? Number(m[3]) : now.getFullYear();
+        if (y < 100) y += 2000;
+        const d = new Date(y, Number(m[1]) - 1, Number(m[2]));
+        return (!isNaN(d.getTime()) && d.getMonth() === Number(m[1]) - 1) ? d : null;
+    }
+    if (/(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*/i.test(str) && /\d/.test(str)) {
+        const d = new Date(/\b\d{4}\b/.test(str) ? str : str + ', ' + now.getFullYear());
+        if (!isNaN(d.getTime())) return new Date(d.getFullYear(), d.getMonth(), d.getDate());
+    }
+    return null;
+}
+
+// Turns the "sales" sheet grid (dates across row 1, one row per SKU) into a
+// flat list of {sku, desc, srp, qty, amount, date} \u2014 one entry per SKU per
+// date that actually had a release, so the renderers can just filter by date.
+function srDetectDeptCol(values) {
+    if (Number.isInteger(SR_DS.DEPT)) return SR_DS.DEPT;
+    for (let r = 0; r < Math.min(2, values.length); r++) {
+        for (let c = 0; c <= 5; c++) {
+            if (/dept|department/i.test(String((values[r] || [])[c] ?? ''))) return c;
+        }
+    }
+    const norm = v => String(v ?? '').trim().toUpperCase();
+    const names = new Set();
+    for (let r = SR_DS.FIRST_DATA_ROW; r < values.length; r++) {
+        const n = norm((values[r] || [])[SR_DS.DEPT_LIST_COL]);
+        if (n) names.add(n);
+    }
+    if (!names.size) return null;
+    let best = null, bestScore = 0;
+    for (let c = 0; c <= 5; c++) {
+        let filled = 0, hits = 0;
+        for (let r = SR_DS.FIRST_DATA_ROW; r < values.length; r++) {
+            const n = norm((values[r] || [])[c]);
+            if (!n) continue;
+            filled++; if (names.has(n)) hits++;
+        }
+        const score = filled ? hits / filled : 0;
+        if (hits && score >= 0.5 && score > bestScore) { best = c; bestScore = score; }
+    }
+    return best;
+}
+
+function srParseDailySalesSheet(values) {
+    if (!Array.isArray(values) || !values.length) return [];
+    const head = values[0] || [];
+    const blocks = [];
+    for (let c = SR_DS.FIRST_DATE_COL; c <= SR_DS.LAST_DATE_COL && c < head.length; c++) {
+        const date = srParseSheetDate(head[c]);
+        if (!date) continue;
+        const hasNextCol = c + 1 <= SR_DS.LAST_DATE_COL;
+        const paired = hasNextCol && !srParseSheetDate(head[c + 1]);
+        blocks.push({ qtyCol: c, amtCol: paired ? c + 1 : -1, date });
+    }
+
+    const out = [];
+    const deptCol = srDetectDeptCol(values);
+    for (let r = SR_DS.FIRST_DATA_ROW; r < values.length; r++) {
+        const row = values[r] || [];
+        const sku = String(row[SR_DS.SKU] ?? '').trim();
+        const desc = String(row[SR_DS.DESC] ?? '').trim();
+        if (!sku && !desc) continue;
+        const srp = srNum(row[SR_DS.SRP]);
+        const dept = deptCol === null ? '' : String(row[deptCol] ?? '').trim();
+        blocks.forEach(b => {
+            const qty = srNum(row[b.qtyCol]);
+            const amtCell = b.amtCol >= 0 ? row[b.amtCol] : '';
+            const hasAmt = String(amtCell ?? '').trim() !== '';
+            const amount = hasAmt ? srNum(amtCell) : qty * srp;
+            if (!qty && !amount) return;
+            out.push({ sku, desc, dept, srp, qty, amount, date: b.date });
+        });
+    }
+    return out;
+}
+
+async function srFetchDailySalesAll() {
+    try {
+        const url = `${window.API}?sheet=${encodeURIComponent(SR_DS_SHEET_NAME)}&range=${encodeURIComponent(SR_DS_RANGE)}&token=${encodeURIComponent(window.API_TOKEN)}`;
+        const res = await fetch(url);
+        const json = await res.json();
+        if (!json.success || !Array.isArray(json.values)) {
+            srState.dailySalesRows = [];
+            srState.dailySalesError = json.error || json.message || `Could not read the "${SR_DS_SHEET_NAME}" sheet.`;
+            return;
+        }
+        srState.dailySalesRows = srParseDailySalesSheet(json.values);
+        srState.dailySalesError = null;
+    } catch (e) {
+        console.error('[Summary Report] daily sales fetch failed:', e);
+        srState.dailySalesRows = [];
+        srState.dailySalesError = String(e && e.message || e);
     }
 }
 
@@ -2226,20 +2362,19 @@ function srRenderActiveTab(animate) {
 // ---- 1. Daily sales vs last week ----
 
 function srRenderDailySales() {
-    const rows = srState.salesRows;
+    // Source = the "sales" sheet (see SR_DS_* above). VALUE is the sheet's
+    // own TOTAL AMOUNT column, not qty x SRP.
+    const rows = srState.dailySalesRows;
     const today = new Date(); today.setHours(0, 0, 0, 0);
     const lastWeek = new Date(today); lastWeek.setDate(lastWeek.getDate() - 7);
 
     const byDay = {}; // 'YYYY-M-D' -> {qty, value}
     rows.forEach(row => {
-        const d = srParseDate(row[SR_SALES_COL.DATE]);
-        if (!d) return;
+        const d = row.date;
         const key = `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`;
-        const qty = srNum(row[SR_SALES_COL.QTY_RELEASED]);
-        const value = qty * srNum(row[SR_SALES_COL.SRP]);
         if (!byDay[key]) byDay[key] = { qty: 0, value: 0 };
-        byDay[key].qty += qty;
-        byDay[key].value += value;
+        byDay[key].qty += row.qty;
+        byDay[key].value += row.amount;
     });
 
     const dayTotal = (d) => byDay[`${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`] || { qty: 0, value: 0 };
@@ -2247,10 +2382,8 @@ function srRenderDailySales() {
     const lastWeekTotal = dayTotal(lastWeek);
     const { start: mtdStart } = srCurrentMonthRange();
     const mtdTotal = rows.reduce((acc, row) => {
-        const d = srParseDate(row[SR_SALES_COL.DATE]);
-        if (!d || d < mtdStart || d > today) return acc;
-        const qty = srNum(row[SR_SALES_COL.QTY_RELEASED]);
-        acc.qty += qty; acc.value += qty * srNum(row[SR_SALES_COL.SRP]);
+        if (row.date < mtdStart || row.date > today) return acc;
+        acc.qty += row.qty; acc.value += row.amount;
         return acc;
     }, { qty: 0, value: 0 });
 
@@ -2286,17 +2419,11 @@ function srRenderDailySales() {
     // moved but exactly what moved.
     const skuToday = {};
     rows.forEach(row => {
-        const d = srParseDate(row[SR_SALES_COL.DATE]);
-        if (!d || !srSameDay(d, today)) return;
-        const sku = row[SR_SALES_COL.SKU] || '';
-        const desc = row[SR_SALES_COL.DESC] || '';
-        if (!sku && !desc) return;
-        const key = sku + '\u0001' + desc;
-        const qty = srNum(row[SR_SALES_COL.QTY_RELEASED]);
-        const value = qty * srNum(row[SR_SALES_COL.SRP]);
-        if (!skuToday[key]) skuToday[key] = { sku, desc, qty: 0, value: 0 };
-        skuToday[key].qty += qty;
-        skuToday[key].value += value;
+        if (!srSameDay(row.date, today)) return;
+        const key = row.sku + '\u0001' + row.desc;
+        if (!skuToday[key]) skuToday[key] = { sku: row.sku, desc: row.desc, srp: row.srp, qty: 0, value: 0 };
+        skuToday[key].qty += row.qty;
+        skuToday[key].value += row.amount;
     });
     const skuList = Object.values(skuToday).sort((a, b) => b.value - a.value);
     const CAP = 50;
@@ -2306,10 +2433,15 @@ function srRenderDailySales() {
         <td class="c-sku c-fit">${srEsc(item.sku)}</td>
         <td class="c-desc">${srEsc(item.desc)}</td>
         <td class="c-fit c-center c-num">${item.qty}</td>
+        <td class="c-fit c-right c-money">${srMoney(item.srp)}</td>
         <td class="c-fit c-right c-money">${srMoney(item.value)}</td>
     </tr>`).join('');
 
-    return srNote('"Sales" = quantity released out to departments (REQUEST_RELEASED sheet) \u00d7 SRP \u2014 this system has no separate point-of-sale log.') + headline +
+    const errorNote = srState.dailySalesError
+        ? `<div class="sr-note" style="color: var(--sr-danger-light);"><i class="fa-solid fa-triangle-exclamation"></i> Couldn't read the "${srEsc(SR_DS_SHEET_NAME)}" sheet: ${srEsc(srState.dailySalesError)}</div>`
+        : '';
+
+    return errorNote + srNote(`Read live from the "${SR_DS_SHEET_NAME}" sheet \u2014 dates in G1:DC1, VALUE = the sheet's TOTAL AMOUNT column.`) + headline +
         srHeading('LAST 7 DAYS', 'fa-chart-line') +
         `<div style="margin-bottom: 8px;">${trendHTML}</div>` +
         srHeading('SALES PER SKU \u2014 TODAY', 'fa-tags', '#f472b6') +
@@ -2318,9 +2450,10 @@ function srRenderDailySales() {
                 <th class="c-fit">SKU CODE</th>
                 <th>ITEM DESCRIPTION</th>
                 <th class="c-fit c-center">QTY<br>RELEASED</th>
-                <th class="c-fit c-right">VALUE</th>
+                <th class="c-fit c-right">SRP</th>
+                <th class="c-fit c-right">TOTAL AMOUNT</th>
             </tr></thead>
-            <tbody>${skuRowsHTML || `<tr><td colspan="4" class="sr-empty-cell">No releases logged today yet.</td></tr>`}</tbody>
+            <tbody>${skuRowsHTML || `<tr><td colspan="5" class="sr-empty-cell">No releases logged today yet.</td></tr>`}</tbody>
         </table>`) + `${skuList.length > CAP ? `<div style="font-size: 0.68rem; color: var(--sr-muted-dim); margin-top: 8px;">Showing the top ${CAP} of ${skuList.length} SKUs released today.</div>` : ''}`;
 }
 
@@ -2371,12 +2504,109 @@ function srCurrentMonthRange() {
 
 // ---- 2/3. Top rank \u2014 department (A) and item (B), one tab, two sections ----
 
+// ---- Top Rank period picker (by date / by month) ----
+
+const srDateKey = d => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+const srMonthKey = d => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+
+// Every date the loaded data knows about ("sales" sheet + request log),
+// plus today, newest first \u2014 these feed both dropdowns.
+function srTopRankPeriods() {
+    const today = new Date(); today.setHours(0, 0, 0, 0);
+    const dayMap = {}; dayMap[srDateKey(today)] = today;
+    const add = d => { if (d) { const k = srDateKey(d); if (!dayMap[k]) dayMap[k] = d; } };
+    srState.dailySalesRows.forEach(r => add(r.date));
+    srState.salesRows.forEach(r => add(srParseDate(r[SR_SALES_COL.DATE])));
+    const days = Object.values(dayMap).sort((a, b) => b - a);
+    const monthMap = {};
+    days.forEach(d => { const k = srMonthKey(d); if (!monthMap[k]) monthMap[k] = new Date(d.getFullYear(), d.getMonth(), 1); });
+    const months = Object.values(monthMap).sort((a, b) => b - a);
+    return { today, days, months };
+}
+
+function srTopRankSetMode(mode) { srState.topRank.mode = mode === 'DAY' ? 'DAY' : 'MONTH'; srRenderActiveTab(); }
+function srTopRankSetPeriod(value) {
+    if (srState.topRank.mode === 'DAY') srState.topRank.day = value; else srState.topRank.month = value;
+    srRenderActiveTab();
+}
+
+// By-item ranking from the "sales" sheet rows (VALUE = the sheet's TOTAL AMOUNT).
+function srAggregateDailyBySku(rows, start, end) {
+    const groups = {};
+    rows.forEach(row => {
+        if (row.date < start || row.date > end) return;
+        const key = row.sku + '\u0001' + row.desc;
+        if (!groups[key]) groups[key] = { sku: row.sku, desc: row.desc, qty: 0, value: 0 };
+        groups[key].qty += row.qty;
+        groups[key].value += row.amount;
+    });
+    return Object.values(groups).sort((a, b) => b.value - a.value);
+}
+
+// By-department ranking: every SKU row's qty + TOTAL AMOUNT added up per department.
+function srAggregateDailyByDept(rows, start, end) {
+    const groups = {};
+    rows.forEach(row => {
+        if (row.date < start || row.date > end) return;
+        const key = row.dept || 'NO DEPARTMENT';
+        if (!groups[key]) groups[key] = { label: key, qty: 0, value: 0 };
+        groups[key].qty += row.qty;
+        groups[key].value += row.amount;
+    });
+    return Object.values(groups).sort((a, b) => b.value - a.value);
+}
+
 function srRenderTopRank() {
-    const { start, end } = srCurrentMonthRange();
-    const monthLabel = start.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
+    const { today, days, months } = srTopRankPeriods();
+    const tr = srState.topRank;
+    const isDay = tr.mode === 'DAY';
+
+    // Resolve the selection to a [start, end] range + label.
+    let start, end, periodLabel, options, selectedKey;
+    if (isDay) {
+        selectedKey = days.some(d => srDateKey(d) === tr.day) ? tr.day : srDateKey(today);
+        const [y, m, dd] = selectedKey.split('-').map(Number);
+        start = end = new Date(y, m - 1, dd);
+        periodLabel = start.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' });
+        options = days.map(d => ({ key: srDateKey(d), label: d.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' }) }));
+    } else {
+        selectedKey = months.some(d => srMonthKey(d) === tr.month) ? tr.month : srMonthKey(today);
+        const [y, m] = selectedKey.split('-').map(Number);
+        start = new Date(y, m - 1, 1);
+        end = new Date(y, m, 0);
+        periodLabel = start.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
+        options = months.map(d => ({ key: srMonthKey(d), label: d.toLocaleDateString('en-US', { month: 'long', year: 'numeric' }) }));
+    }
+
+    const controls = `<div class="sr-period">
+        <span class="sr-period-label"><i class="fa-solid fa-filter"></i> VIEW</span>
+        <select class="sr-select" onchange="srTopRankSetMode(this.value)" aria-label="Top rank period type">
+            <option value="DAY"${isDay ? ' selected' : ''}>PER DATE</option>
+            <option value="MONTH"${!isDay ? ' selected' : ''}>PER MONTH</option>
+        </select>
+        <select class="sr-select" onchange="srTopRankSetPeriod(this.value)" aria-label="${isDay ? 'Select date' : 'Select month'}">
+            ${options.map(o => `<option value="${o.key}"${o.key === selectedKey ? ' selected' : ''}>${srEsc(o.label)}</option>`).join('')}
+        </select>
+    </div>`;
+
+    // Headline: the day's sale, or the selected month's total sale.
+    const periodTotals = srState.dailySalesRows.reduce((acc, r) => {
+        if (r.date < start || r.date > end) return acc;
+        acc.qty += r.qty; acc.value += r.amount;
+        return acc;
+    }, { qty: 0, value: 0 });
+    const cards = `<div class="sr-cards">
+        ${srStatCard(isDay ? 'SALE FOR THE DAY' : 'TOTAL SALE FOR THE MONTH', srMoney(periodTotals.value), periodLabel, 'var(--sr-primary)', isDay ? 'fa-calendar-day' : 'fa-calendar-check')}
+        ${srStatCard('UNITS RELEASED', periodTotals.qty.toLocaleString('en-US'), isDay ? 'that day' : 'that month', 'var(--sr-success)', 'fa-boxes-stacked')}
+    </div>`;
 
     // Section A \u2014 by department
-    const rankedDept = srAggregateSalesByRange(srState.salesRows, start, end, row => row[SR_SALES_COL.DEPT] || '');
+    // Departments come from the "sales" sheet when its rows carry a department
+    // (items added up per department); otherwise fall back to the request log.
+    const deptFromSheet = srState.dailySalesRows.some(r => r.dept);
+    const rankedDept = deptFromSheet
+        ? srAggregateDailyByDept(srState.dailySalesRows, start, end)
+        : srAggregateSalesByRange(srState.salesRows, start, end, row => row[SR_SALES_COL.DEPT] || '');
     const topDept = rankedDept.slice(0, 10);
     const deptRowsHTML = topDept.map((item, i) => `<tr>
         <td class="c-fit c-center">${srRankBadge(i)}</td>
@@ -2386,7 +2616,7 @@ function srRenderTopRank() {
     </tr>`).join('');
 
     // Section B \u2014 by item
-    const rankedItem = srAggregateSalesBySkuRange(srState.salesRows, start, end);
+    const rankedItem = srAggregateDailyBySku(srState.dailySalesRows, start, end);
     const topItem = rankedItem.slice(0, 10);
     const itemRowsHTML = topItem.map((item, i) => `<tr>
         <td class="c-fit c-center">${srRankBadge(i)}</td>
@@ -2396,7 +2626,10 @@ function srRenderTopRank() {
         <td class="c-fit c-right c-money">${srMoney(item.value)}</td>
     </tr>`).join('');
 
-    return srNote(`Ranked by total amount (qty released \u00d7 SRP), month-to-date (${monthLabel}).`) +
+    const emptyMsg = 'No release records for this ' + (isDay ? 'date.' : 'month.');
+    return cards + srNote(`Ranked by total amount for ${periodLabel}. ${deptFromSheet
+        ? `Both tables add up the "${SR_DS_SHEET_NAME}" sheet's qty released and TOTAL AMOUNT \u2014 by department and by item.`
+        : `By item = the "${SR_DS_SHEET_NAME}" sheet's TOTAL AMOUNT. No department column was found in that sheet, so by department uses qty released \u00d7 SRP from the request log.`}`) + controls +
         `<div class="sr-top-rank-grid" style="display: grid; grid-template-columns: 1fr 1fr; gap: 0 20px; align-items: start;">
             <div style="display: block; min-width: 0;">
                 ${srHeading('BY DEPARTMENT', 'fa-building')}
@@ -2405,9 +2638,9 @@ function srRenderTopRank() {
                         <th class="c-fit c-center">RANK</th>
                         <th>DEPARTMENT</th>
                         <th class="c-fit c-center">TOTAL<br>RELEASED</th>
-                        <th class="c-fit c-right">TOTAL AMOUNT<br>(SRP)</th>
+                        <th class="c-fit c-right">${deptFromSheet ? 'TOTAL AMOUNT' : 'TOTAL AMOUNT<br>(SRP)'}</th>
                     </tr></thead>
-                    <tbody>${deptRowsHTML || `<tr><td colspan="4" class="sr-empty-cell">No release records yet this month.</td></tr>`}</tbody>
+                    <tbody>${deptRowsHTML || `<tr><td colspan="4" class="sr-empty-cell">${emptyMsg}</td></tr>`}</tbody>
                 </table>`)}
             </div>
             <div style="display: block; min-width: 0;">
@@ -2418,9 +2651,9 @@ function srRenderTopRank() {
                         <th class="c-fit">SKU CODE</th>
                         <th>ITEM DESCRIPTION</th>
                         <th class="c-fit c-center">TOTAL<br>RELEASED</th>
-                        <th class="c-fit c-right">TOTAL AMOUNT<br>(SRP)</th>
+                        <th class="c-fit c-right">TOTAL AMOUNT</th>
                     </tr></thead>
-                    <tbody>${itemRowsHTML || `<tr><td colspan="5" class="sr-empty-cell">No release records yet this month.</td></tr>`}</tbody>
+                    <tbody>${itemRowsHTML || `<tr><td colspan="5" class="sr-empty-cell">${emptyMsg}</td></tr>`}</tbody>
                 </table>`)}
             </div>
         </div>`;
@@ -2437,20 +2670,40 @@ function srRenderMonthCompare() {
 
     const sum = (rows) => rows.reduce((acc, r) => ({ qty: acc.qty + r.qty, value: acc.value + r.value }), { qty: 0, value: 0 });
 
-    const thisMonthByDept = srAggregateSalesByRange(srState.salesRows, thisMonthStart, now, row => row[SR_SALES_COL.DEPT] || '');
-    const lastMonthMtdByDept = srAggregateSalesByRange(srState.salesRows, lastMonthStart, lastMonthSameDay, row => row[SR_SALES_COL.DEPT] || '');
-    const lastMonthFullByDept = srAggregateSalesByRange(srState.salesRows, lastMonthStart, lastMonthEnd, row => row[SR_SALES_COL.DEPT] || '');
+    // Source: the "sales" sheet (TOTAL AMOUNT); only if it has no rows at all
+    // does this fall back to the old request log (qty released x SRP).
+    const dailyRows = srState.dailySalesRows;
+    const useSheet = dailyRows.length > 0;
+    const deptFromSheet = useSheet && dailyRows.some(r => r.dept);
+    const byDept = (from, to) => deptFromSheet
+        ? srAggregateDailyByDept(dailyRows, from, to)
+        : srAggregateSalesByRange(srState.salesRows, from, to, row => row[SR_SALES_COL.DEPT] || '');
+    const bySku = (from, to) => useSheet
+        ? srAggregateDailyBySku(dailyRows, from, to)
+        : srAggregateSalesBySkuRange(srState.salesRows, from, to);
+
+    const thisMonthByDept = byDept(thisMonthStart, now);
+    const lastMonthMtdByDept = byDept(lastMonthStart, lastMonthSameDay);
+    const lastMonthFullByDept = byDept(lastMonthStart, lastMonthEnd);
 
     const thisMonthTotal = sum(thisMonthByDept);
     const lastMonthMtdTotal = sum(lastMonthMtdByDept);
     const lastMonthFullTotal = sum(lastMonthFullByDept);
+    // No data at all for last month -> show this month on its own instead of
+    // comparing against zero (which would read as a fake +100%).
+    const hasLast = lastMonthFullTotal.qty > 0 || lastMonthFullTotal.value > 0;
+    const NO_LAST = '\u2014';
+    const lastMoney = v => hasLast ? srMoney(v) : NO_LAST;
+    const changePill = (cur, prev) => hasLast
+        ? srChangePill(cur, prev)
+        : `<span class="sr-pill" style="--c: var(--sr-muted);">${NO_LAST}</span>`;
 
     const headline = `
         <div class="sr-cards" style="margin-bottom: 10px;">
             ${srStatCard('THIS MONTH (MTD)', srMoney(thisMonthTotal.value), thisMonthTotal.qty + ' units', 'var(--sr-primary)', 'fa-calendar-day')}
-            ${srStatCard('LAST MONTH (SAME DAYS)', srMoney(lastMonthMtdTotal.value), lastMonthMtdTotal.qty + ' units', '#a78bfa', 'fa-calendar-week')}
-            ${srStatCard('CHANGE (MTD VS MTD)', srPct(thisMonthTotal.value, lastMonthMtdTotal.value), '', srPctColor(thisMonthTotal.value, lastMonthMtdTotal.value), 'fa-percent')}
-            ${srStatCard('LAST MONTH (FULL)', srMoney(lastMonthFullTotal.value), lastMonthFullTotal.qty + ' units', '#f472b6', 'fa-calendar-check')}
+            ${srStatCard('LAST MONTH (SAME DAYS)', lastMoney(lastMonthMtdTotal.value), hasLast ? lastMonthMtdTotal.qty + ' units' : 'no data for last month', '#a78bfa', 'fa-calendar-week')}
+            ${srStatCard('CHANGE (MTD VS MTD)', hasLast ? srPct(thisMonthTotal.value, lastMonthMtdTotal.value) : 'N/A', hasLast ? '' : 'nothing to compare yet', hasLast ? srPctColor(thisMonthTotal.value, lastMonthMtdTotal.value) : 'var(--sr-muted)', 'fa-percent')}
+            ${srStatCard('LAST MONTH (FULL)', lastMoney(lastMonthFullTotal.value), hasLast ? lastMonthFullTotal.qty + ' units' : 'no data for last month', '#f472b6', 'fa-calendar-check')}
         </div>`;
 
     const deptLastMap = {}; lastMonthMtdByDept.forEach(d => { deptLastMap[d.label] = d; });
@@ -2461,15 +2714,15 @@ function srRenderMonthCompare() {
         return `<tr>
             <td style="font-weight: 700;">${srEsc(dept)}</td>
             <td class="c-fit c-right c-money">${srMoney(cur.value)}</td>
-            <td class="c-fit c-right c-num" style="color: var(--sr-muted);">${srMoney(prev.value)}</td>
-            <td class="c-fit c-right">${srChangePill(cur.value, prev.value)}</td>
+            <td class="c-fit c-right c-num" style="color: var(--sr-muted);">${lastMoney(prev.value)}</td>
+            <td class="c-fit c-right">${changePill(cur.value, prev.value)}</td>
         </tr>`;
     }).join('');
 
     // Second category: same MTD-vs-MTD comparison, broken out per product
     // (SKU + description) instead of per department.
-    const thisMonthByProduct = srAggregateSalesBySkuRange(srState.salesRows, thisMonthStart, now);
-    const lastMonthMtdByProduct = srAggregateSalesBySkuRange(srState.salesRows, lastMonthStart, lastMonthSameDay);
+    const thisMonthByProduct = bySku(thisMonthStart, now);
+    const lastMonthMtdByProduct = bySku(lastMonthStart, lastMonthSameDay);
     const productLastMap = {}; lastMonthMtdByProduct.forEach(p => { productLastMap[p.sku + '\u0001' + p.desc] = p; });
     const thisProductMap = {}; thisMonthByProduct.forEach(p => { thisProductMap[p.sku + '\u0001' + p.desc] = p; });
     const allProductKeys = new Set([
@@ -2487,11 +2740,11 @@ function srRenderMonthCompare() {
         <td class="c-sku c-fit">${srEsc(p.sku)}</td>
         <td class="c-desc">${srEsc(p.desc)}</td>
         <td class="c-fit c-right c-money">${srMoney(p.cur.value)}</td>
-        <td class="c-fit c-right c-num" style="color: var(--sr-muted);">${srMoney(p.prev.value)}</td>
-        <td class="c-fit c-right">${srChangePill(p.cur.value, p.prev.value)}</td>
+        <td class="c-fit c-right c-num" style="color: var(--sr-muted);">${lastMoney(p.prev.value)}</td>
+        <td class="c-fit c-right">${changePill(p.cur.value, p.prev.value)}</td>
     </tr>`).join('');
 
-    return srNote('"MTD" = month-to-date, compared against the same number of days into last month so the two periods are apples-to-apples. Last month\'s full total is shown for reference.') +
+    return srNote((hasLast ? '"MTD" = month-to-date, compared against the same number of days into last month so the two periods are apples-to-apples. Last month\'s full total is shown for reference.' : 'No last-month data found yet, so this month is shown on its own \u2014 the comparison fills in automatically once last month has sales.') + (useSheet ? ` Source: the "${SR_DS_SHEET_NAME}" sheet\'s TOTAL AMOUNT.` : ' Source: request log (qty released \u00d7 SRP).')) +
         headline +
         `<div class="sr-top-rank-grid" style="display: grid; grid-template-columns: 1fr 1fr; gap: 0 20px; align-items: start;">
             <div style="display: block; min-width: 0;">
