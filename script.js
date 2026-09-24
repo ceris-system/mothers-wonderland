@@ -1449,11 +1449,23 @@ const SR_DS_DEPT_LIST_RANGE = 'DF1:DF'; // OPTIONAL department names (DF3:DF), o
 // match the department names listed in DF3:DF). Set a number to force it (C = 2).
 const SR_DS = { DEPT: null, DEPT_LIST_COL: 109 /* DF */, SKU: 0, DESC: 1, SRP: 4, FIRST_DATE_COL: 6 /* G */, LAST_DATE_COL: 106 /* DC */, FIRST_DATA_ROW: 2 /* row 3 */ };
 
+// TOP RANK (BY DEPARTMENT / BY PRODUCT) source: pre-ranked totals kept
+// directly on the "sales" sheet, read as-is instead of being aggregated
+// client-side from the daily date columns.
+//   BU3:BW = department rank  -> DEPARTMENT, TOTAL RELEASED, AMOUNT
+//   BY3:CB = product rank     -> SKU CODE, ITEM DESCRIPTION, TOTAL RELEASED, AMOUNT
+// Fetched together as one range (BX sits unused in between).
+const SR_TR_RANGE = 'BU3:CB';
+const SR_TR_COL = { DEPT: 0, DEPT_QTY: 1, DEPT_AMOUNT: 2, SKU: 4, DESC: 5, PROD_QTY: 6, PROD_AMOUNT: 7 };
+
 const srState = {
     inventoryRows: [],
     salesRows: [],
     dailySalesRows: [],   // flattened from the "sales" sheet (see srParseDailySalesSheet)
     dailySalesError: null,
+    topRankDeptRows: [],    // pre-ranked from "sales" BU:BW -> [{label, qty, value}]
+    topRankProductRows: [], // pre-ranked from "sales" BY:CB -> [{sku, desc, qty, value}]
+    topRankError: null,
     topRank: { mode: 'MONTH', day: '', month: '' },   // Top Rank period picker ('' = today / this month)
     historyMonths: [],          // saved monthly backups on the server, newest first: [{month, rows, days, units, amount, savedAt}]
     historyByMonth: {},         // 'YYYY-MM' -> loaded rows [{sku, desc, dept, srp, qty, amount, date}]
@@ -2123,7 +2135,7 @@ async function srRefreshAll(showSpinner) {
     if (statusEl && showSpinner) statusEl.textContent = 'Refreshing live data...';
 
     try {
-        await Promise.all([srFetchInventoryAll(), srFetchSalesAll(), srFetchDailySalesAll(), srFetchHistoryList()]);
+        await Promise.all([srFetchInventoryAll(), srFetchSalesAll(), srFetchDailySalesAll(), srFetchTopRankRanked(), srFetchHistoryList()]);
         await srSyncRecentHistory();
         srState.lastUpdated = new Date();
         if (statusEl) statusEl.textContent = `Live \u00b7 last updated ${srState.lastUpdated.toLocaleTimeString()} \u00b7 auto-refreshes every 60s`;
@@ -2293,6 +2305,39 @@ async function srFetchDailySalesAll() {
         console.error('[Summary Report] daily sales fetch failed:', e);
         srState.dailySalesRows = [];
         srState.dailySalesError = String(e && e.message || e);
+    }
+}
+
+// TOP RANK reads its own pre-ranked totals straight off the "sales" sheet
+// (BU:BW for department, BY:CB for product) rather than aggregating the
+// daily date columns, so it gets one flat range read of its own.
+async function srFetchTopRankRanked() {
+    try {
+        const url = `${window.API}?sheet=${encodeURIComponent(SR_DS_SHEET_NAME)}&range=${encodeURIComponent(SR_TR_RANGE)}&token=${encodeURIComponent(window.API_TOKEN)}`;
+        const json = await (await fetch(url)).json();
+        if (!json.success || !Array.isArray(json.values)) {
+            srState.topRankDeptRows = [];
+            srState.topRankProductRows = [];
+            srState.topRankError = json.error || json.message || `Could not read the "${SR_DS_SHEET_NAME}" sheet.`;
+            return;
+        }
+        const dept = [];
+        const product = [];
+        json.values.forEach(row => {
+            const deptName = String(row[SR_TR_COL.DEPT] ?? '').trim();
+            if (deptName) dept.push({ label: deptName, qty: srNum(row[SR_TR_COL.DEPT_QTY]), value: srNum(row[SR_TR_COL.DEPT_AMOUNT]) });
+            const sku = String(row[SR_TR_COL.SKU] ?? '').trim();
+            const desc = String(row[SR_TR_COL.DESC] ?? '').trim();
+            if (sku || desc) product.push({ sku, desc, qty: srNum(row[SR_TR_COL.PROD_QTY]), value: srNum(row[SR_TR_COL.PROD_AMOUNT]) });
+        });
+        srState.topRankDeptRows = dept.sort((a, b) => b.value - a.value);
+        srState.topRankProductRows = product.sort((a, b) => b.value - a.value);
+        srState.topRankError = null;
+    } catch (e) {
+        console.error('[Summary Report] top rank fetch failed:', e);
+        srState.topRankDeptRows = [];
+        srState.topRankProductRows = [];
+        srState.topRankError = String(e && e.message || e);
     }
 }
 
@@ -2600,14 +2645,9 @@ function srRenderTopRank() {
         ${srStatCard('UNITS RELEASED', periodTotals.qty.toLocaleString('en-US'), isDay ? 'that day' : 'that month', 'var(--sr-success)', 'fa-boxes-stacked')}
     </div>`;
 
-    // Section A \u2014 by department
-    // Departments come from the "sales" sheet when its rows carry a department
-    // (items added up per department); otherwise fall back to the request log.
-    const deptFromSheet = allRows.some(r => r.dept);
-    const rankedDept = deptFromSheet
-        ? srAggregateDailyByDept(allRows, start, end)
-        : srAggregateSalesByRange(srState.salesRows, start, end, row => row[SR_SALES_COL.DEPT] || '');
-    const topDept = rankedDept.slice(0, 10);
+    // Section A \u2014 by department: read straight off the sheet's own
+    // pre-ranked columns (BU:BW), already sorted by amount, top 10.
+    const topDept = srState.topRankDeptRows.slice(0, 10);
     const deptRowsHTML = topDept.map((item, i) => `<tr>
         <td class="c-fit c-center">${srRankBadge(i)}</td>
         <td style="font-weight: 700;">${srEsc(item.label)}</td>
@@ -2615,9 +2655,8 @@ function srRenderTopRank() {
         <td class="c-fit c-right c-money">${srMoney(item.value)}</td>
     </tr>`).join('');
 
-    // Section B \u2014 by item
-    const rankedItem = srAggregateDailyBySku(allRows, start, end);
-    const topItem = rankedItem.slice(0, 10);
+    // Section B \u2014 by product: same idea, from BY:CB.
+    const topItem = srState.topRankProductRows.slice(0, 10);
     const itemRowsHTML = topItem.map((item, i) => `<tr>
         <td class="c-fit c-center">${srRankBadge(i)}</td>
         <td class="c-sku c-fit">${srEsc(item.sku)}</td>
@@ -2626,10 +2665,11 @@ function srRenderTopRank() {
         <td class="c-fit c-right c-money">${srMoney(item.value)}</td>
     </tr>`).join('');
 
-    const emptyMsg = 'No release records for this ' + (isDay ? 'date.' : 'month.');
-    return srDailySalesErrorNote() + cards + srNote(`Ranked by total amount for ${periodLabel}. ${deptFromSheet
-        ? `Both tables add up the "${SR_DS_SHEET_NAME}" sheet's qty released and TOTAL AMOUNT \u2014 by department and by item.`
-        : `By item = the "${SR_DS_SHEET_NAME}" sheet's TOTAL AMOUNT. No department column was found in that sheet, so by department uses qty released \u00d7 SRP from the request log.`}`) + controls +
+    const emptyMsg = 'No rank data found on the sheet.';
+    const trErr = srState.topRankError
+        ? `<div class="sr-note" style="color: var(--sr-danger-light);"><i class="fa-solid fa-triangle-exclamation"></i> Couldn't read the rank columns: ${srEsc(srState.topRankError)}</div>`
+        : '';
+    return srDailySalesErrorNote() + trErr + cards + srNote(`Headline totals are for ${periodLabel}. The BY DEPARTMENT and BY PRODUCT tables below are the "${SR_DS_SHEET_NAME}" sheet's own ranked totals (columns BU\u2013BW and BY\u2013CB) \u2014 they aren't filtered by the VIEW picker.`) + controls +
         `<div class="sr-top-rank-grid" style="display: grid; grid-template-columns: 1fr 1fr; gap: 0 20px; align-items: start;">
             <div style="display: block; min-width: 0;">
                 ${srHeading('BY DEPARTMENT', 'fa-building')}
@@ -2638,13 +2678,13 @@ function srRenderTopRank() {
                         <th class="c-fit c-center">RANK</th>
                         <th>DEPARTMENT</th>
                         <th class="c-fit c-center">TOTAL<br>RELEASED</th>
-                        <th class="c-fit c-right">${deptFromSheet ? 'TOTAL AMOUNT' : 'TOTAL AMOUNT<br>(SRP)'}</th>
+                        <th class="c-fit c-right">TOTAL AMOUNT</th>
                     </tr></thead>
                     <tbody>${deptRowsHTML || `<tr><td colspan="4" class="sr-empty-cell">${emptyMsg}</td></tr>`}</tbody>
                 </table>`)}
             </div>
             <div style="display: block; min-width: 0;">
-                ${srHeading('BY ITEM', 'fa-tags', '#f472b6')}
+                ${srHeading('BY PRODUCT', 'fa-tags', '#f472b6')}
                 ${srTableWrap(`<table class="sr-table">
                     <thead><tr>
                         <th class="c-fit c-center">RANK</th>
