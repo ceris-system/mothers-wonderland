@@ -1381,17 +1381,1308 @@ function selectReportCategory(category) {
     }
 }
 
-// SUMMARY REPORT — placeholder entry point. The button and routing are
-// wired up; the actual summary content/layout isn't defined yet, so this
-// just opens a simple notice for now. Replace this body once the summary
-// report's data/design is decided. Admin-only (also gated in
-// selectReportCategory and in the button's own greyed-out state above).
+// ==========================================
+// SUMMARY REPORT DASHBOARD (admin only)
+// ==========================================
+// Data sources — there is no dedicated "SALES" sheet anywhere in this
+// system, so a few of the ten requested reports are built from the
+// closest real data actually available. Documenting the mapping here
+// so it doesn't get lost:
+//   - CRITICAL STOCK / OUT OF STOCK / STOCK AVAILABILITY read the same
+//     per-row stock-status formula column (col AB, index 27: "CRITICAL" /
+//     "LOW IN STOCK" / "OUT OF STOCK") that the existing per-department
+//     stockAvailabilityModal popup already uses — just aggregated across
+//     every department instead of one.
+//   - NEAR EXPIRATION / EXPIRED ITEMS (tab id EXPIRATION_MONITORING) read
+//     the same days-to-expiry formula column (col AA, index 26) the
+//     existing nearExpiryModal popup uses. NEAR EXPIRATION = 0–90 days
+//     out (not yet expired). EXPIRED ITEMS = days < 0 only, worst-first —
+//     split out from a former "everything" view that just duplicated
+//     NEAR EXPIRATION's 0-90 day window.
+//   - "SALES" has no source sheet, so these are built from the
+//     REQUEST_RELEASED sheet's QTY RELEASED + DATE columns (items
+//     released out to a department) — the only outbound-transaction log
+//     this system has. Peso value = QTY RELEASED x SRP. If "sales" was
+//     meant to mean something else (a POS export, a different sheet),
+//     swap the source in srFetchSalesAll() below.
+//   - AGING PER DESCRIPTION has no stock-received date anywhere in the
+//     sheet to age items against, so it's bucketed by days-until-
+//     expiration instead (the only time dimension available per line) —
+//     shelf-life-remaining, not true time-in-stock. Rewire this if/when
+//     a received-date column gets added.
+//   - "Real time" here means this dashboard polls the same endpoints the
+//     rest of the app uses every 60s while it's open, plus a manual
+//     refresh button — there's no push/websocket channel to be truly
+//     live over.
+//   - Look & layout (livelier restyle): every tab has its own accent
+//     colour (SR_TABS[].color). srRenderActiveTab() writes it onto
+//     #srContent as --sr-primary / --sr-primary-light / --sr-primary-rgb,
+//     so table headers, stat cards, SKU codes and hover states all pick it
+//     up without each renderer having to know about colour. All of the
+//     styling lives in the single <style id="srTabStyles"> block in
+//     openSummaryReportModal() rather than as inline styles.
+//   - Column sizing: the tables use AUTO layout. Number / qty / date
+//     columns are .c-fit (shrink to their own text) and DEPARTMENT / SKU
+//     CODE never wrap, so ITEM DESCRIPTION gets all the leftover width.
+//     Do not put table-layout: fixed or per-column ch widths back on
+//     these tables — that is what made the description columns too narrow.
+
+const SR_SALES_COL = { DEPT: 0, SKU: 1, DESC: 2, SRP: 8, QTY_RELEASED: 11, DATE: 20 };
+const SR_REFRESH_MS = 60000;
+
+// Real "SUMMARY" tab in the spreadsheet, fetched as-is via the generic
+// ?sheet=&range= GET endpoint in Code.gs (SUMMARY isn't in
+// BLOCKED_READ_SHEETS, so it's already reachable there \u2014 no backend
+// change needed). Range is wide/tall on purpose to capture whatever is
+// on the tab; trailing blank rows/columns are trimmed on the front end.
+const SR_SUMMARY_SHEET_NAME = 'SUMMARY';
+const SR_SUMMARY_RANGE = 'A1:BZ5000';
+
+const srState = {
+    inventoryRows: [],
+    salesRows: [],
+    summaryHeaders: [],
+    summaryRows: [],
+    lastUpdated: null,
+    activeTab: 'DAILY_SALES',
+    refreshTimer: null,
+    animTimer: null,
+    loading: false
+};
+
+// color = the tab's accent, light = the lighter end of its gradients,
+// rgb = the same accent as "r,g,b" so CSS can do rgba(var(--x-rgb), .2).
+const SR_TABS = [
+    { id: 'DAILY_SALES', label: 'DAILY SALES VS LAST WEEK', icon: 'fa-calendar-day', group: 'SALES', color: '#22d3ee', light: '#a5f3fc', rgb: '34,211,238' },
+    { id: 'TOP_RANK', label: 'TOP RANK', icon: 'fa-ranking-star', group: 'SALES', color: '#a78bfa', light: '#ddd6fe', rgb: '167,139,250' },
+    { id: 'MONTH_COMPARE', label: 'MONTH VS LAST MONTH', icon: 'fa-calendar-week', group: 'SALES', color: '#2dd4bf', light: '#99f6e4', rgb: '45,212,191' },
+    { id: 'CRITICAL_STOCK', label: 'CRITICAL STOCK', icon: 'fa-triangle-exclamation', group: 'STOCK HEALTH', color: '#ff5c8a', light: '#ffb3c9', rgb: '255,92,138' },
+    { id: 'OUT_OF_STOCK', label: 'OUT OF STOCK', icon: 'fa-ban', group: 'STOCK HEALTH', color: '#ff8a3d', light: '#ffc59a', rgb: '255,138,61' },
+    { id: 'STOCK_AVAILABILITY', label: 'STOCK AVAILABILITY', icon: 'fa-boxes-stacked', group: 'STOCK HEALTH', color: '#60a5fa', light: '#bfdbfe', rgb: '96,165,250' },
+    { id: 'NEAR_EXPIRATION', label: 'NEAR EXPIRATION', icon: 'fa-hourglass-half', group: 'EXPIRATION', color: '#fbbf24', light: '#fde68a', rgb: '251,191,36' },
+    { id: 'EXPIRATION_MONITORING', label: 'EXPIRED ITEMS', icon: 'fa-calendar-xmark', group: 'EXPIRATION', color: '#ef4444', light: '#fca5a5', rgb: '239,68,68' },
+    { id: 'AGING', label: 'AGING PER DESCRIPTION', icon: 'fa-layer-group', group: 'EXPIRATION', color: '#e879f9', light: '#f5d0fe', rgb: '232,121,249' },
+    { id: 'SUMMARY_SHEET', label: 'SUMMARY SHEET', icon: 'fa-table', group: 'SUMMARY', color: '#38bdf8', light: '#bae6fd', rgb: '56,189,248' }
+];
+
+const SR_GROUP_META = {
+    'SALES': { icon: 'fa-chart-line', color: '#22d3ee' },
+    'STOCK HEALTH': { icon: 'fa-heart-pulse', color: '#f472b6' },
+    'EXPIRATION': { icon: 'fa-hourglass-half', color: '#fbbf24' },
+    'SUMMARY': { icon: 'fa-table', color: '#38bdf8' }
+};
+
+// ---- small shared helpers ----
+
+function srEsc(v) { return typeof escapeHtml === 'function' ? escapeHtml(v) : String(v == null ? '' : v); }
+
+function srParseDate(val) {
+    if (val === undefined || val === null || String(val).trim() === '') return null;
+    const strVal = String(val).trim();
+    let year, month, day;
+    const isoMatch = strVal.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/);
+    if (isoMatch) {
+        year = Number(isoMatch[1]); month = Number(isoMatch[2]); day = Number(isoMatch[3]);
+    } else if (strVal.includes('/')) {
+        const parts = strVal.split('/');
+        if (parts.length === 3) { month = Number(parts[0]); day = Number(parts[1]); year = Number(parts[2]); }
+    } else if (/^\d+(\.\d+)?$/.test(strVal)) {
+        const serial = parseFloat(strVal);
+        const SHEETS_EPOCH_UTC = Date.UTC(1899, 11, 30);
+        const utcDate = new Date(SHEETS_EPOCH_UTC + Math.round(serial) * 86400000);
+        year = utcDate.getUTCFullYear(); month = utcDate.getUTCMonth() + 1; day = utcDate.getUTCDate();
+    }
+    let d = (year && month && day) ? new Date(year, month - 1, day) : new Date(strVal);
+    return (d && !isNaN(d.getTime())) ? d : null;
+}
+
+function srSameDay(a, b) {
+    return !!a && !!b && a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate();
+}
+
+function srNum(v) {
+    if (v === undefined || v === null || v === '') return 0;
+    const n = parseFloat(String(v).replace(/[^0-9.\-]/g, ''));
+    return isNaN(n) ? 0 : n;
+}
+
+function srMoney(n) {
+    return '\u20b1' + srNum(n).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+
+function srPct(current, previous) {
+    if (!previous) return current ? '+100%' : '0%';
+    const pct = ((current - previous) / Math.abs(previous)) * 100;
+    return (pct >= 0 ? '+' : '') + pct.toFixed(1) + '%';
+}
+
+function srPctColor(current, previous) {
+    if (current === previous) return 'var(--sr-muted)';
+    return current > previous ? 'var(--sr-success)' : 'var(--sr-danger-light)';
+}
+
+// Colored up/down pill for a period-over-period change.
+function srChangePill(current, previous) {
+    const arrow = current > previous ? '\u25b2' : current < previous ? '\u25bc' : '\u2022';
+    return `<span class="sr-pill" style="--c: ${srPctColor(current, previous)};">${arrow} ${srPct(current, previous)}</span>`;
+}
+
+// Gold / silver / bronze medals for the top 3, accent-colored badge after that.
+function srRankBadge(index) {
+    const cls = index === 0 ? ' r1' : index === 1 ? ' r2' : index === 2 ? ' r3' : '';
+    const crown = index === 0 ? '<i class="fa-solid fa-crown" style="color: inherit; font-size: 0.62rem; margin-right: 3px;"></i>' : '';
+    return `<span class="sr-rank${cls}">${crown}${index + 1}</span>`;
+}
+
+function srStatCard(label, value, sub, color, icon) {
+    const c = color || 'var(--sr-primary)';
+    return `<div class="sr-card" style="--c: ${c};">
+        ${icon ? `<span class="sr-card-icon"><i class="fa-solid ${icon}" style="color: inherit;"></i></span>` : ''}
+        <div class="sr-card-label">${srEsc(label)}</div>
+        <div class="sr-card-value">${value}</div>
+        ${sub ? `<div class="sr-card-sub">${sub}</div>` : ''}
+    </div>`;
+}
+
+function srDept(name) {
+    const n = srEsc(name || '');
+    return `<div class="sr-dept" title="${n}">${n}</div>`;
+}
+
+function srHeading(text, icon, color) {
+    return `<div class="sr-h4"${color ? ` style="--c: ${color};"` : ''}>
+        ${icon ? `<span class="sr-h4-chip"><i class="fa-solid ${icon}" style="color: inherit;"></i></span>` : ''}
+        <span>${text}</span>
+        <span class="sr-h4-line"></span>
+    </div>`;
+}
+
+function srEmpty(msg) {
+    return `<div class="sr-empty"><i class="fa-solid fa-circle-info" style="margin-right: 8px; color: var(--sr-primary);"></i>${srEsc(msg)}</div>`;
+}
+
+function srNote(text) {
+    return `<div class="sr-note"><i class="fa-solid fa-circle-info" style="color: var(--sr-primary); margin-top: 2px;"></i><span>${text}</span></div>`;
+}
+
+function srRankBarList(items, valueKey, formatVal) {
+    // items: [{label, qty, value}], sorted desc by valueKey already
+    if (!items.length) return srEmpty('No data for this period yet.');
+    const max = Math.max(...items.map(i => i[valueKey])) || 1;
+    return items.map((item, i) => {
+        const width = Math.max(2, (item[valueKey] / max) * 100);
+        return `<div style="margin-bottom: 12px;">
+            <div style="display: flex; justify-content: space-between; font-size: 0.78rem; margin-bottom: 4px;">
+                <span><span style="color: var(--sr-primary); font-weight: bold; margin-right: 8px;">#${i + 1}</span>${srEsc(item.label)}</span>
+                <span style="color: var(--sr-muted);">${formatVal(item)}</span>
+            </div>
+            <div style="background: rgba(255,255,255,0.06); border-radius: 4px; height: 8px; overflow: hidden;">
+                <div style="width: ${width}%; height: 100%; background: linear-gradient(90deg, var(--sr-primary), var(--sr-success));"></div>
+            </div>
+        </div>`;
+    }).join('');
+}
+
+// Big colored banner at the top of every tab: which report this is, and
+// when the data was last pulled. It also doubles as the title on the
+// printed page, which previously had no indication of which report it was.
+function srHero(tab) {
+    const stamp = srState.lastUpdated
+        ? `<span class="sr-live-pill"><span class="sr-live-dot"></span>LIVE \u00b7 ${srState.lastUpdated.toLocaleTimeString()}</span>`
+        : '';
+    return `<div class="sr-hero">
+        <div class="sr-hero-icon"><i class="fa-solid ${tab.icon}" style="color: inherit;"></i></div>
+        <div style="min-width: 0;">
+            <div class="sr-hero-kicker">${srEsc(tab.group)}</div>
+            <div class="sr-hero-title">${srEsc(tab.label)}</div>
+        </div>
+        ${stamp}
+    </div>`;
+}
+
+// ---- modal shell ----
+
 function openSummaryReportModal() {
     if (!getSessionScope().isAdmin) {
         showCustomAlert('Summary Report is restricted to admin accounts.');
         return;
     }
-    showCustomAlert('Summary Report is coming soon.');
+
+    let modal = document.getElementById('summaryReportModal');
+    if (!modal) {
+        // Group tabs under section headers (SALES / STOCK HEALTH /
+        // EXPIRATION) instead of one flat list. Each group and each tab
+        // carries its own accent colour (see SR_TABS / SR_GROUP_META);
+        // the colours are handed to the CSS through --gc / --tc custom
+        // properties so the stylesheet below stays colour-agnostic.
+        const groups = [];
+        SR_TABS.forEach(t => {
+            let g = groups.find(g => g.name === t.group);
+            if (!g) { g = { name: t.group, tabs: [] }; groups.push(g); }
+            g.tabs.push(t);
+        });
+
+        const groupsHTML = groups.map(g => {
+            const meta = SR_GROUP_META[g.name] || { icon: 'fa-circle', color: '#a78bfa' };
+            return `
+            <div class="sr-group" style="--gc: ${meta.color};">
+                <i class="fa-solid ${meta.icon}" style="color: var(--gc); font-size: 0.75rem;"></i>
+                <span class="sr-group-label">${g.name}</span>
+                <span class="sr-group-line"></span>
+            </div>
+            ${g.tabs.map(t => `
+            <button class="sr-tab-btn" data-tab="${t.id}" onclick="srSwitchTab('${t.id}')" style="--tc: ${t.color}; --tc-light: ${t.light}; --tc-rgb: ${t.rgb};">
+                <span class="sr-tab-icon"><i class="fa-solid ${t.icon}" style="color: inherit;"></i></span>
+                <span>${t.label}</span>
+            </button>`).join('')}`;
+        }).join('');
+
+        const modalHTML = `
+        <style id="srTabStyles">
+            #summaryReportModal {
+                /* Default (brand) palette — #srContent overrides the
+                   --sr-primary* trio per tab. */
+                --sr-primary: #a78bfa;
+                --sr-primary-light: #ddd6fe;
+                --sr-primary-rgb: 167,139,250;
+                --sr-success: #4ade80;
+                --sr-success-rgb: 74,222,128;
+                --sr-danger: #ff5c8a;
+                --sr-danger-rgb: 255,92,138;
+                --sr-danger-light: #ff8fab;
+                --sr-warning: #fbbf24;
+                --sr-warning-rgb: 251,191,36;
+                --sr-orange: #ff8a3d;
+                --sr-orange-rgb: 255,138,61;
+                --sr-cyan: #22d3ee;
+                --sr-muted: #c3bfe8;
+                --sr-muted-dim: #9d98c8;
+                --sr-ink: #f6f4ff;
+            }
+
+            /* ---------- panel shell ---------- */
+            #srPrintableArea {
+                position: relative;
+                width: 96vw; height: 92vh; box-sizing: border-box;
+                display: flex; flex-direction: column; overflow: hidden;
+                border: 2px solid transparent; border-radius: 18px;
+                color: var(--sr-ink); font-family: 'Roboto Mono', monospace;
+                background:
+                    radial-gradient(900px 480px at 0% 0%, rgba(255,79,216,0.20), transparent 60%) padding-box,
+                    radial-gradient(800px 520px at 100% 100%, rgba(34,211,238,0.18), transparent 60%) padding-box,
+                    radial-gradient(700px 420px at 100% 0%, rgba(251,191,36,0.10), transparent 60%) padding-box,
+                    linear-gradient(160deg, #1d1354 0%, #130b38 55%, #0e0829 100%) padding-box,
+                    linear-gradient(120deg, #ff4fd8, #a78bfa 35%, #22d3ee 70%, #fbbf24) border-box;
+                box-shadow: 0 0 60px rgba(255,79,216,0.22), 0 0 120px rgba(34,211,238,0.14), 0 30px 80px rgba(0,0,0,0.6);
+            }
+            .sr-header {
+                display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px;
+                padding: 16px 22px; border-bottom: 1px solid rgba(255,255,255,0.10);
+                background: linear-gradient(90deg, rgba(255,79,216,0.12), rgba(167,139,250,0.06) 50%, rgba(34,211,238,0.12));
+            }
+            .sr-logo {
+                width: 48px; height: 48px; border-radius: 15px; flex-shrink: 0;
+                display: flex; align-items: center; justify-content: center;
+                background: linear-gradient(135deg, #ff4fd8, #a78bfa 55%, #22d3ee);
+                box-shadow: 0 8px 22px rgba(255,79,216,0.45); color: #fff; font-size: 1.3rem;
+            }
+            .sr-title {
+                margin: 0; font-size: 1.3rem; letter-spacing: 2px; font-weight: 700;
+                background: linear-gradient(90deg, #ff7ae0, #fbbf24, #67e8f9, #ff7ae0); background-size: 250% 100%;
+                -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent;
+                animation: srShimmer 7s linear infinite;
+            }
+            .sr-btn {
+                padding: 10px 16px; border: 0; border-radius: 11px; color: #150a33;
+                font-family: inherit; font-size: 0.75rem; font-weight: 700; letter-spacing: 0.5px;
+                display: inline-flex; align-items: center; gap: 8px; cursor: pointer;
+                transition: transform 0.15s ease, filter 0.15s ease, box-shadow 0.15s ease;
+            }
+            .sr-btn:hover { transform: translateY(-2px); filter: brightness(1.1); }
+            .sr-btn:active { transform: translateY(0); }
+            .sr-btn-refresh { background: linear-gradient(135deg, #22d3ee, #60a5fa); box-shadow: 0 6px 18px rgba(34,211,238,0.35); }
+            .sr-btn-print { background: linear-gradient(135deg, #4ade80, #bef264); box-shadow: 0 6px 18px rgba(74,222,128,0.32); }
+
+            /* ---------- sidebar ---------- */
+            #srSidebar {
+                width: 280px; flex-shrink: 0; overflow-y: auto; padding: 18px 12px;
+                border-right: 1px solid rgba(255,255,255,0.10);
+                background: linear-gradient(180deg, rgba(0,0,0,0.30), rgba(0,0,0,0.12));
+                display: flex; flex-direction: column;
+            }
+            #srSidebar::-webkit-scrollbar, #srContent::-webkit-scrollbar { width: 8px; height: 8px; }
+            #srSidebar::-webkit-scrollbar-thumb, #srContent::-webkit-scrollbar-thumb { background: rgba(var(--sr-primary-rgb), 0.35); border-radius: 4px; }
+            .sr-group { margin: 26px 0 10px; padding: 0 10px; display: flex; align-items: center; gap: 8px; }
+            .sr-group:first-child { margin-top: 4px; }
+            .sr-group-label { font-size: 0.66rem; letter-spacing: 1.6px; font-weight: 700; color: var(--gc); }
+            .sr-group-line { flex: 1; height: 2px; border-radius: 2px; background: linear-gradient(90deg, var(--gc), transparent); opacity: 0.5; }
+            .sr-tab-btn {
+                display: flex; align-items: center; gap: 12px; width: 100%; text-align: left;
+                padding: 10px 12px; margin-bottom: 8px; background: transparent;
+                border: 1px solid transparent; border-radius: 13px; color: var(--sr-muted);
+                font-family: inherit; font-size: 0.7rem; font-weight: 700; letter-spacing: 0.5px; line-height: 1.4; cursor: pointer;
+                transition: background 0.15s ease, transform 0.15s ease, border-color 0.15s ease, color 0.15s ease, box-shadow 0.15s ease;
+            }
+            .sr-tab-icon {
+                display: flex; align-items: center; justify-content: center; flex-shrink: 0;
+                width: 32px; height: 32px; border-radius: 10px; font-size: 0.85rem;
+                background: rgba(var(--tc-rgb), 0.18); color: var(--tc);
+                transition: background 0.15s ease, color 0.15s ease, box-shadow 0.15s ease;
+            }
+            .sr-tab-btn:hover { background: rgba(var(--tc-rgb), 0.12); color: #fff; transform: translateX(3px); }
+            .sr-tab-btn[data-active="true"] {
+                background: linear-gradient(90deg, rgba(var(--tc-rgb), 0.32), rgba(var(--tc-rgb), 0.05));
+                border-color: rgba(var(--tc-rgb), 0.55); color: #fff;
+                box-shadow: 0 8px 22px -10px rgba(var(--tc-rgb), 0.9);
+            }
+            .sr-tab-btn[data-active="true"] .sr-tab-icon {
+                background: linear-gradient(135deg, var(--tc), var(--tc-light)); color: #150a33;
+                box-shadow: 0 0 16px rgba(var(--tc-rgb), 0.65);
+            }
+            .sr-side-foot {
+                margin-top: auto; padding: 16px 14px; border-radius: 14px;
+                background: linear-gradient(160deg, rgba(74,222,128,0.10), rgba(34,211,238,0.06));
+                border: 1px solid rgba(74,222,128,0.28);
+            }
+            .sr-legend-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+            .sr-live-dot {
+                width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0;
+                background: var(--sr-success); box-shadow: 0 0 8px var(--sr-success); animation: srPulse 1.8s ease-in-out infinite;
+            }
+
+            /* ---------- content area ---------- */
+            #srContent { flex: 1; min-width: 0; overflow-y: auto; padding: 0 26px 24px; }
+            #srContent.sr-anim > * { animation: srFadeUp 0.4s ease both; }
+            #srContent.sr-anim > *:nth-child(2) { animation-delay: 0.05s; }
+            #srContent.sr-anim > *:nth-child(3) { animation-delay: 0.10s; }
+            #srContent.sr-anim > *:nth-child(4) { animation-delay: 0.15s; }
+            #srContent.sr-anim > *:nth-child(n+5) { animation-delay: 0.20s; }
+            #srContent.sr-anim .sr-bar-fill { animation: srGrow 0.8s cubic-bezier(.2,.8,.2,1) both; }
+
+            .sr-hero {
+                display: flex; align-items: center; gap: 16px; flex-wrap: wrap; margin: 24px 0 20px; padding: 16px 20px;
+                border-radius: 18px; border: 1px solid rgba(var(--sr-primary-rgb), 0.45);
+                background: linear-gradient(120deg, rgba(var(--sr-primary-rgb), 0.32), rgba(var(--sr-primary-rgb), 0.07) 60%, transparent);
+            }
+            .sr-hero-icon {
+                width: 54px; height: 54px; border-radius: 16px; flex-shrink: 0; font-size: 1.4rem;
+                display: flex; align-items: center; justify-content: center; color: #150a33;
+                background: linear-gradient(135deg, var(--sr-primary), var(--sr-primary-light));
+                box-shadow: 0 8px 24px -6px rgba(var(--sr-primary-rgb), 0.9);
+            }
+            .sr-hero-kicker { font-size: 0.66rem; letter-spacing: 2px; font-weight: 700; color: var(--sr-primary-light); }
+            .sr-hero-title { font-size: 1.2rem; letter-spacing: 1.5px; font-weight: 700; color: #fff; margin-top: 2px; }
+            .sr-live-pill {
+                margin-left: auto; display: inline-flex; align-items: center; gap: 8px; padding: 6px 12px; border-radius: 999px;
+                font-size: 0.68rem; font-weight: 700; letter-spacing: 0.8px; color: var(--sr-success);
+                background: rgba(var(--sr-success-rgb), 0.12); border: 1px solid rgba(var(--sr-success-rgb), 0.4);
+            }
+
+            .sr-note {
+                display: flex; gap: 10px; align-items: flex-start; margin-bottom: 18px; padding: 11px 14px;
+                font-size: 0.72rem; line-height: 1.55; color: var(--sr-muted);
+                background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.10);
+                border-left: 4px solid var(--sr-primary); border-radius: 10px;
+            }
+            .sr-empty { text-align: center; padding: 50px 20px; color: var(--sr-muted-dim); font-size: 0.85rem; }
+
+            /* ---------- stat cards ---------- */
+            .sr-cards { display: flex; gap: 16px; flex-wrap: wrap; margin-bottom: 22px; }
+            .sr-card {
+                --c: var(--sr-primary);
+                position: relative; isolation: isolate; overflow: hidden; flex: 1; min-width: 160px;
+                padding: 14px 14px 12px; border-radius: 14px;
+                background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.10);
+                box-shadow: 0 14px 30px -16px var(--c);
+                transition: transform 0.18s ease, box-shadow 0.18s ease;
+            }
+            .sr-card::before { content: ''; position: absolute; inset: 0; z-index: -1; background: linear-gradient(135deg, var(--c), transparent 75%); opacity: 0.22; }
+            .sr-card::after { content: ''; position: absolute; left: 0; right: 0; top: 0; height: 4px; background: linear-gradient(90deg, var(--c), transparent); }
+            .sr-card:hover { transform: translateY(-3px); box-shadow: 0 18px 36px -14px var(--c); }
+            .sr-cards > .sr-card:only-child { flex: 0 1 340px; }
+            .sr-card-icon {
+                position: absolute; right: 12px; top: 12px; width: 28px; height: 28px; border-radius: 50%;
+                display: flex; align-items: center; justify-content: center; font-size: 0.75rem;
+                color: var(--c); background: rgba(255,255,255,0.09);
+            }
+            .sr-card-label { font-size: 0.62rem; font-weight: 700; letter-spacing: 1.1px; color: var(--sr-muted); margin-bottom: 6px; padding-right: 34px; }
+            .sr-card-value { font-size: 1.4rem; font-weight: 700; color: var(--c); }
+            .sr-card-sub { font-size: 0.64rem; color: var(--sr-muted-dim); margin-top: 3px; }
+
+            /* ---------- section headings ---------- */
+            .sr-h4 { --c: var(--sr-primary); display: flex; align-items: center; gap: 10px; margin: 26px 0 12px; font-size: 0.8rem; font-weight: 700; letter-spacing: 1.3px; color: #fff; }
+            .sr-h4-chip {
+                width: 28px; height: 28px; border-radius: 9px; flex-shrink: 0; font-size: 0.72rem; color: #150a33;
+                display: flex; align-items: center; justify-content: center;
+                background: linear-gradient(135deg, var(--c), var(--sr-primary-light));
+            }
+            .sr-h4-line { flex: 1; height: 2px; border-radius: 2px; background: linear-gradient(90deg, var(--c), transparent); opacity: 0.45; }
+
+            /* ---------- tables ----------
+               AUTO table layout on purpose. Columns marked .c-fit shrink to
+               the width of their own text (width:1% + nowrap is the standard
+               "shrink-to-fit column" trick), and DEPARTMENT / SKU CODE are
+               nowrap too, so the ITEM DESCRIPTION column (the only one left
+               free to flex) gets ALL the remaining width instead of the old
+               fixed layout's even split between every column. */
+            .sr-table { width: 100%; border-collapse: separate; border-spacing: 0; font-size: 0.8rem; margin-bottom: 8px; border-radius: 12px; box-shadow: 0 12px 30px -16px rgba(0,0,0,0.7); }
+            .sr-table thead th {
+                position: sticky; top: 0; z-index: 2; padding: 11px 12px; text-align: left; white-space: nowrap;
+                font-size: 0.72rem; font-weight: 700; letter-spacing: 0.8px; text-transform: uppercase; line-height: 1.25; color: #150a33;
+                background: linear-gradient(90deg, var(--sr-primary), var(--sr-primary-light));
+            }
+            .sr-table thead th:first-child { border-top-left-radius: 12px; }
+            .sr-table thead th:last-child { border-top-right-radius: 12px; }
+            .sr-table tbody td { padding: 10px 12px; vertical-align: middle; border-bottom: 1px solid rgba(255,255,255,0.07); }
+            .sr-table tbody tr:nth-child(even) td { background: rgba(255,255,255,0.035); }
+            .sr-table tbody tr:hover td { background: rgba(var(--sr-primary-rgb), 0.18); }
+            .sr-table tbody:last-child tr:last-child td { border-bottom: 0; }
+            .sr-table tbody:last-child tr:last-child td:first-child { border-bottom-left-radius: 12px; }
+            .sr-table tbody:last-child tr:last-child td:last-child { border-bottom-right-radius: 12px; }
+            .sr-table .c-fit { width: 1%; white-space: nowrap; }
+            .sr-table .c-nowrap { white-space: nowrap; }
+            .sr-table .c-tight { padding-left: 8px !important; padding-right: 8px !important; }
+            .sr-table .c-center { text-align: center; }
+            .sr-table .c-right { text-align: right; }
+            .sr-table .c-sku { white-space: nowrap; font-weight: 700; letter-spacing: 0.3px; color: var(--sr-primary-light); }
+            .sr-table .c-desc { min-width: 20ch; overflow-wrap: break-word; }
+            /* One line up to ~32 characters (the old fixed column cut names off at ~12),
+               then an ellipsis + hover tooltip, so one freak-long name can't push the
+               whole table into a horizontal scrollbar. */
+            .sr-dept { max-width: 32ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+            .sr-table .c-num { font-weight: 700; font-variant-numeric: tabular-nums; color: #fff; }
+            .sr-table .c-money { font-weight: 700; font-variant-numeric: tabular-nums; color: var(--sr-success); }
+            .sr-table td.sr-empty-cell { text-align: center; padding: 26px; color: var(--sr-muted-dim); white-space: normal; }
+            .sr-table tbody tr.sr-section td {
+                padding: 12px; font-size: 0.76rem; font-weight: 700; letter-spacing: 1.2px; color: var(--sc);
+                background: rgba(var(--sc-rgb), 0.18); border-top: 2px solid var(--sc); border-bottom: 1px solid rgba(var(--sc-rgb), 0.4);
+            }
+            .sr-table tbody tr.sr-section:hover td { background: rgba(var(--sc-rgb), 0.18); }
+            .sr-dot { display: inline-block; width: 9px; height: 9px; border-radius: 50%; margin-right: 6px; vertical-align: 1px; box-shadow: 0 0 0 2px rgba(21,10,51,0.35); }
+
+            /* ---------- small bits ---------- */
+            .sr-pill {
+                --c: var(--sr-primary);
+                position: relative; isolation: isolate; display: inline-flex; align-items: center; justify-content: center; gap: 5px;
+                padding: 3px 10px; border-radius: 999px; border: 1px solid var(--c); color: var(--c);
+                font-size: 0.74rem; font-weight: 700; font-variant-numeric: tabular-nums; white-space: nowrap;
+            }
+            .sr-pill::before { content: ''; position: absolute; inset: 0; z-index: -1; border-radius: inherit; background: var(--c); opacity: 0.16; }
+            .sr-count { display: inline-block; margin-left: 6px; padding: 1px 9px; border-radius: 999px; font-size: 0.7rem; color: #150a33; background: var(--sc); }
+            .sr-rank {
+                display: inline-flex; align-items: center; justify-content: center; min-width: 32px; height: 32px; padding: 0 7px; box-sizing: border-box;
+                border-radius: 999px; font-weight: 700; font-size: 0.82rem;
+                color: var(--sr-primary-light); background: rgba(var(--sr-primary-rgb), 0.22); border: 1px solid rgba(var(--sr-primary-rgb), 0.55);
+            }
+            .sr-rank.r1 { color: #3b2300; border-color: transparent; background: linear-gradient(135deg, #fde047, #f59e0b); box-shadow: 0 0 16px rgba(253,224,71,0.55); }
+            .sr-rank.r2 { color: #1f2937; border-color: transparent; background: linear-gradient(135deg, #f1f5f9, #94a3b8); box-shadow: 0 0 12px rgba(203,213,225,0.4); }
+            .sr-rank.r3 { color: #2b1200; border-color: transparent; background: linear-gradient(135deg, #fdba74, #c2410c); box-shadow: 0 0 12px rgba(251,146,60,0.4); }
+
+            .sr-bar-row { display: flex; align-items: center; gap: 12px; margin-bottom: 9px; }
+            .sr-bar-label { width: 100px; flex-shrink: 0; font-size: 0.72rem; color: var(--sr-muted); }
+            .sr-bar-track { flex: 1; height: 18px; border-radius: 9px; overflow: hidden; background: rgba(255,255,255,0.07); }
+            .sr-bar-fill { height: 100%; border-radius: 9px; transform-origin: left; background: linear-gradient(90deg, rgba(var(--sr-primary-rgb), 0.45), rgba(var(--sr-primary-rgb), 0.95)); }
+            .sr-bar-val { width: 170px; flex-shrink: 0; text-align: right; font-size: 0.75rem; color: #fff; }
+            .sr-bar-val span { color: var(--sr-muted-dim); }
+            .sr-bar-row.today .sr-bar-label { color: #ffd0f3; font-weight: 700; }
+            .sr-bar-row.today .sr-bar-fill { background: linear-gradient(90deg, #ff4fd8, #fbbf24); box-shadow: 0 0 14px rgba(255,79,216,0.6); }
+
+            @media (max-width: 1180px) {
+                #srSidebar { width: 220px; padding: 14px 8px; }
+                .sr-tab-btn { padding: 8px 8px; gap: 9px; font-size: 0.66rem; }
+                #srContent { padding-left: 16px; padding-right: 16px; }
+            }
+            .sr-top-rank-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0 20px; align-items: start; }
+            @media (max-width: 900px) {
+                .sr-top-rank-grid { grid-template-columns: 1fr !important; }
+            }
+            @keyframes srPulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.35; } }
+            @keyframes srShimmer { from { background-position: 0% 0; } to { background-position: 250% 0; } }
+            @keyframes srFadeUp { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: none; } }
+            @keyframes srGrow { from { transform: scaleX(0); } to { transform: scaleX(1); } }
+            @media (prefers-reduced-motion: reduce) {
+                #srPrintableArea *, #srPrintableArea *::before, #srPrintableArea *::after { animation: none !important; transition: none !important; }
+            }
+
+            /* On paper everything is plain black-on-white (printOnly's own
+               stylesheet does that) — these rules just stop the decorative
+               parts of the theme from fighting it:
+                 - gradient-clipped title text would print invisible;
+                 - printOnly forces white-space:normal + word-break:
+                   break-word on every cell, and with the on-screen width:1%
+                   "fit" columns that collapses SKU/qty columns to ONE
+                   character wide (SKU codes stacked vertically, dozens of
+                   extra pages) — so on paper the fit columns go back to
+                   auto width, words never split mid-word, and short
+                   SKU/number cells stay on one line;
+                 - pills, rank badges and dots are on-screen decoration;
+                   numbers print as plain text. */
+            @media print {
+                #srPrintableArea .sr-title { background: none !important; -webkit-text-fill-color: #000 !important; animation: none !important; }
+                #srPrintableArea .sr-card::before, #srPrintableArea .sr-card::after, #srPrintableArea .sr-pill::before { display: none !important; }
+                #srPrintableArea .sr-live-pill, #srPrintableArea .sr-hero-icon, #srPrintableArea .sr-card-icon, #srPrintableArea .sr-dot, #srPrintableArea .sr-h4-chip { display: none !important; }
+                #srPrintableArea .sr-table thead th { position: static !important; }
+                #srPrintableArea .sr-table th, #srPrintableArea .sr-table td { width: auto !important; word-break: normal !important; overflow-wrap: break-word !important; }
+                #srPrintableArea .sr-table td.c-sku, #srPrintableArea .sr-table td.c-num, #srPrintableArea .sr-table td.c-money { white-space: nowrap !important; }
+                #srPrintableArea .sr-table .c-desc { min-width: 0 !important; }
+                #srPrintableArea .sr-dept { white-space: normal !important; overflow: visible !important; text-overflow: clip !important; max-width: none !important; }
+                #srPrintableArea .sr-pill, #srPrintableArea .sr-rank { border: 0 !important; padding: 0 !important; min-width: 0 !important; height: auto !important; border-radius: 0 !important; }
+                #srPrintableArea .sr-pill, #srPrintableArea .sr-rank, #srPrintableArea .sr-count { font-size: inherit !important; }
+                #srPrintableArea .sr-count { padding: 0 !important; margin-left: 6px !important; }
+                #srPrintableArea .sr-hero { border: 0 !important; border-bottom: 2px solid #000 !important; border-radius: 0 !important; padding: 0 0 8px !important; }
+                #srPrintableArea .sr-note, #srPrintableArea .sr-card { border: 1px solid #000 !important; border-radius: 0 !important; }
+                #srPrintableArea .sr-table tbody tr.sr-section td { border-top: 2px solid #000 !important; }
+            }
+        </style>
+        <div id="summaryReportModal" style="display: none; position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; background: rgba(8, 4, 24, 0.84); -webkit-backdrop-filter: blur(8px); backdrop-filter: blur(8px); z-index: 9999; justify-content: center; align-items: center;">
+            <div id="srPrintableArea">
+
+                <div class="no-print sr-header">
+                    <div style="display: flex; align-items: center; gap: 14px;">
+                        <div class="sr-logo"><i class="fa-solid fa-chart-pie" style="color: inherit;"></i></div>
+                        <div>
+                            <h2 class="sr-title">SUMMARY REPORT</h2>
+                            <p id="srLastUpdated" style="margin: 5px 0 0; font-size: 0.7rem; color: var(--sr-muted);">Loading...</p>
+                        </div>
+                    </div>
+                    <div style="display: flex; align-items: center; gap: 10px;">
+                        <button class="sr-btn sr-btn-refresh" onclick="srRefreshAll(true)">
+                            <i class="fa-solid fa-rotate-right" id="srRefreshIcon" style="color: inherit;"></i> REFRESH
+                        </button>
+                        <button class="sr-btn sr-btn-print" onclick="printOnly('srPrintableArea')">
+                            <i class="fa-solid fa-print" style="color: inherit;"></i> PRINT
+                        </button>
+                        <button class="app-close-btn" onclick="closeSummaryReportModal()" title="Close"><i class="fa-solid fa-xmark"></i></button>
+                    </div>
+                </div>
+
+                <div style="flex: 1; display: flex; min-height: 0;">
+                    <div id="srSidebar" class="no-print">
+                        ${groupsHTML}
+                    </div>
+                    <div id="srContent"></div>
+                </div>
+            </div>
+        </div>`;
+        document.body.insertAdjacentHTML('beforeend', modalHTML);
+        modal = document.getElementById('summaryReportModal');
+    }
+
+    modal.style.display = 'flex';
+    srHighlightActiveTab();
+    srRefreshAll(true);
+
+    if (srState.refreshTimer) clearInterval(srState.refreshTimer);
+    srState.refreshTimer = setInterval(() => srRefreshAll(false), SR_REFRESH_MS);
+
+    if (typeof logButtonClick === 'function') logButtonClick('SUMMARY_REPORT_OPENED');
+}
+
+function closeSummaryReportModal() {
+    const modal = document.getElementById('summaryReportModal');
+    if (modal) modal.style.display = 'none';
+    if (srState.refreshTimer) { clearInterval(srState.refreshTimer); srState.refreshTimer = null; }
+}
+
+function srSwitchTab(tabId) {
+    srState.activeTab = tabId;
+    srHighlightActiveTab();
+    srRenderActiveTab(true);
+}
+
+function srHighlightActiveTab() {
+    document.querySelectorAll('.sr-tab-btn').forEach(btn => {
+        btn.setAttribute('data-active', btn.getAttribute('data-tab') === srState.activeTab ? 'true' : 'false');
+    });
+}
+
+// ---- data fetching ----
+
+async function srRefreshAll(showSpinner) {
+    if (srState.loading) return;
+    srState.loading = true;
+    const icon = document.getElementById('srRefreshIcon');
+    if (icon && showSpinner) icon.classList.add('fa-spin');
+
+    const statusEl = document.getElementById('srLastUpdated');
+    if (statusEl && showSpinner) statusEl.textContent = 'Refreshing live data...';
+
+    try {
+        await Promise.all([srFetchInventoryAll(), srFetchSalesAll(), srFetchSummarySheetAll()]);
+        srState.lastUpdated = new Date();
+        if (statusEl) statusEl.textContent = `Live \u00b7 last updated ${srState.lastUpdated.toLocaleTimeString()} \u00b7 auto-refreshes every 60s`;
+        srRenderActiveTab();
+    } catch (err) {
+        console.error('[Summary Report] refresh failed:', err);
+        if (statusEl) statusEl.textContent = 'Failed to refresh \u2014 showing last known data.';
+    } finally {
+        srState.loading = false;
+        if (icon) icon.classList.remove('fa-spin');
+    }
+}
+
+async function srFetchInventoryAll() {
+    await fetchAreaList();
+    const username = window.sessionUser || localStorage.getItem('activeUser') || '';
+    const depts = cachedAreaList.length ? cachedAreaList : [];
+
+    const results = await Promise.all(depts.map(async dept => {
+        try {
+            const url = `${window.API}?action=getScopedInventory&user=${encodeURIComponent(username)}&department=${encodeURIComponent(dept)}&token=${encodeURIComponent(window.API_TOKEN)}`;
+            const res = await fetch(url);
+            const json = await res.json();
+            if (!json.success) return [];
+            return (json.data || []).map(row => { row._dept = dept; return row; });
+        } catch (e) {
+            console.error(`[Summary Report] inventory fetch failed for ${dept}:`, e);
+            return [];
+        }
+    }));
+
+    srState.inventoryRows = results.flat();
+}
+
+async function srFetchSalesAll() {
+    const username = window.sessionUser || localStorage.getItem('activeUser') || '';
+    try {
+        const url = `${window.API}?action=getFilteredHistory&sheet=REQUEST&department=&user=${encodeURIComponent(username)}&token=${encodeURIComponent(window.API_TOKEN)}`;
+        const res = await fetch(url);
+        const json = await res.json();
+        srState.salesRows = (json.success && json.data) ? json.data : [];
+    } catch (e) {
+        console.error('[Summary Report] sales fetch failed:', e);
+        srState.salesRows = [];
+    }
+}
+
+// Reads the actual "SUMMARY" tab from the spreadsheet, as-is, via the
+// generic ?sheet=&range= GET endpoint in Code.gs. That endpoint isn't
+// gated behind a named action or a user/department scope check \u2014 it
+// just returns getDisplayValues() for whatever sheet+range is asked for
+// (SUMMARY isn't in BLOCKED_READ_SHEETS) \u2014 so this needs no backend
+// change. First non-blank row is treated as the header row; fully-blank
+// rows/trailing columns beyond the last populated one are trimmed so an
+// oversized fetch range doesn't leave hundreds of empty rows/columns.
+async function srFetchSummarySheetAll() {
+    try {
+        const url = `${window.API}?sheet=${encodeURIComponent(SR_SUMMARY_SHEET_NAME)}&range=${encodeURIComponent(SR_SUMMARY_RANGE)}&token=${encodeURIComponent(window.API_TOKEN)}`;
+        const res = await fetch(url);
+        const json = await res.json();
+        const raw = (json.success && Array.isArray(json.values)) ? json.values : [];
+
+        const isBlankRow = row => !row.some(cell => String(cell).trim() !== '');
+        const trimmed = raw.slice();
+        while (trimmed.length && isBlankRow(trimmed[trimmed.length - 1])) trimmed.pop();
+
+        let lastCol = 0;
+        trimmed.forEach(row => {
+            for (let c = row.length - 1; c >= 0; c--) {
+                if (String(row[c]).trim() !== '') { lastCol = Math.max(lastCol, c + 1); break; }
+            }
+        });
+
+        if (!trimmed.length || !lastCol) {
+            srState.summaryHeaders = [];
+            srState.summaryRows = [];
+            return;
+        }
+
+        const cropped = trimmed.map(row => row.slice(0, lastCol));
+        srState.summaryHeaders = cropped[0];
+        srState.summaryRows = cropped.slice(1);
+    } catch (e) {
+        console.error('[Summary Report] SUMMARY sheet fetch failed:', e);
+        srState.summaryHeaders = [];
+        srState.summaryRows = [];
+    }
+}
+
+// ---- render dispatch ----
+
+// animate = true only when the person actually switched tabs. The 60s
+// auto-refresh re-renders too, and replaying the entrance animation every
+// minute (and jumping back to the top of a long table) would be annoying.
+function srRenderActiveTab(animate) {
+    const content = document.getElementById('srContent');
+    if (!content) return;
+    const renderers = {
+        DAILY_SALES: srRenderDailySales,
+        TOP_RANK: srRenderTopRank,
+        MONTH_COMPARE: srRenderMonthCompare,
+        CRITICAL_STOCK: () => srRenderStockBucket('CRITICAL', 'CRITICAL STOCK', 'var(--sr-danger)', 'fa-triangle-exclamation'),
+        OUT_OF_STOCK: () => srRenderStockBucket('OUT OF STOCK', 'OUT OF STOCK', 'var(--sr-orange)', 'fa-ban'),
+        STOCK_AVAILABILITY: srRenderStockAvailability,
+        NEAR_EXPIRATION: srRenderNearExpiration,
+        EXPIRATION_MONITORING: srRenderExpirationMonitoring,
+        AGING: srRenderAging,
+        SUMMARY_SHEET: srRenderSummarySheet
+    };
+    const tab = SR_TABS.find(t => t.id === srState.activeTab) || SR_TABS[0];
+
+    // Re-point the shared accent variables at this tab's colour — every
+    // var(--sr-primary…) used by the renderers below follows automatically.
+    content.style.setProperty('--sr-primary', tab.color);
+    content.style.setProperty('--sr-primary-light', tab.light);
+    content.style.setProperty('--sr-primary-rgb', tab.rgb);
+
+    const fn = renderers[srState.activeTab];
+    content.innerHTML = srHero(tab) + (fn ? fn() : srEmpty('Unknown report.'));
+
+    if (animate) {
+        content.scrollTop = 0;
+        content.classList.remove('sr-anim');
+        void content.offsetWidth; // restart the CSS animation
+        content.classList.add('sr-anim');
+        if (srState.animTimer) clearTimeout(srState.animTimer);
+        srState.animTimer = setTimeout(() => content.classList.remove('sr-anim'), 1200);
+    }
+}
+
+// ---- 1. Daily sales vs last week ----
+
+function srRenderDailySales() {
+    const rows = srState.salesRows;
+    const today = new Date(); today.setHours(0, 0, 0, 0);
+    const lastWeek = new Date(today); lastWeek.setDate(lastWeek.getDate() - 7);
+
+    const byDay = {}; // 'YYYY-M-D' -> {qty, value}
+    rows.forEach(row => {
+        const d = srParseDate(row[SR_SALES_COL.DATE]);
+        if (!d) return;
+        const key = `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`;
+        const qty = srNum(row[SR_SALES_COL.QTY_RELEASED]);
+        const value = qty * srNum(row[SR_SALES_COL.SRP]);
+        if (!byDay[key]) byDay[key] = { qty: 0, value: 0 };
+        byDay[key].qty += qty;
+        byDay[key].value += value;
+    });
+
+    const dayTotal = (d) => byDay[`${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`] || { qty: 0, value: 0 };
+    const todayTotal = dayTotal(today);
+    const lastWeekTotal = dayTotal(lastWeek);
+    const { start: mtdStart } = srCurrentMonthRange();
+    const mtdTotal = rows.reduce((acc, row) => {
+        const d = srParseDate(row[SR_SALES_COL.DATE]);
+        if (!d || d < mtdStart || d > today) return acc;
+        const qty = srNum(row[SR_SALES_COL.QTY_RELEASED]);
+        acc.qty += qty; acc.value += qty * srNum(row[SR_SALES_COL.SRP]);
+        return acc;
+    }, { qty: 0, value: 0 });
+
+    const headline = `
+        <div class="sr-cards">
+            ${srStatCard('TODAY (' + today.toLocaleDateString('en-US', { weekday: 'long', month: 'short', day: 'numeric' }) + ')', srMoney(todayTotal.value), todayTotal.qty + ' units released', 'var(--sr-primary)', 'fa-sun')}
+            ${srStatCard('SAME DAY LAST WEEK', srMoney(lastWeekTotal.value), lastWeekTotal.qty + ' units released', '#a78bfa', 'fa-calendar-week')}
+            ${srStatCard('CHANGE VS LAST WEEK', srPct(todayTotal.value, lastWeekTotal.value), 'by peso value', srPctColor(todayTotal.value, lastWeekTotal.value), 'fa-percent')}
+            ${srStatCard('MONTH-TO-DATE', srMoney(mtdTotal.value), mtdTotal.qty + ' units released', 'var(--sr-success)', 'fa-calendar-check')}
+        </div>`;
+
+    // 7-day trend, drawn as bars (not a plain table) so the shape of the
+    // last week is visible at a glance, today pinned/highlighted.
+    const days = [];
+    for (let i = 6; i >= 0; i--) {
+        const d = new Date(today); d.setDate(d.getDate() - i);
+        days.push(d);
+    }
+    const dayValues = days.map(dayTotal);
+    const maxDayValue = Math.max(...dayValues.map(t => t.value), 1);
+    const trendHTML = days.map((d, i) => {
+        const t = dayValues[i];
+        const isToday = srSameDay(d, today);
+        const width = Math.max(t.value > 0 ? 2 : 0, (t.value / maxDayValue) * 100);
+        return `<div class="sr-bar-row${isToday ? ' today' : ''}">
+            <div class="sr-bar-label">${d.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })}</div>
+            <div class="sr-bar-track"><div class="sr-bar-fill" style="width: ${width}%;"></div></div>
+            <div class="sr-bar-val">${srMoney(t.value)} <span>(${t.qty}u)</span></div>
+        </div>`;
+    }).join('');
+
+    // Per-SKU breakdown for today, so this tells you not just how much
+    // moved but exactly what moved.
+    const skuToday = {};
+    rows.forEach(row => {
+        const d = srParseDate(row[SR_SALES_COL.DATE]);
+        if (!d || !srSameDay(d, today)) return;
+        const sku = row[SR_SALES_COL.SKU] || '';
+        const desc = row[SR_SALES_COL.DESC] || '';
+        if (!sku && !desc) return;
+        const key = sku + '\u0001' + desc;
+        const qty = srNum(row[SR_SALES_COL.QTY_RELEASED]);
+        const value = qty * srNum(row[SR_SALES_COL.SRP]);
+        if (!skuToday[key]) skuToday[key] = { sku, desc, qty: 0, value: 0 };
+        skuToday[key].qty += qty;
+        skuToday[key].value += value;
+    });
+    const skuList = Object.values(skuToday).sort((a, b) => b.value - a.value);
+    const CAP = 50;
+    const skuShown = skuList.slice(0, CAP);
+
+    const skuRowsHTML = skuShown.map(item => `<tr>
+        <td class="c-sku c-fit">${srEsc(item.sku)}</td>
+        <td class="c-desc">${srEsc(item.desc)}</td>
+        <td class="c-fit c-center c-num">${item.qty}</td>
+        <td class="c-fit c-right c-money">${srMoney(item.value)}</td>
+    </tr>`).join('');
+
+    return srNote('"Sales" = quantity released out to departments (REQUEST_RELEASED sheet) \u00d7 SRP \u2014 this system has no separate point-of-sale log.') + headline +
+        srHeading('LAST 7 DAYS', 'fa-chart-line') +
+        `<div style="margin-bottom: 8px;">${trendHTML}</div>` +
+        srHeading('SALES PER SKU \u2014 TODAY', 'fa-tags', '#f472b6') +
+        `<table class="sr-table">
+            <thead><tr>
+                <th class="c-fit">SKU CODE</th>
+                <th>ITEM DESCRIPTION</th>
+                <th class="c-fit c-center">QTY<br>RELEASED</th>
+                <th class="c-fit c-right">VALUE</th>
+            </tr></thead>
+            <tbody>${skuRowsHTML || `<tr><td colspan="4" class="sr-empty-cell">No releases logged today yet.</td></tr>`}</tbody>
+        </table>${skuList.length > CAP ? `<div style="font-size: 0.68rem; color: var(--sr-muted-dim); margin-top: 8px;">Showing the top ${CAP} of ${skuList.length} SKUs released today.</div>` : ''}`;
+}
+
+// ---- shared: aggregate sales rows within a date range, grouped by a key ----
+
+function srAggregateSalesByRange(rows, start, end, keyFn) {
+    const groups = {};
+    rows.forEach(row => {
+        const d = srParseDate(row[SR_SALES_COL.DATE]);
+        if (!d || d < start || d > end) return;
+        const key = keyFn(row);
+        if (!key) return;
+        const qty = srNum(row[SR_SALES_COL.QTY_RELEASED]);
+        const value = qty * srNum(row[SR_SALES_COL.SRP]);
+        if (!groups[key]) groups[key] = { label: key, qty: 0, value: 0 };
+        groups[key].qty += qty;
+        groups[key].value += value;
+    });
+    return Object.values(groups).sort((a, b) => b.value - a.value);
+}
+
+// Same idea, but keyed on SKU + description together (rather than a single
+// string) so callers get both fields back per row without splitting a
+// composite key apart again.
+function srAggregateSalesBySkuRange(rows, start, end) {
+    const groups = {};
+    rows.forEach(row => {
+        const d = srParseDate(row[SR_SALES_COL.DATE]);
+        if (!d || d < start || d > end) return;
+        const sku = row[SR_SALES_COL.SKU] || '';
+        const desc = row[SR_SALES_COL.DESC] || '';
+        if (!sku && !desc) return;
+        const key = sku + '\u0001' + desc;
+        const qty = srNum(row[SR_SALES_COL.QTY_RELEASED]);
+        const value = qty * srNum(row[SR_SALES_COL.SRP]);
+        if (!groups[key]) groups[key] = { sku, desc, qty: 0, value: 0 };
+        groups[key].qty += qty;
+        groups[key].value += value;
+    });
+    return Object.values(groups).sort((a, b) => b.value - a.value);
+}
+
+function srCurrentMonthRange() {
+    const now = new Date(); now.setHours(0, 0, 0, 0);
+    const start = new Date(now.getFullYear(), now.getMonth(), 1);
+    return { start, end: now };
+}
+
+// ---- 2/3. Top rank \u2014 department (A) and item (B), one tab, two sections ----
+
+function srRenderTopRank() {
+    const { start, end } = srCurrentMonthRange();
+    const monthLabel = start.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
+
+    // Section A \u2014 by department
+    const rankedDept = srAggregateSalesByRange(srState.salesRows, start, end, row => row[SR_SALES_COL.DEPT] || '');
+    const topDept = rankedDept.slice(0, 10);
+    const deptRowsHTML = topDept.map((item, i) => `<tr>
+        <td class="c-fit c-center">${srRankBadge(i)}</td>
+        <td style="font-weight: 700;">${srEsc(item.label)}</td>
+        <td class="c-fit c-center c-num">${item.qty}</td>
+        <td class="c-fit c-right c-money">${srMoney(item.value)}</td>
+    </tr>`).join('');
+
+    // Section B \u2014 by item
+    const rankedItem = srAggregateSalesBySkuRange(srState.salesRows, start, end);
+    const topItem = rankedItem.slice(0, 10);
+    const itemRowsHTML = topItem.map((item, i) => `<tr>
+        <td class="c-fit c-center">${srRankBadge(i)}</td>
+        <td class="c-sku c-fit">${srEsc(item.sku)}</td>
+        <td class="c-desc">${srEsc(item.desc)}</td>
+        <td class="c-fit c-center c-num">${item.qty}</td>
+        <td class="c-fit c-right c-money">${srMoney(item.value)}</td>
+    </tr>`).join('');
+
+    return srNote(`Ranked by total amount (qty released \u00d7 SRP), month-to-date (${monthLabel}).`) +
+        `<div class="sr-top-rank-grid" style="display: grid; grid-template-columns: 1fr 1fr; gap: 0 20px; align-items: start;">
+            <div style="display: block; min-width: 0;">
+                ${srHeading('BY DEPARTMENT', 'fa-building')}
+                <table class="sr-table">
+                    <thead><tr>
+                        <th class="c-fit c-center">RANK</th>
+                        <th>DEPARTMENT</th>
+                        <th class="c-fit c-center">TOTAL<br>RELEASED</th>
+                        <th class="c-fit c-right">TOTAL AMOUNT<br>(SRP)</th>
+                    </tr></thead>
+                    <tbody>${deptRowsHTML || `<tr><td colspan="4" class="sr-empty-cell">No release records yet this month.</td></tr>`}</tbody>
+                </table>
+            </div>
+            <div style="display: block; min-width: 0;">
+                ${srHeading('BY DESCRIPTION', 'fa-tags', '#f472b6')}
+                <table class="sr-table">
+                    <thead><tr>
+                        <th class="c-fit c-center">RANK</th>
+                        <th class="c-fit">SKU CODE</th>
+                        <th>ITEM DESCRIPTION</th>
+                        <th class="c-fit c-center">TOTAL<br>RELEASED</th>
+                        <th class="c-fit c-right">TOTAL AMOUNT<br>(SRP)</th>
+                    </tr></thead>
+                    <tbody>${itemRowsHTML || `<tr><td colspan="5" class="sr-empty-cell">No release records yet this month.</td></tr>`}</tbody>
+                </table>
+            </div>
+        </div>`;
+}
+
+// ---- 4. Month vs last month ----
+
+function srRenderMonthCompare() {
+    const now = new Date(); now.setHours(0, 0, 0, 0);
+    const thisMonthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+    const lastMonthStart = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+    const lastMonthSameDay = new Date(now.getFullYear(), now.getMonth() - 1, now.getDate());
+    const lastMonthEnd = new Date(now.getFullYear(), now.getMonth(), 0);
+
+    const sum = (rows) => rows.reduce((acc, r) => ({ qty: acc.qty + r.qty, value: acc.value + r.value }), { qty: 0, value: 0 });
+
+    const thisMonthByDept = srAggregateSalesByRange(srState.salesRows, thisMonthStart, now, row => row[SR_SALES_COL.DEPT] || '');
+    const lastMonthMtdByDept = srAggregateSalesByRange(srState.salesRows, lastMonthStart, lastMonthSameDay, row => row[SR_SALES_COL.DEPT] || '');
+    const lastMonthFullByDept = srAggregateSalesByRange(srState.salesRows, lastMonthStart, lastMonthEnd, row => row[SR_SALES_COL.DEPT] || '');
+
+    const thisMonthTotal = sum(thisMonthByDept);
+    const lastMonthMtdTotal = sum(lastMonthMtdByDept);
+    const lastMonthFullTotal = sum(lastMonthFullByDept);
+
+    const headline = `
+        <div class="sr-cards" style="margin-bottom: 10px;">
+            ${srStatCard('THIS MONTH (MTD)', srMoney(thisMonthTotal.value), thisMonthTotal.qty + ' units', 'var(--sr-primary)', 'fa-calendar-day')}
+            ${srStatCard('LAST MONTH (SAME DAYS)', srMoney(lastMonthMtdTotal.value), lastMonthMtdTotal.qty + ' units', '#a78bfa', 'fa-calendar-week')}
+            ${srStatCard('CHANGE (MTD VS MTD)', srPct(thisMonthTotal.value, lastMonthMtdTotal.value), '', srPctColor(thisMonthTotal.value, lastMonthMtdTotal.value), 'fa-percent')}
+            ${srStatCard('LAST MONTH (FULL)', srMoney(lastMonthFullTotal.value), lastMonthFullTotal.qty + ' units', '#f472b6', 'fa-calendar-check')}
+        </div>`;
+
+    const deptLastMap = {}; lastMonthMtdByDept.forEach(d => { deptLastMap[d.label] = d; });
+    const allDepts = new Set([...thisMonthByDept.map(d => d.label), ...lastMonthMtdByDept.map(d => d.label)]);
+    const deptRowsHTML = Array.from(allDepts).sort().map(dept => {
+        const cur = thisMonthByDept.find(d => d.label === dept) || { qty: 0, value: 0 };
+        const prev = deptLastMap[dept] || { qty: 0, value: 0 };
+        return `<tr>
+            <td style="font-weight: 700;">${srEsc(dept)}</td>
+            <td class="c-fit c-right c-money">${srMoney(cur.value)}</td>
+            <td class="c-fit c-right c-num" style="color: var(--sr-muted);">${srMoney(prev.value)}</td>
+            <td class="c-fit c-right">${srChangePill(cur.value, prev.value)}</td>
+        </tr>`;
+    }).join('');
+
+    // Second category: same MTD-vs-MTD comparison, broken out per product
+    // (SKU + description) instead of per department.
+    const thisMonthByProduct = srAggregateSalesBySkuRange(srState.salesRows, thisMonthStart, now);
+    const lastMonthMtdByProduct = srAggregateSalesBySkuRange(srState.salesRows, lastMonthStart, lastMonthSameDay);
+    const productLastMap = {}; lastMonthMtdByProduct.forEach(p => { productLastMap[p.sku + '\u0001' + p.desc] = p; });
+    const thisProductMap = {}; thisMonthByProduct.forEach(p => { thisProductMap[p.sku + '\u0001' + p.desc] = p; });
+    const allProductKeys = new Set([
+        ...thisMonthByProduct.map(p => p.sku + '\u0001' + p.desc),
+        ...lastMonthMtdByProduct.map(p => p.sku + '\u0001' + p.desc)
+    ]);
+    const productRows = Array.from(allProductKeys).map(key => {
+        const [sku, desc] = key.split('\u0001');
+        const cur = thisProductMap[key] || { qty: 0, value: 0 };
+        const prev = productLastMap[key] || { qty: 0, value: 0 };
+        return { sku, desc, cur, prev };
+    }).sort((a, b) => b.cur.value - a.cur.value);
+
+    const productRowsHTML = productRows.map(p => `<tr>
+        <td class="c-sku c-fit">${srEsc(p.sku)}</td>
+        <td class="c-desc">${srEsc(p.desc)}</td>
+        <td class="c-fit c-right c-money">${srMoney(p.cur.value)}</td>
+        <td class="c-fit c-right c-num" style="color: var(--sr-muted);">${srMoney(p.prev.value)}</td>
+        <td class="c-fit c-right">${srChangePill(p.cur.value, p.prev.value)}</td>
+    </tr>`).join('');
+
+    return srNote('"MTD" = month-to-date, compared against the same number of days into last month so the two periods are apples-to-apples. Last month\'s full total is shown for reference.') +
+        headline +
+        `<div class="sr-top-rank-grid" style="display: grid; grid-template-columns: 1fr 1fr; gap: 0 20px; align-items: start;">
+            <div style="display: block; min-width: 0;">
+                ${srHeading('BY DEPARTMENT', 'fa-building')}
+                <table class="sr-table">
+                    <thead><tr>
+                        <th>DEPARTMENT</th>
+                        <th class="c-fit c-right">THIS MONTH</th>
+                        <th class="c-fit c-right">LAST MONTH</th>
+                        <th class="c-fit c-right">CHANGE</th>
+                    </tr></thead>
+                    <tbody>${deptRowsHTML || `<tr><td colspan="4" class="sr-empty-cell">No release records yet.</td></tr>`}</tbody>
+                </table>
+            </div>
+            <div style="display: block; min-width: 0;">
+                ${srHeading('BY DESCRIPTION', 'fa-tags', '#f472b6')}
+                <table class="sr-table">
+                    <thead><tr>
+                        <th class="c-fit">SKU CODE</th>
+                        <th>ITEM DESCRIPTION</th>
+                        <th class="c-fit c-right">THIS MONTH</th>
+                        <th class="c-fit c-right">LAST MONTH</th>
+                        <th class="c-fit c-right">CHANGE</th>
+                    </tr></thead>
+                    <tbody>${productRowsHTML || `<tr><td colspan="5" class="sr-empty-cell">No release records yet.</td></tr>`}</tbody>
+                </table>
+            </div>
+        </div>`;
+}
+
+// ---- 5/6. Critical stock & out of stock ----
+
+function srRenderStockBucket(status, title, color, icon) {
+    const items = srState.inventoryRows.filter(row => {
+        const s = row[27] ? String(row[27]).trim().toUpperCase() : '';
+        return s === status;
+    });
+
+    const rowsHTML = items.map(row => `<tr>
+        <td class="c-fit">${srDept(row._dept)}</td>
+        <td class="c-sku c-fit">${srEsc(row[1] || '')}</td>
+        <td class="c-desc">${srEsc(row[2] || '')}</td>
+        <td class="c-fit c-center c-num">${srEsc(row[20] !== undefined ? row[20] : 0)}</td>
+        <td class="c-fit c-center">${srEsc(formatExpirationDate(row[15]) || row[15] || '-')}</td>
+    </tr>`).join('');
+
+    return `<div class="sr-cards">${srStatCard(title + ' ITEMS', items.length, 'across all departments', color, icon)}</div>
+        <table class="sr-table">
+            <thead><tr>
+                <th class="c-fit">DEPARTMENT</th>
+                <th class="c-fit">SKU CODE</th>
+                <th>ITEM DESCRIPTION</th>
+                <th class="c-fit c-center">TOTAL QTY<br>ONHAND</th>
+                <th class="c-fit c-center">LAST DATE<br>RECEIVED</th>
+            </tr></thead>
+            <tbody>${rowsHTML || `<tr><td colspan="5" class="sr-empty-cell">No items currently ${title.toLowerCase()}.</td></tr>`}</tbody>
+        </table>`;
+}
+
+// ---- 7. Stock availability ----
+
+function srRenderStockAvailability() {
+    const buckets = { critical: [], low: [], out: [], ok: 0 };
+    srState.inventoryRows.forEach(row => {
+        const s = row[27] ? String(row[27]).trim().toUpperCase() : '';
+        if (s === 'CRITICAL') buckets.critical.push(row);
+        else if (s === 'LOW IN STOCK') buckets.low.push(row);
+        else if (s === 'OUT OF STOCK') buckets.out.push(row);
+        else buckets.ok++;
+    });
+
+    const cards = `<div class="sr-cards">
+        ${srStatCard('CRITICAL', buckets.critical.length, '', 'var(--sr-danger)', 'fa-triangle-exclamation')}
+        ${srStatCard('LOW IN STOCK', buckets.low.length, '', 'var(--sr-warning)', 'fa-battery-quarter')}
+        ${srStatCard('OUT OF STOCK', buckets.out.length, '', 'var(--sr-orange)', 'fa-ban')}
+        ${srStatCard('HEALTHY STOCK', buckets.ok, '', 'var(--sr-success)', 'fa-circle-check')}
+    </div>`;
+
+    // ONE table with a colored banner row per bucket (instead of three
+    // separate tables), so DEPARTMENT / SKU CODE / ITEM DESCRIPTION / QTY
+    // line up at exactly the same width in every section — auto-layout
+    // columns are sized per table, so separate tables would each fit their
+    // own content and drift out of alignment.
+    const section = (label, color, rgb, icon, items) => `
+        <tbody>
+            <tr class="sr-section" style="--sc: ${color}; --sc-rgb: var(${rgb});">
+                <td colspan="4"><i class="fa-solid ${icon}" style="color: inherit; margin-right: 8px;"></i>${label}<span class="sr-count">${items.length}</span></td>
+            </tr>
+            ${items.map(row => `<tr>
+                <td class="c-fit">${srDept(row._dept)}</td>
+                <td class="c-sku c-fit">${srEsc(row[1] || '')}</td>
+                <td class="c-desc">${srEsc(row[2] || '')}</td>
+                <td class="c-fit c-center c-num">${srEsc(row[20] !== undefined ? row[20] : 0)}</td>
+            </tr>`).join('') || `<tr><td colspan="4" class="sr-empty-cell">None.</td></tr>`}
+        </tbody>`;
+
+    return cards +
+        `<table class="sr-table">
+            <thead><tr>
+                <th class="c-fit">DEPARTMENT</th>
+                <th class="c-fit">SKU CODE</th>
+                <th>ITEM DESCRIPTION</th>
+                <th class="c-fit c-center">QTY</th>
+            </tr></thead>
+            ${section('CRITICAL', 'var(--sr-danger)', '--sr-danger-rgb', 'fa-triangle-exclamation', buckets.critical)}
+            ${section('LOW IN STOCK', 'var(--sr-warning)', '--sr-warning-rgb', 'fa-battery-quarter', buckets.low)}
+            ${section('OUT OF STOCK', 'var(--sr-orange)', '--sr-orange-rgb', 'fa-ban', buckets.out)}
+        </table>`;
+}
+
+// ---- 8/9. Expiration-based reports ----
+
+function srExpirationRows() {
+    // Returns every inventory row that has a usable days-to-expiry value,
+    // annotated with a parsed `days` number.
+    return srState.inventoryRows
+        .map(row => {
+            const raw = row[26];
+            if (raw === undefined || raw === null || String(raw).trim() === '') return null;
+            const days = Number(raw);
+            if (isNaN(days)) return null;
+            return { row, days };
+        })
+        .filter(Boolean);
+}
+
+function srRenderNearExpiration() {
+    const items = srExpirationRows().filter(r => r.days >= 0 && r.days <= 90).sort((a, b) => a.days - b.days);
+
+    const rowsHTML = items.map(({ row, days }) => {
+        const pillColor = days <= 30 ? 'var(--sr-danger)' : days <= 60 ? 'var(--sr-warning)' : 'var(--sr-primary-light)';
+        return `<tr>
+            <td class="c-fit">${srDept(row._dept)}</td>
+            <td class="c-sku c-fit">${srEsc(row[1] || '')}</td>
+            <td class="c-desc">${srEsc(row[2] || '')}</td>
+            <td class="c-fit c-center">${srEsc(formatExpirationDate(row[23]) || row[23] || '-')}</td>
+            <td class="c-fit c-center"><span class="sr-pill" style="--c: ${pillColor};">${days} days</span></td>
+            <td class="c-fit c-center c-num">${srEsc(row[24] !== undefined ? row[24] : 0)}</td>
+        </tr>`;
+    }).join('');
+
+    return `<div class="sr-cards">${srStatCard('NEAR-EXPIRATION ITEMS', items.length, 'expiring within 90 days, across all departments', 'var(--sr-warning)', 'fa-hourglass-half')}</div>
+        <table class="sr-table">
+            <thead><tr>
+                <th class="c-fit">DEPARTMENT</th>
+                <th class="c-fit">SKU CODE</th>
+                <th>ITEM DESCRIPTION</th>
+                <th class="c-fit c-center">EXP. DATE</th>
+                <th class="c-fit c-center">DAYS LEFT</th>
+                <th class="c-fit c-center">QTY<br>ONHAND</th>
+            </tr></thead>
+            <tbody>${rowsHTML || `<tr><td colspan="6" class="sr-empty-cell">Nothing expiring in the next 90 days.</td></tr>`}</tbody>
+        </table>`;
+}
+
+function srRenderExpirationMonitoring() {
+    // Repurposed from a full 5-bucket "everything" view (which just
+    // duplicated NEAR_EXPIRATION's 0-90 day window) into a dedicated
+    // EXPIRED ITEMS view: only items already past their expiration date,
+    // worst-first, so this tab is the one place that answers "what's
+    // already expired and needs to be pulled?" instead of restating
+    // near-expiration data.
+    const all = srExpirationRows();
+    const expired = all.filter(r => r.days < 0).sort((a, b) => a.days - b.days); // most days expired first
+
+    const cards = `<div class="sr-cards">
+        ${srStatCard('EXPIRED ITEMS', expired.length, 'already past expiration, across all departments', 'var(--sr-danger)', 'fa-calendar-xmark')}
+    </div>`;
+
+    const CAP = 500;
+    const shown = expired.slice(0, CAP);
+
+    const rowsHTML = shown.map(({ row, days }) => `<tr>
+        <td class="c-fit">${srDept(row._dept)}</td>
+        <td class="c-sku c-fit">${srEsc(row[1] || '')}</td>
+        <td class="c-desc">${srEsc(row[2] || '')}</td>
+        <td class="c-fit c-center">${srEsc(formatExpirationDate(row[23]) || row[23] || '-')}</td>
+        <td class="c-fit c-center"><span class="sr-pill" style="--c: var(--sr-danger);">${Math.abs(days)} days</span></td>
+        <td class="c-fit c-center c-num">${srEsc(row[24] !== undefined ? row[24] : 0)}</td>
+    </tr>`).join('');
+
+    return srNote('Already-expired items only \u2014 for the 0\u201390-day-out watchlist, see NEAR EXPIRATION. Sorted longest-expired first.' + (expired.length > CAP ? ` Showing the first ${CAP} of ${expired.length} items.` : '')) +
+        cards +
+        `<table class="sr-table">
+            <thead><tr>
+                <th class="c-fit">DEPARTMENT</th>
+                <th class="c-fit">SKU CODE</th>
+                <th>ITEM DESCRIPTION</th>
+                <th class="c-fit c-center">EXP. DATE</th>
+                <th class="c-fit c-center">DAYS<br>EXPIRED</th>
+                <th class="c-fit c-center">QTY<br>ONHAND</th>
+            </tr></thead>
+            <tbody>${rowsHTML || `<tr><td colspan="6" class="sr-empty-cell">No expired items on file.</td></tr>`}</tbody>
+        </table>`;
+}
+
+// ---- 10. Aging per description ----
+
+function srRenderAging() {
+    const all = srExpirationRows();
+    const bySku = {};
+    all.forEach(({ row, days }) => {
+        const sku = row[1] || '(no SKU)';
+        const desc = row[2] || '(no description)';
+        const key = sku + '\u0001' + desc;
+        if (!bySku[key]) bySku[key] = { sku, desc, expired: 0, d30: 0, d60: 0, d90: 0, over90: 0, total: 0 };
+        const qty = srNum(row[24]);
+        bySku[key].total += qty;
+        if (days < 0) bySku[key].expired += qty;
+        else if (days <= 30) bySku[key].d30 += qty;
+        else if (days <= 60) bySku[key].d60 += qty;
+        else if (days <= 90) bySku[key].d90 += qty;
+        else bySku[key].over90 += qty;
+    });
+
+    const list = Object.values(bySku).sort((a, b) => b.total - a.total);
+
+    // Heat-map colouring, hottest (already expired) to coolest (90D+).
+    const BUCKET_COLORS = ['var(--sr-danger)', 'var(--sr-orange)', 'var(--sr-warning)', 'var(--sr-cyan)', 'var(--sr-success)'];
+    const chip = (qty, color) => qty ? `<span class="sr-pill" style="--c: ${color};">${qty}</span>` : '';
+
+    const rowsHTML = list.map(item => `<tr>
+        <td class="c-sku c-fit">${srEsc(item.sku)}</td>
+        <td class="c-desc">${srEsc(item.desc)}</td>
+        <td class="c-fit c-center c-tight">${chip(item.expired, BUCKET_COLORS[0])}</td>
+        <td class="c-fit c-center c-tight">${chip(item.d30, BUCKET_COLORS[1])}</td>
+        <td class="c-fit c-center c-tight">${chip(item.d60, BUCKET_COLORS[2])}</td>
+        <td class="c-fit c-center c-tight">${chip(item.d90, BUCKET_COLORS[3])}</td>
+        <td class="c-fit c-center c-tight">${chip(item.over90, BUCKET_COLORS[4])}</td>
+        <td class="c-fit c-center c-tight c-num">${item.total}</td>
+    </tr>`).join('');
+
+    const bucketTh = (label, i) => `<th class="c-fit c-center c-tight"><span class="sr-dot" style="background: ${BUCKET_COLORS[i]};"></span>${label}</th>`;
+
+    return srNote('No stock-received date exists anywhere in the sheet, so this buckets by days-remaining-until-expiration (shelf life left) rather than true time-in-stock. Add a received-date column to make this a real aging report.') +
+        `<table class="sr-table">
+            <thead><tr>
+                <th class="c-fit">SKU CODE</th>
+                <th>ITEM DESCRIPTION</th>
+                ${bucketTh('EXPIRED', 0)}
+                ${bucketTh('0\u201330D', 1)}
+                ${bucketTh('31\u201360D', 2)}
+                ${bucketTh('61\u201390D', 3)}
+                ${bucketTh('90D+', 4)}
+                <th class="c-fit c-center c-tight">TOTAL QTY</th>
+            </tr></thead>
+            <tbody>${rowsHTML || `<tr><td colspan="8" class="sr-empty-cell">No items with an expiration date on file.</td></tr>`}</tbody>
+        </table>`;
+}
+
+// ---- SUMMARY SHEET \u2014 raw pull of the actual "SUMMARY" tab ----
+// Column count/labels aren't hardcoded anywhere \u2014 whatever headers and
+// rows are on the sheet are rendered as-is, so this stays correct if that
+// tab's layout changes later.
+
+function srRenderSummarySheet() {
+    const headers = srState.summaryHeaders;
+    const rows = srState.summaryRows;
+
+    if (!headers.length) {
+        return srNote(`Reads the "${SR_SUMMARY_SHEET_NAME}" tab directly from the spreadsheet, exactly as it appears there \u2014 no calculations applied.`) +
+            srEmpty(`No data found on the "${SR_SUMMARY_SHEET_NAME}" tab (or that sheet doesn't exist yet).`);
+    }
+
+    const CAP = 300;
+    const shown = rows.slice(0, CAP);
+    const theadHTML = headers.map(h => `<th>${srEsc(h || '')}</th>`).join('');
+    const rowsHTML = shown.map(row => `<tr>${headers.map((_, c) => `<td>${srEsc(row[c] !== undefined ? row[c] : '')}</td>`).join('')}</tr>`).join('');
+
+    return srNote(`Reads the "${SR_SUMMARY_SHEET_NAME}" tab directly from the spreadsheet, exactly as it appears there \u2014 no calculations applied. ${rows.length} row(s) \u00d7 ${headers.length} column(s) found.`) +
+        `<div style="overflow-x: auto;">
+            <table class="sr-table" style="min-width: max-content;">
+                <thead><tr>${theadHTML}</tr></thead>
+                <tbody>${rowsHTML || `<tr><td colspan="${headers.length}" class="sr-empty-cell">No data rows on this tab yet.</td></tr>`}</tbody>
+            </table>
+        </div>${rows.length > CAP ? `<div style="font-size: 0.68rem; color: var(--sr-muted-dim); margin-top: 8px;">Showing the first ${CAP} of ${rows.length} rows.</div>` : ''}`;
 }
 
 // ==========================================
