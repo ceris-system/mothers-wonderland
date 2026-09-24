@@ -1441,19 +1441,13 @@ const SR_REFRESH_MS = 60000;
 //   Row 3 down     = A: SKU, B: DESCRIPTION, E: SRP.
 // Indexes below are 0-based (A = 0).
 const SR_DS_SHEET_NAME = 'sales';
-const SR_DS_RANGE = 'A1:DH'; // (DC = last date column; DF:DH = the department list/totals) // open-ended: Apps Script stops at the sheet's last row, so this works whatever the row count
+const SR_DS_RANGE = 'A1:DC'; // main grid, up to the last date column. Kept to DC on purpose: asking for columns the sheet doesn't have makes the whole read fail.
+const SR_DS_DEPT_LIST_RANGE = 'DF1:DF'; // OPTIONAL department names (DF3:DF), only used to auto-detect the department column; ignored if it can't be read.
+// open-ended: Apps Script stops at the sheet's last row, so this works whatever the row count
 // DEPT = 0-based column of the department name on each SKU row. null = auto-detect
 // (a header containing "DEPT" in rows 1-2 of A:F, else the A:F column whose values
 // match the department names listed in DF3:DF). Set a number to force it (C = 2).
 const SR_DS = { DEPT: null, DEPT_LIST_COL: 109 /* DF */, SKU: 0, DESC: 1, SRP: 4, FIRST_DATE_COL: 6 /* G */, LAST_DATE_COL: 106 /* DC */, FIRST_DATA_ROW: 2 /* row 3 */ };
-
-// Real "SUMMARY" tab in the spreadsheet, fetched as-is via the generic
-// ?sheet=&range= GET endpoint in Code.gs (SUMMARY isn't in
-// BLOCKED_READ_SHEETS, so it's already reachable there \u2014 no backend
-// change needed). Range is wide/tall on purpose to capture whatever is
-// on the tab; trailing blank rows/columns are trimmed on the front end.
-const SR_SUMMARY_SHEET_NAME = 'SUMMARY';
-const SR_SUMMARY_RANGE = 'A1:BZ5000';
 
 const srState = {
     inventoryRows: [],
@@ -1461,8 +1455,13 @@ const srState = {
     dailySalesRows: [],   // flattened from the "sales" sheet (see srParseDailySalesSheet)
     dailySalesError: null,
     topRank: { mode: 'MONTH', day: '', month: '' },   // Top Rank period picker ('' = today / this month)
-    summaryHeaders: [],
-    summaryRows: [],
+    historyMonths: [],          // saved monthly backups on the server, newest first: [{month, rows, days, units, amount, savedAt}]
+    historyByMonth: {},         // 'YYYY-MM' -> loaded rows [{sku, desc, dept, srp, qty, amount, date}]
+    historySavedAt: {},         // 'YYYY-MM' -> savedAt of the copy we hold (to notice a newer backup)
+    historyLoading: {},         // 'YYYY-MM' -> true while a download is in flight
+    historyError: null,
+    historyVersion: 0,          // bumped whenever historyByMonth changes (invalidates the combined-rows cache)
+    histView: { month: 'LIVE', search: '', status: '', busy: false },
     lastUpdated: null,
     activeTab: 'DAILY_SALES',
     refreshTimer: null,
@@ -1482,14 +1481,14 @@ const SR_TABS = [
     { id: 'NEAR_EXPIRATION', label: 'NEAR EXPIRATION', icon: 'fa-hourglass-half', group: 'EXPIRATION', color: '#fbbf24', light: '#fde68a', rgb: '251,191,36' },
     { id: 'EXPIRATION_MONITORING', label: 'EXPIRED ITEMS', icon: 'fa-calendar-xmark', group: 'EXPIRATION', color: '#ef4444', light: '#fca5a5', rgb: '239,68,68' },
     { id: 'AGING', label: 'AGING PER DESCRIPTION', icon: 'fa-layer-group', group: 'EXPIRATION', color: '#e879f9', light: '#f5d0fe', rgb: '232,121,249' },
-    { id: 'SUMMARY_SHEET', label: 'SUMMARY SHEET', icon: 'fa-table', group: 'SUMMARY', color: '#38bdf8', light: '#bae6fd', rgb: '56,189,248' }
+    { id: 'HISTORICAL_DATA', label: 'HISTORICAL DATA', icon: 'fa-clock-rotate-left', group: 'HISTORY', color: '#38bdf8', light: '#bae6fd', rgb: '56,189,248' }
 ];
 
 const SR_GROUP_META = {
     'SALES': { icon: 'fa-chart-line', color: '#22d3ee' },
     'STOCK HEALTH': { icon: 'fa-heart-pulse', color: '#f472b6' },
     'EXPIRATION': { icon: 'fa-hourglass-half', color: '#fbbf24' },
-    'SUMMARY': { icon: 'fa-table', color: '#38bdf8' }
+    'HISTORY': { icon: 'fa-database', color: '#38bdf8' }
 };
 
 // ---- small shared helpers ----
@@ -1847,6 +1846,22 @@ function openSummaryReportModal() {
                 padding: 8px 12px; font: 700 0.78rem 'Roboto Mono', monospace;
                 cursor: pointer; outline: none; color-scheme: dark; max-width: 100%;
             }
+            .sr-input {
+                background: rgba(var(--sr-primary-rgb), 0.10); color: var(--sr-ink);
+                border: 1px solid rgba(var(--sr-primary-rgb), 0.4); border-radius: 8px;
+                padding: 8px 12px; font: 600 0.78rem 'Roboto Mono', monospace; outline: none;
+                min-width: 220px; flex: 1 1 220px; max-width: 340px; color-scheme: dark;
+            }
+            .sr-input:focus { box-shadow: 0 0 0 2px rgba(var(--sr-primary-rgb), 0.45); }
+            .sr-btn {
+                display: inline-flex; align-items: center; gap: 7px; cursor: pointer;
+                background: var(--sr-primary); color: #0b0a1a; border: 0; border-radius: 8px;
+                padding: 9px 14px; font: 800 0.7rem 'Roboto Mono', monospace; letter-spacing: 0.08em;
+            }
+            .sr-btn.ghost { background: rgba(var(--sr-primary-rgb), 0.14); color: var(--sr-ink); border: 1px solid rgba(var(--sr-primary-rgb), 0.5); }
+            .sr-btn:hover:not(:disabled) { filter: brightness(1.12); }
+            .sr-btn:disabled { opacity: 0.45; cursor: not-allowed; }
+            .sr-hist-status { font-size: 0.7rem; color: var(--sr-muted); }
             .sr-select:focus { box-shadow: 0 0 0 2px rgba(var(--sr-primary-rgb), 0.45); }
             .sr-select option { background: #1a1633; color: #f6f4ff; }
             .sr-hero-top .sr-cards { flex: 1 1 0; min-width: 280px; margin: 0 !important; gap: 12px; }
@@ -2108,7 +2123,8 @@ async function srRefreshAll(showSpinner) {
     if (statusEl && showSpinner) statusEl.textContent = 'Refreshing live data...';
 
     try {
-        await Promise.all([srFetchInventoryAll(), srFetchSalesAll(), srFetchDailySalesAll(), srFetchSummarySheetAll()]);
+        await Promise.all([srFetchInventoryAll(), srFetchSalesAll(), srFetchDailySalesAll(), srFetchHistoryList()]);
+        await srSyncRecentHistory();
         srState.lastUpdated = new Date();
         if (statusEl) statusEl.textContent = `Live \u00b7 last updated ${srState.lastUpdated.toLocaleTimeString()} \u00b7 auto-refreshes every 60s`;
         srRenderActiveTab();
@@ -2181,7 +2197,7 @@ function srParseSheetDate(val) {
 // Turns the "sales" sheet grid (dates across row 1, one row per SKU) into a
 // flat list of {sku, desc, srp, qty, amount, date} \u2014 one entry per SKU per
 // date that actually had a release, so the renderers can just filter by date.
-function srDetectDeptCol(values) {
+function srDetectDeptCol(values, listValues) {
     if (Number.isInteger(SR_DS.DEPT)) return SR_DS.DEPT;
     for (let r = 0; r < Math.min(2, values.length); r++) {
         for (let c = 0; c <= 5; c++) {
@@ -2190,6 +2206,11 @@ function srDetectDeptCol(values) {
     }
     const norm = v => String(v ?? '').trim().toUpperCase();
     const names = new Set();
+    (listValues || []).forEach((row, r) => {
+        if (r < SR_DS.FIRST_DATA_ROW) return;
+        const n = norm((row || [])[0]);
+        if (n) names.add(n);
+    });
     for (let r = SR_DS.FIRST_DATA_ROW; r < values.length; r++) {
         const n = norm((values[r] || [])[SR_DS.DEPT_LIST_COL]);
         if (n) names.add(n);
@@ -2209,7 +2230,7 @@ function srDetectDeptCol(values) {
     return best;
 }
 
-function srParseDailySalesSheet(values) {
+function srParseDailySalesSheet(values, listValues) {
     if (!Array.isArray(values) || !values.length) return [];
     const head = values[0] || [];
     const blocks = [];
@@ -2222,7 +2243,7 @@ function srParseDailySalesSheet(values) {
     }
 
     const out = [];
-    const deptCol = srDetectDeptCol(values);
+    const deptCol = srDetectDeptCol(values, listValues);
     for (let r = SR_DS.FIRST_DATA_ROW; r < values.length; r++) {
         const row = values[r] || [];
         const sku = String(row[SR_DS.SKU] ?? '').trim();
@@ -2239,7 +2260,14 @@ function srParseDailySalesSheet(values) {
             out.push({ sku, desc, dept, srp, qty, amount, date: b.date });
         });
     }
+    out.headerDates = blocks.map(b => srDateKey(b.date));
     return out;
+}
+
+function srDailySalesErrorNote() {
+    return srState.dailySalesError
+        ? `<div class="sr-note" style="color: var(--sr-danger-light);"><i class="fa-solid fa-triangle-exclamation"></i> Couldn't read the "${srEsc(SR_DS_SHEET_NAME)}" sheet: ${srEsc(srState.dailySalesError)}</div>`
+        : '';
 }
 
 async function srFetchDailySalesAll() {
@@ -2252,54 +2280,19 @@ async function srFetchDailySalesAll() {
             srState.dailySalesError = json.error || json.message || `Could not read the "${SR_DS_SHEET_NAME}" sheet.`;
             return;
         }
-        srState.dailySalesRows = srParseDailySalesSheet(json.values);
+        // Optional: the department names in DF3:DF (helps find the department column).
+        let listValues = [];
+        try {
+            const lurl = `${window.API}?sheet=${encodeURIComponent(SR_DS_SHEET_NAME)}&range=${encodeURIComponent(SR_DS_DEPT_LIST_RANGE)}&token=${encodeURIComponent(window.API_TOKEN)}`;
+            const lj = await (await fetch(lurl)).json();
+            if (lj.success && Array.isArray(lj.values)) listValues = lj.values;
+        } catch (e) { /* optional, ignore */ }
+        srState.dailySalesRows = srParseDailySalesSheet(json.values, listValues);
         srState.dailySalesError = null;
     } catch (e) {
         console.error('[Summary Report] daily sales fetch failed:', e);
         srState.dailySalesRows = [];
         srState.dailySalesError = String(e && e.message || e);
-    }
-}
-
-// Reads the actual "SUMMARY" tab from the spreadsheet, as-is, via the
-// generic ?sheet=&range= GET endpoint in Code.gs. That endpoint isn't
-// gated behind a named action or a user/department scope check \u2014 it
-// just returns getDisplayValues() for whatever sheet+range is asked for
-// (SUMMARY isn't in BLOCKED_READ_SHEETS) \u2014 so this needs no backend
-// change. First non-blank row is treated as the header row; fully-blank
-// rows/trailing columns beyond the last populated one are trimmed so an
-// oversized fetch range doesn't leave hundreds of empty rows/columns.
-async function srFetchSummarySheetAll() {
-    try {
-        const url = `${window.API}?sheet=${encodeURIComponent(SR_SUMMARY_SHEET_NAME)}&range=${encodeURIComponent(SR_SUMMARY_RANGE)}&token=${encodeURIComponent(window.API_TOKEN)}`;
-        const res = await fetch(url);
-        const json = await res.json();
-        const raw = (json.success && Array.isArray(json.values)) ? json.values : [];
-
-        const isBlankRow = row => !row.some(cell => String(cell).trim() !== '');
-        const trimmed = raw.slice();
-        while (trimmed.length && isBlankRow(trimmed[trimmed.length - 1])) trimmed.pop();
-
-        let lastCol = 0;
-        trimmed.forEach(row => {
-            for (let c = row.length - 1; c >= 0; c--) {
-                if (String(row[c]).trim() !== '') { lastCol = Math.max(lastCol, c + 1); break; }
-            }
-        });
-
-        if (!trimmed.length || !lastCol) {
-            srState.summaryHeaders = [];
-            srState.summaryRows = [];
-            return;
-        }
-
-        const cropped = trimmed.map(row => row.slice(0, lastCol));
-        srState.summaryHeaders = cropped[0];
-        srState.summaryRows = cropped.slice(1);
-    } catch (e) {
-        console.error('[Summary Report] SUMMARY sheet fetch failed:', e);
-        srState.summaryHeaders = [];
-        srState.summaryRows = [];
     }
 }
 
@@ -2321,7 +2314,7 @@ function srRenderActiveTab(animate) {
         NEAR_EXPIRATION: srRenderNearExpiration,
         EXPIRATION_MONITORING: srRenderExpirationMonitoring,
         AGING: srRenderAging,
-        SUMMARY_SHEET: srRenderSummarySheet
+        HISTORICAL_DATA: srRenderHistorical
     };
     const tab = SR_TABS.find(t => t.id === srState.activeTab) || SR_TABS[0];
 
@@ -2364,7 +2357,7 @@ function srRenderActiveTab(animate) {
 function srRenderDailySales() {
     // Source = the "sales" sheet (see SR_DS_* above). VALUE is the sheet's
     // own TOTAL AMOUNT column, not qty x SRP.
-    const rows = srState.dailySalesRows;
+    const rows = srAllSalesRows();
     const today = new Date(); today.setHours(0, 0, 0, 0);
     const lastWeek = new Date(today); lastWeek.setDate(lastWeek.getDate() - 7);
 
@@ -2437,9 +2430,7 @@ function srRenderDailySales() {
         <td class="c-fit c-right c-money">${srMoney(item.value)}</td>
     </tr>`).join('');
 
-    const errorNote = srState.dailySalesError
-        ? `<div class="sr-note" style="color: var(--sr-danger-light);"><i class="fa-solid fa-triangle-exclamation"></i> Couldn't read the "${srEsc(SR_DS_SHEET_NAME)}" sheet: ${srEsc(srState.dailySalesError)}</div>`
-        : '';
+    const errorNote = srDailySalesErrorNote();
 
     return errorNote + srNote(`Read live from the "${SR_DS_SHEET_NAME}" sheet \u2014 dates in G1:DC1, VALUE = the sheet's TOTAL AMOUNT column.`) + headline +
         srHeading('LAST 7 DAYS', 'fa-chart-line') +
@@ -2515,18 +2506,26 @@ function srTopRankPeriods() {
     const today = new Date(); today.setHours(0, 0, 0, 0);
     const dayMap = {}; dayMap[srDateKey(today)] = today;
     const add = d => { if (d) { const k = srDateKey(d); if (!dayMap[k]) dayMap[k] = d; } };
-    srState.dailySalesRows.forEach(r => add(r.date));
+    srAllSalesRows().forEach(r => add(r.date));
     srState.salesRows.forEach(r => add(srParseDate(r[SR_SALES_COL.DATE])));
     const days = Object.values(dayMap).sort((a, b) => b - a);
     const monthMap = {};
     days.forEach(d => { const k = srMonthKey(d); if (!monthMap[k]) monthMap[k] = new Date(d.getFullYear(), d.getMonth(), 1); });
+    // Saved (backed-up) months are selectable too, even before they're loaded.
+    srState.historyMonths.forEach(m => {
+        if (!monthMap[m.month]) { const [y, mo] = m.month.split('-').map(Number); monthMap[m.month] = new Date(y, mo - 1, 1); }
+    });
     const months = Object.values(monthMap).sort((a, b) => b - a);
     return { today, days, months };
 }
 
 function srTopRankSetMode(mode) { srState.topRank.mode = mode === 'DAY' ? 'DAY' : 'MONTH'; srRenderActiveTab(); }
-function srTopRankSetPeriod(value) {
+async function srTopRankSetPeriod(value) {
     if (srState.topRank.mode === 'DAY') srState.topRank.day = value; else srState.topRank.month = value;
+    // Picking a backed-up month that isn't loaded yet: fetch it first.
+    if (srState.topRank.mode === 'MONTH' && !srState.historyByMonth[value] && srState.historyMonths.some(m => m.month === value)) {
+        await srLoadHistoryMonth(value);
+    }
     srRenderActiveTab();
 }
 
@@ -2557,6 +2556,7 @@ function srAggregateDailyByDept(rows, start, end) {
 }
 
 function srRenderTopRank() {
+    const allRows = srAllSalesRows();
     const { today, days, months } = srTopRankPeriods();
     const tr = srState.topRank;
     const isDay = tr.mode === 'DAY';
@@ -2590,7 +2590,7 @@ function srRenderTopRank() {
     </div>`;
 
     // Headline: the day's sale, or the selected month's total sale.
-    const periodTotals = srState.dailySalesRows.reduce((acc, r) => {
+    const periodTotals = allRows.reduce((acc, r) => {
         if (r.date < start || r.date > end) return acc;
         acc.qty += r.qty; acc.value += r.amount;
         return acc;
@@ -2603,9 +2603,9 @@ function srRenderTopRank() {
     // Section A \u2014 by department
     // Departments come from the "sales" sheet when its rows carry a department
     // (items added up per department); otherwise fall back to the request log.
-    const deptFromSheet = srState.dailySalesRows.some(r => r.dept);
+    const deptFromSheet = allRows.some(r => r.dept);
     const rankedDept = deptFromSheet
-        ? srAggregateDailyByDept(srState.dailySalesRows, start, end)
+        ? srAggregateDailyByDept(allRows, start, end)
         : srAggregateSalesByRange(srState.salesRows, start, end, row => row[SR_SALES_COL.DEPT] || '');
     const topDept = rankedDept.slice(0, 10);
     const deptRowsHTML = topDept.map((item, i) => `<tr>
@@ -2616,7 +2616,7 @@ function srRenderTopRank() {
     </tr>`).join('');
 
     // Section B \u2014 by item
-    const rankedItem = srAggregateDailyBySku(srState.dailySalesRows, start, end);
+    const rankedItem = srAggregateDailyBySku(allRows, start, end);
     const topItem = rankedItem.slice(0, 10);
     const itemRowsHTML = topItem.map((item, i) => `<tr>
         <td class="c-fit c-center">${srRankBadge(i)}</td>
@@ -2627,7 +2627,7 @@ function srRenderTopRank() {
     </tr>`).join('');
 
     const emptyMsg = 'No release records for this ' + (isDay ? 'date.' : 'month.');
-    return cards + srNote(`Ranked by total amount for ${periodLabel}. ${deptFromSheet
+    return srDailySalesErrorNote() + cards + srNote(`Ranked by total amount for ${periodLabel}. ${deptFromSheet
         ? `Both tables add up the "${SR_DS_SHEET_NAME}" sheet's qty released and TOTAL AMOUNT \u2014 by department and by item.`
         : `By item = the "${SR_DS_SHEET_NAME}" sheet's TOTAL AMOUNT. No department column was found in that sheet, so by department uses qty released \u00d7 SRP from the request log.`}`) + controls +
         `<div class="sr-top-rank-grid" style="display: grid; grid-template-columns: 1fr 1fr; gap: 0 20px; align-items: start;">
@@ -2672,7 +2672,7 @@ function srRenderMonthCompare() {
 
     // Source: the "sales" sheet (TOTAL AMOUNT); only if it has no rows at all
     // does this fall back to the old request log (qty released x SRP).
-    const dailyRows = srState.dailySalesRows;
+    const dailyRows = srAllSalesRows();
     const useSheet = dailyRows.length > 0;
     const deptFromSheet = useSheet && dailyRows.some(r => r.dept);
     const byDept = (from, to) => deptFromSheet
@@ -2744,7 +2744,7 @@ function srRenderMonthCompare() {
         <td class="c-fit c-right">${changePill(p.cur.value, p.prev.value)}</td>
     </tr>`).join('');
 
-    return srNote((hasLast ? '"MTD" = month-to-date, compared against the same number of days into last month so the two periods are apples-to-apples. Last month\'s full total is shown for reference.' : 'No last-month data found yet, so this month is shown on its own \u2014 the comparison fills in automatically once last month has sales.') + (useSheet ? ` Source: the "${SR_DS_SHEET_NAME}" sheet\'s TOTAL AMOUNT.` : ' Source: request log (qty released \u00d7 SRP).')) +
+    return srDailySalesErrorNote() + srNote((hasLast ? '"MTD" = month-to-date, compared against the same number of days into last month so the two periods are apples-to-apples. Last month\'s full total is shown for reference.' : 'No last-month data found yet, so this month is shown on its own \u2014 the comparison fills in automatically once last month has sales.') + (useSheet ? ` Source: the "${SR_DS_SHEET_NAME}" sheet\'s TOTAL AMOUNT.` : ' Source: request log (qty released \u00d7 SRP).')) +
         headline +
         `<div class="sr-top-rank-grid" style="display: grid; grid-template-columns: 1fr 1fr; gap: 0 20px; align-items: start;">
             <div style="display: block; min-width: 0;">
@@ -2995,30 +2995,261 @@ function srRenderAging() {
         </table>`);
 }
 
-// ---- SUMMARY SHEET \u2014 raw pull of the actual "SUMMARY" tab ----
-// Column count/labels aren't hardcoded anywhere \u2014 whatever headers and
-// rows are on the sheet are rendered as-is, so this stays correct if that
-// tab's layout changes later.
+// ---- HISTORICAL DATA \u2014 monthly backups kept on the server ----
+// The backend saves each month of the "sales" sheet as its own file in Google
+// Drive (nightly, or on demand). Those saved months are what Month vs Last
+// Month / Top Rank / Daily Sales fall back to once a date has been cleared
+// from the sheet, and what this tab lists and lets you download.
 
-function srRenderSummarySheet() {
-    const headers = srState.summaryHeaders;
-    const rows = srState.summaryRows;
+function srMonthLabel(key) {
+    const [y, m] = key.split('-').map(Number);
+    return new Date(y, m - 1, 1).toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
+}
 
-    if (!headers.length) {
-        return srNote(`Reads the "${SR_SUMMARY_SHEET_NAME}" tab directly from the spreadsheet, exactly as it appears there \u2014 no calculations applied.`) +
-            srEmpty(`No data found on the "${SR_SUMMARY_SHEET_NAME}" tab (or that sheet doesn't exist yet).`);
+function srHistRowsFromServer(rows) {
+    return (rows || []).map(r => {
+        const [y, m, d] = String(r[0]).split('-').map(Number);
+        return { date: new Date(y, m - 1, d), sku: r[1], desc: r[2], dept: r[3], srp: srNum(r[4]), qty: srNum(r[5]), amount: srNum(r[6]) };
+    });
+}
+
+async function srFetchHistoryList() {
+    try {
+        const url = `${window.API}?action=historyList&token=${encodeURIComponent(window.API_TOKEN)}`;
+        const json = await (await fetch(url)).json();
+        if (!json.success || !Array.isArray(json.months)) {
+            srState.historyError = json.error || 'The server did not return the saved months.';
+            return;
+        }
+        srState.historyMonths = json.months.slice().sort((a, b) => (a.month < b.month ? 1 : -1));
+        srState.historyError = null;
+    } catch (e) {
+        console.error('[Summary Report] history list failed:', e);
+        srState.historyError = String(e && e.message || e);
+    }
+}
+
+// Loads one saved month (skips the download if we already hold the latest copy).
+async function srLoadHistoryMonth(key, force) {
+    const meta = srState.historyMonths.find(m => m.month === key);
+    if (!meta) return false;
+    if (!force && srState.historyByMonth[key] && srState.historySavedAt[key] === meta.savedAt) return true;
+    if (srState.historyLoading[key]) return false;
+    srState.historyLoading[key] = true;
+    try {
+        const url = `${window.API}?action=historyGet&month=${encodeURIComponent(key)}&token=${encodeURIComponent(window.API_TOKEN)}`;
+        const json = await (await fetch(url)).json();
+        if (!json.success) { srState.historyError = json.error || `Could not load ${key}.`; return false; }
+        srState.historyByMonth[key] = srHistRowsFromServer(json.rows);
+        srState.historySavedAt[key] = meta.savedAt;
+        srState.historyVersion++;
+        return true;
+    } catch (e) {
+        console.error('[Summary Report] history month failed:', e);
+        srState.historyError = String(e && e.message || e);
+        return false;
+    } finally {
+        srState.historyLoading[key] = false;
+    }
+}
+
+// Last month is what Month vs Last Month (and the last-week comparison across
+// a month boundary) needs, so it's always kept loaded.
+async function srSyncRecentHistory() {
+    const now = new Date();
+    const prev = srMonthKey(new Date(now.getFullYear(), now.getMonth() - 1, 1));
+    await srLoadHistoryMonth(prev);
+}
+
+// The sheet's own rows + every loaded saved month, where a saved date is used
+// only if that date is no longer on the sheet (the sheet always wins).
+function srAllSalesRows() {
+    const live = srState.dailySalesRows;
+    const c = srState._combined;
+    if (c && c.live === live && c.ver === srState.historyVersion) return c.out;
+    const onSheet = new Set(live.headerDates || live.map(r => srDateKey(r.date)));
+    let out = live;
+    const keys = Object.keys(srState.historyByMonth);
+    if (keys.length) {
+        out = live.slice();
+        keys.forEach(k => srState.historyByMonth[k].forEach(r => { if (!onSheet.has(srDateKey(r.date))) out.push(r); }));
+    }
+    srState._combined = { live, ver: srState.historyVersion, out };
+    return out;
+}
+
+function srCsvEscape(v) {
+    const str = String(v === null || v === undefined ? '' : v);
+    return /[",\r\n]/.test(str) ? '"' + str.replace(/"/g, '""') + '"' : str;
+}
+
+function srDownloadHistoryCsv(filename, rows) {
+    const header = ['DATE', 'SKU CODE', 'ITEM DESCRIPTION', 'DEPARTMENT', 'QTY RELEASED', 'SRP', 'TOTAL AMOUNT'];
+    const lines = [header.join(',')].concat(rows.map(r =>
+        [srDateKey(r.date), r.sku, r.desc, r.dept, r.qty, r.srp, r.amount].map(srCsvEscape).join(',')));
+    const blob = new Blob(['\ufeff' + lines.join('\r\n')], { type: 'text/csv;charset=utf-8;' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 500);
+}
+
+// The rows the tab is currently showing: the live sheet, or one saved month.
+function srHistViewRows() {
+    const hv = srState.histView;
+    return hv.month === 'LIVE' ? srState.dailySalesRows : (srState.historyByMonth[hv.month] || []);
+}
+
+function srHistSetStatus(text) {
+    srState.histView.status = text;
+    const el = document.getElementById('srHistStatus');
+    if (el) el.textContent = text;
+}
+
+function srHistSetMonth(value) {
+    srState.histView.month = value;
+    srState.histView.search = '';
+    srRenderActiveTab();
+}
+
+function srHistSearch(value) {
+    srState.histView.search = value;
+    const el = document.getElementById('srHistTable');
+    if (el) el.innerHTML = srHistTableHTML();
+}
+
+function srHistDownload() {
+    const rows = srHistViewRows();
+    if (!rows.length) { srHistSetStatus('Nothing to download for this view yet.'); return; }
+    const key = srState.histView.month === 'LIVE' ? 'current-sheet' : srState.histView.month;
+    srDownloadHistoryCsv(`sales-history-${key}.csv`, rows);
+    srHistSetStatus(`Downloaded ${rows.length.toLocaleString('en-US')} records.`);
+}
+
+async function srHistDownloadAll() {
+    if (srState.histView.busy) return;
+    srState.histView.busy = true;
+    try {
+        for (let i = 0; i < srState.historyMonths.length; i++) {
+            const m = srState.historyMonths[i].month;
+            srHistSetStatus(`Loading ${srMonthLabel(m)} (${i + 1} of ${srState.historyMonths.length})...`);
+            await srLoadHistoryMonth(m);
+        }
+        const rows = srAllSalesRows().slice().sort((a, b) => a.date - b.date);
+        if (!rows.length) { srHistSetStatus('Nothing to download yet.'); return; }
+        srDownloadHistoryCsv('sales-history-all-months.csv', rows);
+        srHistSetStatus(`Downloaded ${rows.length.toLocaleString('en-US')} records from every saved month.`);
+    } finally {
+        srState.histView.busy = false;
+    }
+}
+
+async function srHistSnapshotNow() {
+    if (srState.histView.busy) return;
+    srState.histView.busy = true;
+    srHistSetStatus('Saving snapshot...');
+    try {
+        const body = { action: 'historySnapshot', token: window.API_TOKEN, user: window.sessionUser || localStorage.getItem('activeUser') || '' };
+        const json = await (await fetch(window.API, { method: 'POST', body: JSON.stringify(body) })).json();
+        if (!json.success) { srHistSetStatus(json.error || 'Snapshot failed.'); return; }
+        await srFetchHistoryList();
+        (json.saved || []).forEach(m => { delete srState.historyByMonth[m.month]; delete srState.historySavedAt[m.month]; });
+        srState.historyVersion++;
+        await srSyncRecentHistory();
+        srState.histView.status = `Saved ${(json.saved || []).length} month(s) at ${new Date().toLocaleTimeString()}.`;
+        srRenderActiveTab();
+    } catch (e) {
+        srHistSetStatus('Snapshot failed: ' + (e && e.message || e));
+    } finally {
+        srState.histView.busy = false;
+    }
+}
+
+function srHistTableHTML() {
+    const hv = srState.histView;
+    const q = hv.search.trim().toLowerCase();
+    const all = srHistViewRows().slice().sort((a, b) => (b.date - a.date) || (b.amount - a.amount));
+    const filtered = q ? all.filter(r => `${r.sku} ${r.desc} ${r.dept}`.toLowerCase().includes(q)) : all;
+    const CAP = 500;
+    const shown = filtered.slice(0, CAP);
+    const rowsHTML = shown.map(r => `<tr>
+        <td class="c-fit">${r.date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}</td>
+        <td class="c-sku c-fit">${srEsc(r.sku)}</td>
+        <td class="c-desc">${srEsc(r.desc)}</td>
+        <td class="c-fit">${srEsc(r.dept)}</td>
+        <td class="c-fit c-center c-num">${r.qty}</td>
+        <td class="c-fit c-right c-money">${srMoney(r.srp)}</td>
+        <td class="c-fit c-right c-money">${srMoney(r.amount)}</td>
+    </tr>`).join('');
+    const loading = hv.month !== 'LIVE' && !srState.historyByMonth[hv.month];
+    const note = `<div style="font-size: 0.68rem; color: var(--sr-muted-dim); margin: 0 0 8px;">${loading ? 'Loading this month...' : `${q ? `${filtered.length.toLocaleString('en-US')} of ${all.length.toLocaleString('en-US')} records match.` : `${all.length.toLocaleString('en-US')} records.`}${filtered.length > CAP ? ` Showing the first ${CAP} \u2014 use DOWNLOAD for everything.` : ''}`}</div>`;
+    return note + srTableWrap(`<table class="sr-table">
+        <thead><tr>
+            <th class="c-fit">DATE</th>
+            <th class="c-fit">SKU CODE</th>
+            <th>ITEM DESCRIPTION</th>
+            <th class="c-fit">DEPARTMENT</th>
+            <th class="c-fit c-center">QTY<br>RELEASED</th>
+            <th class="c-fit c-right">SRP</th>
+            <th class="c-fit c-right">TOTAL AMOUNT</th>
+        </tr></thead>
+        <tbody>${rowsHTML || `<tr><td colspan="7" class="sr-empty-cell">${loading ? 'Loading...' : 'No records for this view.'}</td></tr>`}</tbody>
+    </table>`);
+}
+
+function srRenderHistorical() {
+    const hv = srState.histView;
+    const months = srState.historyMonths;
+
+    // A saved month picked earlier may have been removed server-side.
+    if (hv.month !== 'LIVE' && !months.some(m => m.month === hv.month)) hv.month = 'LIVE';
+
+    // Load the picked month on demand, then redraw.
+    if (hv.month !== 'LIVE' && !srState.historyByMonth[hv.month] && !srState.historyLoading[hv.month]) {
+        srLoadHistoryMonth(hv.month).then(() => { if (srState.activeTab === 'HISTORICAL_DATA') srRenderActiveTab(); });
     }
 
-    const CAP = 300;
-    const shown = rows.slice(0, CAP);
-    const theadHTML = headers.map(h => `<th>${srEsc(h || '')}</th>`).join('');
-    const rowsHTML = shown.map(row => `<tr>${headers.map((_, c) => `<td>${srEsc(row[c] !== undefined ? row[c] : '')}</td>`).join('')}</tr>`).join('');
+    const rows = srHistViewRows();
+    const dayKeys = new Set(rows.map(r => srDateKey(r.date)));
+    const totals = rows.reduce((acc, r) => { acc.qty += r.qty; acc.value += r.amount; return acc; }, { qty: 0, value: 0 });
+    const meta = months.find(m => m.month === hv.month);
+    const viewLabel = hv.month === 'LIVE' ? 'CURRENT SHEET' : srMonthLabel(hv.month).toUpperCase();
 
-    return srNote(`Reads the "${SR_SUMMARY_SHEET_NAME}" tab directly from the spreadsheet, exactly as it appears there \u2014 no calculations applied. ${rows.length} row(s) \u00d7 ${headers.length} column(s) found.`) +
-        srTableWrap(`<table class="sr-table" style="min-width: max-content;">
-                <thead><tr>${theadHTML}</tr></thead>
-                <tbody>${rowsHTML || `<tr><td colspan="${headers.length}" class="sr-empty-cell">No data rows on this tab yet.</td></tr>`}</tbody>
-            </table>`) + `${rows.length > CAP ? `<div style="font-size: 0.68rem; color: var(--sr-muted-dim); margin-top: 8px;">Showing the first ${CAP} of ${rows.length} rows.</div>` : ''}`;
+    const cards = `<div class="sr-cards">
+        ${srStatCard('RECORDS', rows.length.toLocaleString('en-US'), viewLabel, 'var(--sr-primary)', 'fa-list')}
+        ${srStatCard('DAYS COVERED', dayKeys.size, hv.month === 'LIVE' ? 'dates on the sheet now' : (meta && meta.savedAt ? 'saved ' + new Date(meta.savedAt).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }) : ''), '#a78bfa', 'fa-calendar-days')}
+        ${srStatCard('UNITS RELEASED', totals.qty.toLocaleString('en-US'), '', 'var(--sr-success)', 'fa-boxes-stacked')}
+        ${srStatCard('TOTAL AMOUNT', srMoney(totals.value), '', '#f472b6', 'fa-peso-sign')}
+    </div>`;
+
+    const options = [`<option value="LIVE"${hv.month === 'LIVE' ? ' selected' : ''}>CURRENT SHEET (live)</option>`]
+        .concat(months.map(m => `<option value="${m.month}"${m.month === hv.month ? ' selected' : ''}>${srEsc(srMonthLabel(m.month))} \u00b7 ${m.rows.toLocaleString('en-US')} records</option>`)).join('');
+
+    const isAdmin = (typeof getSessionScope === 'function') ? getSessionScope().isAdmin : false;
+    const controls = `<div class="sr-period">
+        <span class="sr-period-label"><i class="fa-solid fa-clock-rotate-left"></i> VIEW</span>
+        <select class="sr-select" onchange="srHistSetMonth(this.value)" aria-label="Saved month">${options}</select>
+        <input class="sr-input" type="search" placeholder="Search SKU, item or department" value="${srEsc(hv.search)}" oninput="srHistSearch(this.value)">
+        <button class="sr-btn" onclick="srHistDownload()"><i class="fa-solid fa-download"></i> DOWNLOAD</button>
+        <button class="sr-btn ghost" onclick="srHistDownloadAll()"${months.length ? '' : ' disabled'}><i class="fa-solid fa-file-zipper"></i> DOWNLOAD ALL MONTHS</button>
+        <button class="sr-btn ghost" onclick="srHistSnapshotNow()"${isAdmin ? '' : ' disabled title="Admins only"'}><i class="fa-solid fa-floppy-disk"></i> SAVE SNAPSHOT NOW</button>
+        <span class="sr-hist-status" id="srHistStatus">${srEsc(hv.status)}</span>
+    </div>`;
+
+    // Months that are on the sheet but not backed up yet.
+    const saved = new Set(months.map(m => m.month));
+    const unsaved = [...new Set(srState.dailySalesRows.map(r => srMonthKey(r.date)))].filter(k => !saved.has(k)).sort().map(srMonthLabel);
+    const warn = unsaved.length && !srState.historyError
+        ? `<div class="sr-note"><i class="fa-solid fa-circle-exclamation" style="color: var(--sr-warning);"></i><span>Not backed up yet: <b>${srEsc(unsaved.join(', '))}</b>. It saves automatically every night, or press SAVE SNAPSHOT NOW.</span></div>`
+        : '';
+    const err = srState.historyError
+        ? `<div class="sr-note" style="color: var(--sr-danger-light);"><i class="fa-solid fa-triangle-exclamation"></i> Couldn't reach the saved history: ${srEsc(srState.historyError)}. Make sure the updated Code.gs is deployed as a new version.</div>`
+        : '';
+
+    return err + srNote('Each month of the "' + SR_DS_SHEET_NAME + '" sheet is backed up on the server (nightly and on demand), so you can clear old dates from the sheet and still compare against them here. Saved months feed Month vs Last Month, Top Rank and Daily Sales automatically.') +
+        cards + warn + controls + `<div id="srHistTable">${srHistTableHTML()}</div>`;
 }
 
 // ==========================================
