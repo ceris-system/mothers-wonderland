@@ -1530,7 +1530,8 @@ function srChangePill(current, previous) {
 // Gold / silver / bronze medals for the top 3, accent-colored badge after that.
 function srRankBadge(index) {
     const cls = index === 0 ? ' r1' : index === 1 ? ' r2' : index === 2 ? ' r3' : '';
-    const crown = index === 0 ? '<i class="fa-solid fa-crown" style="color: inherit; font-size: 0.62rem; margin-right: 3px;"></i>' : '';
+    // Inline SVG (not a Font Awesome glyph) so the crown always shows, even if the icon font is blocked or slow.
+    const crown = index === 0 ? '<svg class="sr-crown" viewBox="0 0 24 24" aria-hidden="true"><path d="M2.5 7.5l5 4.5L12 4l4.5 8 5-4.5L19.5 18h-15L2.5 7.5zM4.5 20h15v2h-15z" fill="currentColor"/></svg>' : '';
     return `<span class="sr-rank${cls}">${crown}${index + 1}</span>`;
 }
 
@@ -1587,10 +1588,16 @@ function srRankBarList(items, valueKey, formatVal) {
 // when the data was last pulled. It also doubles as the title on the
 // printed page, which previously had no indication of which report it was.
 function srHero(tab) {
+    return `<div class="sr-hero">${srHeroTop(tab)}</div>`;
+}
+
+// Just the icon / kicker / title / live-pill row, shared by both the
+// plain banner (srHero) and the panel variant (srHeroPanel) below.
+function srHeroTop(tab) {
     const stamp = srState.lastUpdated
         ? `<span class="sr-live-pill"><span class="sr-live-dot"></span>LIVE \u00b7 ${srState.lastUpdated.toLocaleTimeString()}</span>`
         : '';
-    return `<div class="sr-hero">
+    return `<div class="sr-hero-top">
         <div class="sr-hero-icon"><i class="fa-solid ${tab.icon}" style="color: inherit;"></i></div>
         <div style="min-width: 0;">
             <div class="sr-hero-kicker">${srEsc(tab.group)}</div>
@@ -1598,6 +1605,26 @@ function srHero(tab) {
         </div>
         ${stamp}
     </div>`;
+}
+
+// Tabs whose data table needs to live INSIDE the hero block (nested,
+// not floating below it as a separate element) use this instead of
+// srHero(). bodyHTML is everything that used to render after the hero
+// (notes, stat cards, headings, tables) \u2014 it now nests under the same
+// bordered/background container as the title row.
+function srHeroPanel(tab, bodyHTML) {
+    return `<div class="sr-hero sr-hero-panel">
+        ${srHeroTop(tab)}
+        <div class="sr-hero-body">${bodyHTML}</div>
+    </div>`;
+}
+
+// Wrap a <table class="sr-table">...</table> block in its own scroll
+// container so the sticky thead (freeze pane) freezes relative to THIS
+// table only \u2014 never drifting over the hero title, stat cards, or a
+// second table's rows above/below it.
+function srTableWrap(tableHTML) {
+    return `<div class="sr-table-wrap">${tableHTML}</div>`;
 }
 
 // ---- modal shell ----
@@ -1665,7 +1692,7 @@ function openSummaryReportModal() {
                 position: relative;
                 width: 96vw; height: 92vh; box-sizing: border-box;
                 display: flex; flex-direction: column; overflow: hidden;
-                border: 2px solid transparent; border-radius: 18px;
+                border: 2px solid transparent; border-radius: 0;
                 color: var(--sr-ink); font-family: 'Roboto Mono', monospace;
                 background:
                     radial-gradient(900px 480px at 0% 0%, rgba(255,79,216,0.20), transparent 60%) padding-box,
@@ -1681,7 +1708,7 @@ function openSummaryReportModal() {
                 background: linear-gradient(90deg, rgba(255,79,216,0.12), rgba(167,139,250,0.06) 50%, rgba(34,211,238,0.12));
             }
             .sr-logo {
-                width: 48px; height: 48px; border-radius: 15px; flex-shrink: 0;
+                width: 48px; height: 48px; border-radius: 0; flex-shrink: 0;
                 display: flex; align-items: center; justify-content: center;
                 background: linear-gradient(135deg, #ff4fd8, #a78bfa 55%, #22d3ee);
                 box-shadow: 0 8px 22px rgba(255,79,216,0.45); color: #fff; font-size: 1.3rem;
@@ -1693,7 +1720,7 @@ function openSummaryReportModal() {
                 animation: srShimmer 7s linear infinite;
             }
             .sr-btn {
-                padding: 10px 16px; border: 0; border-radius: 11px; color: #150a33;
+                padding: 10px 16px; border: 0; border-radius: 0; color: #150a33;
                 font-family: inherit; font-size: 0.75rem; font-weight: 700; letter-spacing: 0.5px;
                 display: inline-flex; align-items: center; gap: 8px; cursor: pointer;
                 transition: transform 0.15s ease, filter 0.15s ease, box-shadow 0.15s ease;
@@ -1711,21 +1738,21 @@ function openSummaryReportModal() {
                 display: flex; flex-direction: column;
             }
             #srSidebar::-webkit-scrollbar, #srContent::-webkit-scrollbar { width: 8px; height: 8px; }
-            #srSidebar::-webkit-scrollbar-thumb, #srContent::-webkit-scrollbar-thumb { background: rgba(var(--sr-primary-rgb), 0.35); border-radius: 4px; }
+            #srSidebar::-webkit-scrollbar-thumb, #srContent::-webkit-scrollbar-thumb { background: rgba(var(--sr-primary-rgb), 0.35); border-radius: 0; }
             .sr-group { margin: 26px 0 10px; padding: 0 10px; display: flex; align-items: center; gap: 8px; }
             .sr-group:first-child { margin-top: 4px; }
             .sr-group-label { font-size: 0.66rem; letter-spacing: 1.6px; font-weight: 700; color: var(--gc); }
-            .sr-group-line { flex: 1; height: 2px; border-radius: 2px; background: linear-gradient(90deg, var(--gc), transparent); opacity: 0.5; }
+            .sr-group-line { flex: 1; height: 2px; border-radius: 0; background: linear-gradient(90deg, var(--gc), transparent); opacity: 0.5; }
             .sr-tab-btn {
                 display: flex; align-items: center; gap: 12px; width: 100%; text-align: left;
                 padding: 10px 12px; margin-bottom: 8px; background: transparent;
-                border: 1px solid transparent; border-radius: 13px; color: var(--sr-muted);
+                border: 1px solid transparent; border-radius: 0; color: var(--sr-muted);
                 font-family: inherit; font-size: 0.7rem; font-weight: 700; letter-spacing: 0.5px; line-height: 1.4; cursor: pointer;
                 transition: background 0.15s ease, transform 0.15s ease, border-color 0.15s ease, color 0.15s ease, box-shadow 0.15s ease;
             }
             .sr-tab-icon {
                 display: flex; align-items: center; justify-content: center; flex-shrink: 0;
-                width: 32px; height: 32px; border-radius: 10px; font-size: 0.85rem;
+                width: 32px; height: 32px; border-radius: 0; font-size: 0.85rem;
                 background: rgba(var(--tc-rgb), 0.18); color: var(--tc);
                 transition: background 0.15s ease, color 0.15s ease, box-shadow 0.15s ease;
             }
@@ -1740,13 +1767,13 @@ function openSummaryReportModal() {
                 box-shadow: 0 0 16px rgba(var(--tc-rgb), 0.65);
             }
             .sr-side-foot {
-                margin-top: auto; padding: 16px 14px; border-radius: 14px;
+                margin-top: auto; padding: 16px 14px; border-radius: 0;
                 background: linear-gradient(160deg, rgba(74,222,128,0.10), rgba(34,211,238,0.06));
                 border: 1px solid rgba(74,222,128,0.28);
             }
-            .sr-legend-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+            .sr-legend-dot { width: 8px; height: 8px; border-radius: 0; flex-shrink: 0; }
             .sr-live-dot {
-                width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0;
+                width: 8px; height: 8px; border-radius: 0; flex-shrink: 0;
                 background: var(--sr-success); box-shadow: 0 0 8px var(--sr-success); animation: srPulse 1.8s ease-in-out infinite;
             }
 
@@ -1761,11 +1788,11 @@ function openSummaryReportModal() {
 
             .sr-hero {
                 display: flex; align-items: center; gap: 16px; flex-wrap: wrap; margin: 24px 0 20px; padding: 16px 20px;
-                border-radius: 18px; border: 1px solid rgba(var(--sr-primary-rgb), 0.45);
+                border-radius: 0; border: 1px solid rgba(var(--sr-primary-rgb), 0.45);
                 background: linear-gradient(120deg, rgba(var(--sr-primary-rgb), 0.32), rgba(var(--sr-primary-rgb), 0.07) 60%, transparent);
             }
             .sr-hero-icon {
-                width: 54px; height: 54px; border-radius: 16px; flex-shrink: 0; font-size: 1.4rem;
+                width: 54px; height: 54px; border-radius: 0; flex-shrink: 0; font-size: 1.4rem;
                 display: flex; align-items: center; justify-content: center; color: #150a33;
                 background: linear-gradient(135deg, var(--sr-primary), var(--sr-primary-light));
                 box-shadow: 0 8px 24px -6px rgba(var(--sr-primary-rgb), 0.9);
@@ -1773,16 +1800,37 @@ function openSummaryReportModal() {
             .sr-hero-kicker { font-size: 0.66rem; letter-spacing: 2px; font-weight: 700; color: var(--sr-primary-light); }
             .sr-hero-title { font-size: 1.2rem; letter-spacing: 1.5px; font-weight: 700; color: #fff; margin-top: 2px; }
             .sr-live-pill {
-                margin-left: auto; display: inline-flex; align-items: center; gap: 8px; padding: 6px 12px; border-radius: 999px;
+                margin-left: auto; display: inline-flex; align-items: center; gap: 8px; padding: 6px 12px; border-radius: 0;
                 font-size: 0.68rem; font-weight: 700; letter-spacing: 0.8px; color: var(--sr-success);
                 background: rgba(var(--sr-success-rgb), 0.12); border: 1px solid rgba(var(--sr-success-rgb), 0.4);
             }
+
+            /* ---------- hero-panel variant ----------
+               Used by tabs whose data table lives INSIDE the hero block
+               instead of floating below it as a separate element. The
+               title row (.sr-hero-top) keeps the normal hero look; the
+               rest of the tab's content (.sr-hero-body) is nested under
+               it, in the same bordered/background container, so the
+               whole thing reads as one card. */
+            .sr-hero.sr-hero-panel {
+                flex-direction: column; align-items: stretch; padding: 16px 20px 20px;
+            }
+            .sr-hero-top { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; width: 100%; }
+            .sr-hero-body { width: 100%; margin-top: 18px; }
+            .sr-hero-body .sr-cards { margin-bottom: 18px; }
+            /* stat cards live in the hero's title row, next to the title */
+            .sr-hero-top .sr-cards { flex: 1 1 0; min-width: 280px; margin: 0 !important; gap: 12px; }
+            .sr-hero-top .sr-card { min-width: 130px; padding: 10px 12px 9px; }
+            .sr-hero-top .sr-cards > .sr-card:only-child { flex: 0 1 280px; }
+            .sr-hero-top .sr-card-value { font-size: 1.2rem; }
+            .sr-hero-top .sr-card-label { margin-bottom: 4px; }
+            .sr-hero-body .sr-note { margin-bottom: 16px; }
 
             .sr-note {
                 display: flex; gap: 10px; align-items: flex-start; margin-bottom: 18px; padding: 11px 14px;
                 font-size: 0.72rem; line-height: 1.55; color: var(--sr-muted);
                 background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.10);
-                border-left: 4px solid var(--sr-primary); border-radius: 10px;
+                border-left: 4px solid var(--sr-primary); border-radius: 0;
             }
             .sr-empty { text-align: center; padding: 50px 20px; color: var(--sr-muted-dim); font-size: 0.85rem; }
 
@@ -1791,7 +1839,7 @@ function openSummaryReportModal() {
             .sr-card {
                 --c: var(--sr-primary);
                 position: relative; isolation: isolate; overflow: hidden; flex: 1; min-width: 160px;
-                padding: 14px 14px 12px; border-radius: 14px;
+                padding: 14px 14px 12px; border-radius: 0;
                 background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.10);
                 box-shadow: 0 14px 30px -16px var(--c);
                 transition: transform 0.18s ease, box-shadow 0.18s ease;
@@ -1801,7 +1849,7 @@ function openSummaryReportModal() {
             .sr-card:hover { transform: translateY(-3px); box-shadow: 0 18px 36px -14px var(--c); }
             .sr-cards > .sr-card:only-child { flex: 0 1 340px; }
             .sr-card-icon {
-                position: absolute; right: 12px; top: 12px; width: 28px; height: 28px; border-radius: 50%;
+                position: absolute; right: 12px; top: 12px; width: 28px; height: 28px; border-radius: 0;
                 display: flex; align-items: center; justify-content: center; font-size: 0.75rem;
                 color: var(--c); background: rgba(255,255,255,0.09);
             }
@@ -1812,11 +1860,11 @@ function openSummaryReportModal() {
             /* ---------- section headings ---------- */
             .sr-h4 { --c: var(--sr-primary); display: flex; align-items: center; gap: 10px; margin: 26px 0 12px; font-size: 0.8rem; font-weight: 700; letter-spacing: 1.3px; color: #fff; }
             .sr-h4-chip {
-                width: 28px; height: 28px; border-radius: 9px; flex-shrink: 0; font-size: 0.72rem; color: #150a33;
+                width: 28px; height: 28px; border-radius: 0; flex-shrink: 0; font-size: 0.72rem; color: #150a33;
                 display: flex; align-items: center; justify-content: center;
                 background: linear-gradient(135deg, var(--c), var(--sr-primary-light));
             }
-            .sr-h4-line { flex: 1; height: 2px; border-radius: 2px; background: linear-gradient(90deg, var(--c), transparent); opacity: 0.45; }
+            .sr-h4-line { flex: 1; height: 2px; border-radius: 0; background: linear-gradient(90deg, var(--c), transparent); opacity: 0.45; }
 
             /* ---------- tables ----------
                AUTO table layout on purpose. Columns marked .c-fit shrink to
@@ -1825,20 +1873,39 @@ function openSummaryReportModal() {
                nowrap too, so the ITEM DESCRIPTION column (the only one left
                free to flex) gets ALL the remaining width instead of the old
                fixed layout's even split between every column. */
-            .sr-table { width: 100%; border-collapse: separate; border-spacing: 0; font-size: 0.8rem; margin-bottom: 8px; border-radius: 12px; box-shadow: 0 12px 30px -16px rgba(0,0,0,0.7); }
-            .sr-table thead th {
-                position: sticky; top: 0; z-index: 2; padding: 11px 12px; text-align: left; white-space: nowrap;
-                font-size: 0.72rem; font-weight: 700; letter-spacing: 0.8px; text-transform: uppercase; line-height: 1.25; color: #150a33;
-                background: linear-gradient(90deg, var(--sr-primary), var(--sr-primary-light));
+            /* ---------- freeze-pane table wrapper ----------
+               Gives each table its OWN scroll context (instead of the
+               whole tab content scrolling as one block), so the sticky
+               thead below freezes relative to this box only \u2014 it can
+               never drift over the hero title, cards, or another table's
+               rows above/below it. max-height caps how tall any single
+               table gets before it scrolls internally. */
+            .sr-table-wrap {
+                width: 100%; max-height: 420px; overflow-y: auto; overflow-x: auto;
+                margin-bottom: 8px; box-shadow: 0 12px 30px -16px rgba(0,0,0,0.7); position: relative; isolation: isolate;
             }
-            .sr-table thead th:first-child { border-top-left-radius: 12px; }
-            .sr-table thead th:last-child { border-top-right-radius: 12px; }
-            .sr-table tbody td { padding: 10px 12px; vertical-align: middle; border-bottom: 1px solid rgba(255,255,255,0.07); }
+            .sr-table-wrap .sr-table { margin-bottom: 0; box-shadow: none; }
+            .sr-table { width: 100%; border-collapse: separate; border-spacing: 0; font-size: 0.8rem; margin-bottom: 8px; border-radius: 0; box-shadow: 0 12px 30px -16px rgba(0,0,0,0.7); }
+            .sr-table thead { position: sticky; top: 0; z-index: 10; }
+            .sr-table thead th {
+                position: sticky; top: 0; z-index: 10; padding: 11px 12px; text-align: left; white-space: nowrap;
+                font-size: 0.72rem; font-weight: 700; letter-spacing: 0.8px; text-transform: uppercase; line-height: 1.25; color: #150a33;
+                background-color: var(--sr-primary);
+                background-image: linear-gradient(90deg, var(--sr-primary), var(--sr-primary-light));
+                background-clip: border-box; border: 0;
+                box-shadow: 0 -2px 0 var(--sr-primary), 0 2px 0 rgba(0,0,0,0.35);
+            }
+            /* body cells always sit UNDER the frozen header */
+            .sr-table tbody, .sr-table tbody td { position: relative; z-index: 0; }
+            .sr-table tbody .sr-pill, .sr-table tbody .sr-rank { z-index: 0; }
+            .sr-table thead th:first-child { border-top-left-radius: 0; }
+            .sr-table thead th:last-child { border-top-right-radius: 0; }
+            .sr-table tbody td { padding: 10px 12px; vertical-align: middle; border: 0; }
             .sr-table tbody tr:nth-child(even) td { background: rgba(255,255,255,0.035); }
             .sr-table tbody tr:hover td { background: rgba(var(--sr-primary-rgb), 0.18); }
             .sr-table tbody:last-child tr:last-child td { border-bottom: 0; }
-            .sr-table tbody:last-child tr:last-child td:first-child { border-bottom-left-radius: 12px; }
-            .sr-table tbody:last-child tr:last-child td:last-child { border-bottom-right-radius: 12px; }
+            .sr-table tbody:last-child tr:last-child td:first-child { border-bottom-left-radius: 0; }
+            .sr-table tbody:last-child tr:last-child td:last-child { border-bottom-right-radius: 0; }
             .sr-table .c-fit { width: 1%; white-space: nowrap; }
             .sr-table .c-nowrap { white-space: nowrap; }
             .sr-table .c-tight { padding-left: 8px !important; padding-right: 8px !important; }
@@ -1855,33 +1922,35 @@ function openSummaryReportModal() {
             .sr-table td.sr-empty-cell { text-align: center; padding: 26px; color: var(--sr-muted-dim); white-space: normal; }
             .sr-table tbody tr.sr-section td {
                 padding: 12px; font-size: 0.76rem; font-weight: 700; letter-spacing: 1.2px; color: var(--sc);
-                background: rgba(var(--sc-rgb), 0.18); border-top: 2px solid var(--sc); border-bottom: 1px solid rgba(var(--sc-rgb), 0.4);
+                background: rgba(var(--sc-rgb), 0.18); border: 0;
             }
+            .sr-table .sr-pill, .sr-table .sr-rank { border: 0; }
             .sr-table tbody tr.sr-section:hover td { background: rgba(var(--sc-rgb), 0.18); }
-            .sr-dot { display: inline-block; width: 9px; height: 9px; border-radius: 50%; margin-right: 6px; vertical-align: 1px; box-shadow: 0 0 0 2px rgba(21,10,51,0.35); }
+            .sr-dot { display: inline-block; width: 9px; height: 9px; border-radius: 0; margin-right: 6px; vertical-align: 1px; box-shadow: 0 0 0 2px rgba(21,10,51,0.35); }
 
             /* ---------- small bits ---------- */
             .sr-pill {
                 --c: var(--sr-primary);
                 position: relative; isolation: isolate; display: inline-flex; align-items: center; justify-content: center; gap: 5px;
-                padding: 3px 10px; border-radius: 999px; border: 1px solid var(--c); color: var(--c);
+                padding: 3px 10px; border-radius: 0; border: 1px solid var(--c); color: var(--c);
                 font-size: 0.74rem; font-weight: 700; font-variant-numeric: tabular-nums; white-space: nowrap;
             }
             .sr-pill::before { content: ''; position: absolute; inset: 0; z-index: -1; border-radius: inherit; background: var(--c); opacity: 0.16; }
-            .sr-count { display: inline-block; margin-left: 6px; padding: 1px 9px; border-radius: 999px; font-size: 0.7rem; color: #150a33; background: var(--sc); }
+            .sr-count { display: inline-block; margin-left: 6px; padding: 1px 9px; border-radius: 0; font-size: 0.7rem; color: #150a33; background: var(--sc); }
             .sr-rank {
                 display: inline-flex; align-items: center; justify-content: center; min-width: 32px; height: 32px; padding: 0 7px; box-sizing: border-box;
-                border-radius: 999px; font-weight: 700; font-size: 0.82rem;
+                border-radius: 0; font-weight: 700; font-size: 0.82rem;
                 color: var(--sr-primary-light); background: rgba(var(--sr-primary-rgb), 0.22); border: 1px solid rgba(var(--sr-primary-rgb), 0.55);
             }
-            .sr-rank.r1 { color: #3b2300; border-color: transparent; background: linear-gradient(135deg, #fde047, #f59e0b); box-shadow: 0 0 16px rgba(253,224,71,0.55); }
+            .sr-rank.r1 { flex-direction: column; gap: 1px; height: 40px; min-width: 36px; line-height: 1; color: #3b2300; border-color: transparent; background: linear-gradient(135deg, #fde047, #f59e0b); box-shadow: 0 0 16px rgba(253,224,71,0.55); }
+            .sr-rank .sr-crown { width: 18px; height: 18px; display: block; flex-shrink: 0; filter: drop-shadow(0 1px 0 rgba(255,255,255,0.45)); }
             .sr-rank.r2 { color: #1f2937; border-color: transparent; background: linear-gradient(135deg, #f1f5f9, #94a3b8); box-shadow: 0 0 12px rgba(203,213,225,0.4); }
             .sr-rank.r3 { color: #2b1200; border-color: transparent; background: linear-gradient(135deg, #fdba74, #c2410c); box-shadow: 0 0 12px rgba(251,146,60,0.4); }
 
             .sr-bar-row { display: flex; align-items: center; gap: 12px; margin-bottom: 9px; }
             .sr-bar-label { width: 100px; flex-shrink: 0; font-size: 0.72rem; color: var(--sr-muted); }
-            .sr-bar-track { flex: 1; height: 18px; border-radius: 9px; overflow: hidden; background: rgba(255,255,255,0.07); }
-            .sr-bar-fill { height: 100%; border-radius: 9px; transform-origin: left; background: linear-gradient(90deg, rgba(var(--sr-primary-rgb), 0.45), rgba(var(--sr-primary-rgb), 0.95)); }
+            .sr-bar-track { flex: 1; height: 18px; border-radius: 0; overflow: hidden; background: rgba(255,255,255,0.07); }
+            .sr-bar-fill { height: 100%; border-radius: 0; transform-origin: left; background: linear-gradient(90deg, rgba(var(--sr-primary-rgb), 0.45), rgba(var(--sr-primary-rgb), 0.95)); }
             .sr-bar-val { width: 170px; flex-shrink: 0; text-align: right; font-size: 0.75rem; color: #fff; }
             .sr-bar-val span { color: var(--sr-muted-dim); }
             .sr-bar-row.today .sr-bar-label { color: #ffd0f3; font-weight: 700; }
@@ -1921,7 +1990,8 @@ function openSummaryReportModal() {
                 #srPrintableArea .sr-title { background: none !important; -webkit-text-fill-color: #000 !important; animation: none !important; }
                 #srPrintableArea .sr-card::before, #srPrintableArea .sr-card::after, #srPrintableArea .sr-pill::before { display: none !important; }
                 #srPrintableArea .sr-live-pill, #srPrintableArea .sr-hero-icon, #srPrintableArea .sr-card-icon, #srPrintableArea .sr-dot, #srPrintableArea .sr-h4-chip { display: none !important; }
-                #srPrintableArea .sr-table thead th { position: static !important; }
+                #srPrintableArea .sr-table-wrap { max-height: none !important; overflow: visible !important; box-shadow: none !important; }
+                #srPrintableArea .sr-table thead th { position: static !important; box-shadow: none !important; }
                 #srPrintableArea .sr-table th, #srPrintableArea .sr-table td { width: auto !important; word-break: normal !important; overflow-wrap: break-word !important; }
                 #srPrintableArea .sr-table td.c-sku, #srPrintableArea .sr-table td.c-num, #srPrintableArea .sr-table td.c-money { white-space: nowrap !important; }
                 #srPrintableArea .sr-table .c-desc { min-width: 0 !important; }
@@ -2126,7 +2196,22 @@ function srRenderActiveTab(animate) {
     content.style.setProperty('--sr-primary-rgb', tab.rgb);
 
     const fn = renderers[srState.activeTab];
-    content.innerHTML = srHero(tab) + (fn ? fn() : srEmpty('Unknown report.'));
+    // These four tabs nest their table(s) INSIDE the hero block instead
+    // of floating them below it as separate elements.
+    const NEST_TABLE_IN_HERO = ['DAILY_SALES', 'TOP_RANK', 'MONTH_COMPARE', 'CRITICAL_STOCK', 'OUT_OF_STOCK', 'STOCK_AVAILABILITY'];
+    const body = fn ? fn() : srEmpty('Unknown report.');
+    content.innerHTML = NEST_TABLE_IN_HERO.includes(srState.activeTab)
+        ? srHeroPanel(tab, body)
+        : srHero(tab) + body;
+
+    // Stat cards sit NEXT TO the hero title (same row) instead of below it:
+    // lift the .sr-cards block out of the body and drop it into the hero's
+    // title row, just before the LIVE pill.
+    const heroTop = content.querySelector('.sr-hero-top');
+    const heroCards = content.querySelector('.sr-cards');
+    if (heroTop && heroCards) {
+        heroTop.insertBefore(heroCards, heroTop.querySelector('.sr-live-pill'));
+    }
 
     if (animate) {
         content.scrollTop = 0;
@@ -2228,7 +2313,7 @@ function srRenderDailySales() {
         srHeading('LAST 7 DAYS', 'fa-chart-line') +
         `<div style="margin-bottom: 8px;">${trendHTML}</div>` +
         srHeading('SALES PER SKU \u2014 TODAY', 'fa-tags', '#f472b6') +
-        `<table class="sr-table">
+        srTableWrap(`<table class="sr-table">
             <thead><tr>
                 <th class="c-fit">SKU CODE</th>
                 <th>ITEM DESCRIPTION</th>
@@ -2236,7 +2321,7 @@ function srRenderDailySales() {
                 <th class="c-fit c-right">VALUE</th>
             </tr></thead>
             <tbody>${skuRowsHTML || `<tr><td colspan="4" class="sr-empty-cell">No releases logged today yet.</td></tr>`}</tbody>
-        </table>${skuList.length > CAP ? `<div style="font-size: 0.68rem; color: var(--sr-muted-dim); margin-top: 8px;">Showing the top ${CAP} of ${skuList.length} SKUs released today.</div>` : ''}`;
+        </table>`) + `${skuList.length > CAP ? `<div style="font-size: 0.68rem; color: var(--sr-muted-dim); margin-top: 8px;">Showing the top ${CAP} of ${skuList.length} SKUs released today.</div>` : ''}`;
 }
 
 // ---- shared: aggregate sales rows within a date range, grouped by a key ----
@@ -2315,7 +2400,7 @@ function srRenderTopRank() {
         `<div class="sr-top-rank-grid" style="display: grid; grid-template-columns: 1fr 1fr; gap: 0 20px; align-items: start;">
             <div style="display: block; min-width: 0;">
                 ${srHeading('BY DEPARTMENT', 'fa-building')}
-                <table class="sr-table">
+                ${srTableWrap(`<table class="sr-table">
                     <thead><tr>
                         <th class="c-fit c-center">RANK</th>
                         <th>DEPARTMENT</th>
@@ -2323,11 +2408,11 @@ function srRenderTopRank() {
                         <th class="c-fit c-right">TOTAL AMOUNT<br>(SRP)</th>
                     </tr></thead>
                     <tbody>${deptRowsHTML || `<tr><td colspan="4" class="sr-empty-cell">No release records yet this month.</td></tr>`}</tbody>
-                </table>
+                </table>`)}
             </div>
             <div style="display: block; min-width: 0;">
-                ${srHeading('BY DESCRIPTION', 'fa-tags', '#f472b6')}
-                <table class="sr-table">
+                ${srHeading('BY ITEM', 'fa-tags', '#f472b6')}
+                ${srTableWrap(`<table class="sr-table">
                     <thead><tr>
                         <th class="c-fit c-center">RANK</th>
                         <th class="c-fit">SKU CODE</th>
@@ -2336,7 +2421,7 @@ function srRenderTopRank() {
                         <th class="c-fit c-right">TOTAL AMOUNT<br>(SRP)</th>
                     </tr></thead>
                     <tbody>${itemRowsHTML || `<tr><td colspan="5" class="sr-empty-cell">No release records yet this month.</td></tr>`}</tbody>
-                </table>
+                </table>`)}
             </div>
         </div>`;
 }
@@ -2411,7 +2496,7 @@ function srRenderMonthCompare() {
         `<div class="sr-top-rank-grid" style="display: grid; grid-template-columns: 1fr 1fr; gap: 0 20px; align-items: start;">
             <div style="display: block; min-width: 0;">
                 ${srHeading('BY DEPARTMENT', 'fa-building')}
-                <table class="sr-table">
+                ${srTableWrap(`<table class="sr-table">
                     <thead><tr>
                         <th>DEPARTMENT</th>
                         <th class="c-fit c-right">THIS MONTH</th>
@@ -2419,11 +2504,11 @@ function srRenderMonthCompare() {
                         <th class="c-fit c-right">CHANGE</th>
                     </tr></thead>
                     <tbody>${deptRowsHTML || `<tr><td colspan="4" class="sr-empty-cell">No release records yet.</td></tr>`}</tbody>
-                </table>
+                </table>`)}
             </div>
             <div style="display: block; min-width: 0;">
-                ${srHeading('BY DESCRIPTION', 'fa-tags', '#f472b6')}
-                <table class="sr-table">
+                ${srHeading('BY PRODUCT', 'fa-tags', '#f472b6')}
+                ${srTableWrap(`<table class="sr-table">
                     <thead><tr>
                         <th class="c-fit">SKU CODE</th>
                         <th>ITEM DESCRIPTION</th>
@@ -2432,7 +2517,7 @@ function srRenderMonthCompare() {
                         <th class="c-fit c-right">CHANGE</th>
                     </tr></thead>
                     <tbody>${productRowsHTML || `<tr><td colspan="5" class="sr-empty-cell">No release records yet.</td></tr>`}</tbody>
-                </table>
+                </table>`)}
             </div>
         </div>`;
 }
@@ -2454,7 +2539,7 @@ function srRenderStockBucket(status, title, color, icon) {
     </tr>`).join('');
 
     return `<div class="sr-cards">${srStatCard(title + ' ITEMS', items.length, 'across all departments', color, icon)}</div>
-        <table class="sr-table">
+        ${srTableWrap(`<table class="sr-table">
             <thead><tr>
                 <th class="c-fit">DEPARTMENT</th>
                 <th class="c-fit">SKU CODE</th>
@@ -2463,7 +2548,7 @@ function srRenderStockBucket(status, title, color, icon) {
                 <th class="c-fit c-center">LAST DATE<br>RECEIVED</th>
             </tr></thead>
             <tbody>${rowsHTML || `<tr><td colspan="5" class="sr-empty-cell">No items currently ${title.toLowerCase()}.</td></tr>`}</tbody>
-        </table>`;
+        </table>`)}`;
 }
 
 // ---- 7. Stock availability ----
@@ -2504,7 +2589,7 @@ function srRenderStockAvailability() {
         </tbody>`;
 
     return cards +
-        `<table class="sr-table">
+        srTableWrap(`<table class="sr-table">
             <thead><tr>
                 <th class="c-fit">DEPARTMENT</th>
                 <th class="c-fit">SKU CODE</th>
@@ -2514,7 +2599,7 @@ function srRenderStockAvailability() {
             ${section('CRITICAL', 'var(--sr-danger)', '--sr-danger-rgb', 'fa-triangle-exclamation', buckets.critical)}
             ${section('LOW IN STOCK', 'var(--sr-warning)', '--sr-warning-rgb', 'fa-battery-quarter', buckets.low)}
             ${section('OUT OF STOCK', 'var(--sr-orange)', '--sr-orange-rgb', 'fa-ban', buckets.out)}
-        </table>`;
+        </table>`);
 }
 
 // ---- 8/9. Expiration-based reports ----
@@ -2549,7 +2634,7 @@ function srRenderNearExpiration() {
     }).join('');
 
     return `<div class="sr-cards">${srStatCard('NEAR-EXPIRATION ITEMS', items.length, 'expiring within 90 days, across all departments', 'var(--sr-warning)', 'fa-hourglass-half')}</div>
-        <table class="sr-table">
+        ${srTableWrap(`<table class="sr-table">
             <thead><tr>
                 <th class="c-fit">DEPARTMENT</th>
                 <th class="c-fit">SKU CODE</th>
@@ -2559,7 +2644,7 @@ function srRenderNearExpiration() {
                 <th class="c-fit c-center">QTY<br>ONHAND</th>
             </tr></thead>
             <tbody>${rowsHTML || `<tr><td colspan="6" class="sr-empty-cell">Nothing expiring in the next 90 days.</td></tr>`}</tbody>
-        </table>`;
+        </table>`)}`;
 }
 
 function srRenderExpirationMonitoring() {
@@ -2590,7 +2675,7 @@ function srRenderExpirationMonitoring() {
 
     return srNote('Already-expired items only \u2014 for the 0\u201390-day-out watchlist, see NEAR EXPIRATION. Sorted longest-expired first.' + (expired.length > CAP ? ` Showing the first ${CAP} of ${expired.length} items.` : '')) +
         cards +
-        `<table class="sr-table">
+        srTableWrap(`<table class="sr-table">
             <thead><tr>
                 <th class="c-fit">DEPARTMENT</th>
                 <th class="c-fit">SKU CODE</th>
@@ -2600,7 +2685,7 @@ function srRenderExpirationMonitoring() {
                 <th class="c-fit c-center">QTY<br>ONHAND</th>
             </tr></thead>
             <tbody>${rowsHTML || `<tr><td colspan="6" class="sr-empty-cell">No expired items on file.</td></tr>`}</tbody>
-        </table>`;
+        </table>`);
 }
 
 // ---- 10. Aging per description ----
@@ -2642,7 +2727,7 @@ function srRenderAging() {
     const bucketTh = (label, i) => `<th class="c-fit c-center c-tight"><span class="sr-dot" style="background: ${BUCKET_COLORS[i]};"></span>${label}</th>`;
 
     return srNote('No stock-received date exists anywhere in the sheet, so this buckets by days-remaining-until-expiration (shelf life left) rather than true time-in-stock. Add a received-date column to make this a real aging report.') +
-        `<table class="sr-table">
+        srTableWrap(`<table class="sr-table">
             <thead><tr>
                 <th class="c-fit">SKU CODE</th>
                 <th>ITEM DESCRIPTION</th>
@@ -2654,7 +2739,7 @@ function srRenderAging() {
                 <th class="c-fit c-center c-tight">TOTAL QTY</th>
             </tr></thead>
             <tbody>${rowsHTML || `<tr><td colspan="8" class="sr-empty-cell">No items with an expiration date on file.</td></tr>`}</tbody>
-        </table>`;
+        </table>`);
 }
 
 // ---- SUMMARY SHEET \u2014 raw pull of the actual "SUMMARY" tab ----
@@ -2677,12 +2762,10 @@ function srRenderSummarySheet() {
     const rowsHTML = shown.map(row => `<tr>${headers.map((_, c) => `<td>${srEsc(row[c] !== undefined ? row[c] : '')}</td>`).join('')}</tr>`).join('');
 
     return srNote(`Reads the "${SR_SUMMARY_SHEET_NAME}" tab directly from the spreadsheet, exactly as it appears there \u2014 no calculations applied. ${rows.length} row(s) \u00d7 ${headers.length} column(s) found.`) +
-        `<div style="overflow-x: auto;">
-            <table class="sr-table" style="min-width: max-content;">
+        srTableWrap(`<table class="sr-table" style="min-width: max-content;">
                 <thead><tr>${theadHTML}</tr></thead>
                 <tbody>${rowsHTML || `<tr><td colspan="${headers.length}" class="sr-empty-cell">No data rows on this tab yet.</td></tr>`}</tbody>
-            </table>
-        </div>${rows.length > CAP ? `<div style="font-size: 0.68rem; color: var(--sr-muted-dim); margin-top: 8px;">Showing the first ${CAP} of ${rows.length} rows.</div>` : ''}`;
+            </table>`) + `${rows.length > CAP ? `<div style="font-size: 0.68rem; color: var(--sr-muted-dim); margin-top: 8px;">Showing the first ${CAP} of ${rows.length} rows.</div>` : ''}`;
 }
 
 // ==========================================
