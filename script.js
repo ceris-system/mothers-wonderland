@@ -556,6 +556,9 @@ function openModule(moduleName) {
         case 'PULLOUT_FORM':
             loadPulloutFormModuleCode(targetView);
             break;
+        case 'PURCHASE_ORDER_FORM':
+            loadPurchaseOrderFormModuleCode(targetView);
+            break;
         case 'INCOMING':
             loadIncomingModuleCode(targetView);
             break;
@@ -1010,7 +1013,7 @@ function closeCustomAlert() {
 function clearTableData() {
     const activeModule = document.querySelector('.module-view[style*="display: block"]');
     if (activeModule) {
-        const tableBody = activeModule.querySelector('#transferTableBody, #pulloutTableBody');
+        const tableBody = activeModule.querySelector('#transferTableBody, #pulloutTableBody, #poTableBody');
         if (tableBody) tableBody.innerHTML = '';
 
         const remarksInput = activeModule.querySelector('#outgoingRemarks');
@@ -1025,14 +1028,18 @@ function clearTableData() {
 async function triggerPrintForm() {
     const transferMod = document.getElementById('mod-TRANSFER_FORM');
     const reqRelMod = document.getElementById('mod-REQUEST_AND_RELEASED_FORM');
+    const poMod = document.getElementById('mod-PURCHASE_ORDER_FORM');
 
     const isTransferModule = transferMod && transferMod.style.display !== 'none';
     const isReqRelModule = reqRelMod && reqRelMod.style.display !== 'none';
+    const isPoModule = poMod && poMod.style.display !== 'none';
 
     if (isTransferModule) {
         await triggerPrintTransferForm();
     } else if (isReqRelModule) {
         await triggerPrintRequestAndReleasedForm();
+    } else if (isPoModule) {
+        await triggerPrintPurchaseOrderForm();
     } else {
         await triggerPrintPulloutForm();
     }
@@ -1446,37 +1453,26 @@ function selectReportCategory(category) {
     }
 }
 
-// ---- P.O FORM (placeholder shell) ----
-// This button was added to the REPORTS SYSTEM panel before the actual
-// field list / target sheet was specified. Rather than invent fields that
-// likely wouldn't match the real sheet layout, it opens a simple modal
-// shell (title, close button, placeholder note) so the navigation is
-// wired up now; the real form fields/save logic can be dropped into
-// #poFormBody once they're defined.
-
-function buildSimpleFormModal(modalId, titleText, bodyId) {
-    let modal = document.getElementById(modalId);
-    if (modal) return modal;
-
-    const modalHTML = `
-        <div id="${modalId}" style="display: none; position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; background: rgba(0, 0, 0, 0.85); -webkit-backdrop-filter: blur(8px); backdrop-filter: blur(8px); z-index: 9999; justify-content: center; align-items: center;">
-            <div style="background: rgba(18, 24, 38, 0.98); border: 1.5px solid rgba(0, 219, 255, 0.4); box-shadow: 0 0 25px rgba(0, 219, 255, 0.2); padding: 25px; width: 92vw; max-width: 720px; max-height: 85vh; color: #fff; font-family: 'Roboto Mono', monospace; display: flex; flex-direction: column; box-sizing: border-box; border-radius: 8px;">
-                <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid rgba(0, 219, 255, 0.3); padding-bottom: 12px; margin-bottom: 15px;">
-                    <h2 style="color: #00dbff; margin: 0; font-size: 1.2rem; letter-spacing: 1px;">${srEsc(titleText)}</h2>
-                    <button class="app-close-btn" onclick="document.getElementById('${modalId}').style.display='none'" title="Close"><i class="fa-solid fa-xmark"></i></button>
-                </div>
-                <div id="${bodyId}" style="flex: 1; overflow-y: auto; color: #a8b4c8; font-size: 0.85rem; line-height: 1.6;">
-                    Form fields for this haven't been set up yet \u2014 let me know what it should capture (and which sheet it should save to) and I'll build it out.
-                </div>
-            </div>
-        </div>`;
-    document.body.insertAdjacentHTML('beforeend', modalHTML);
-    return document.getElementById(modalId);
-}
+// ---- P.O FORM ----
+// Opens the same Purchase Order entry form used under OUTGOING FORMS →
+// Purchase Order Form (loadPurchaseOrderFormModuleCode / mod-
+// PURCHASE_ORDER_FORM), so REPORTS SYSTEM's "P.O FORM" button and the
+// OUTGOING category button both lead to the exact same form/save/print
+// logic instead of two separate implementations.
+//
+// poFormOpenedFromReports tracks which entry point was used: normally,
+// closing this form (closePurchaseOrderFormModal) returns to the
+// OUTGOING category picker (returnToOutgoingCategories) — but when it
+// was opened from here, there's no OUTGOING picker to return to, so the
+// close button should just hide the form instead.
+let poFormOpenedFromReports = false;
 
 function openPOFormModal() {
-    const modal = buildSimpleFormModal('poFormModal', 'P.O FORM', 'poFormBody');
-    modal.style.display = 'flex';
+    const container = document.getElementById('mod-PURCHASE_ORDER_FORM');
+    if (!container) return;
+    poFormOpenedFromReports = true;
+    container.style.display = 'block';
+    loadPurchaseOrderFormModuleCode(container);
 }
 
 // ==========================================
@@ -2030,16 +2026,12 @@ function srHero(tab) {
 // Just the icon / kicker / title / live-pill row, shared by both the
 // plain banner (srHero) and the panel variant (srHeroPanel) below.
 function srHeroTop(tab) {
-    const stamp = srState.lastUpdated
-        ? `<span class="sr-live-pill"><span class="sr-live-dot"></span>LIVE \u00b7 ${srState.lastUpdated.toLocaleTimeString()}</span>`
-        : '';
     return `<div class="sr-hero-top">
         <div class="sr-hero-icon"><i class="fa-solid ${tab.icon}" style="color: inherit;"></i></div>
         <div style="min-width: 0;">
             <div class="sr-hero-kicker">${srEsc(tab.group)}</div>
             <div class="sr-hero-title">${srEsc(tab.label)}</div>
         </div>
-        ${stamp}
     </div>`;
 }
 
@@ -2489,7 +2481,7 @@ function openSummaryReportModal() {
                         <div class="sr-logo" style="flex-shrink: 0;"><i class="fa-solid fa-chart-pie" style="color: inherit;"></i></div>
                         <div style="flex-shrink: 0; text-align: left;">
                             <h2 class="sr-title" style="text-align: left; white-space: nowrap;">SUMMARY REPORT</h2>
-                            <p id="srLastUpdated" style="margin: 5px 0 0; font-size: 0.7rem; color: var(--sr-muted); text-align: left; white-space: nowrap;">Loading...</p>
+                            <p id="srLastUpdated" class="sr-live-pill" style="margin: 5px 0 0; text-align: left; white-space: nowrap;">Loading...</p>
                         </div>
                     </div>
                     <div style="display: flex; align-items: center; gap: 10px;">
@@ -2590,7 +2582,7 @@ async function srRefreshAll(showSpinner) {
         await srSyncRecentHistory();
         bumpProgress();
         srState.lastUpdated = new Date();
-        if (statusEl) statusEl.textContent = `Live \u00b7 ${srState.lastUpdated.toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })} \u00b7 last updated ${srState.lastUpdated.toLocaleTimeString()} \u00b7 auto-refreshes every 60s`;
+        if (statusEl) statusEl.textContent = srState.lastUpdated.toLocaleTimeString();
         srRenderActiveTab();
     } catch (err) {
         console.error('[Summary Report] refresh failed:', err);
@@ -4961,9 +4953,10 @@ function addSelectedProducts() {
     }
 
     const activeModule = document.querySelector('.module-view[style*="display: block"]');
-    let tableBody = activeModule?.querySelector('#transferTableBody, #pulloutTableBody') || 
+    let tableBody = activeModule?.querySelector('#transferTableBody, #pulloutTableBody, #poTableBody') || 
                     document.getElementById('transferTableBody') || 
-                    document.getElementById('pulloutTableBody');
+                    document.getElementById('pulloutTableBody') ||
+                    document.getElementById('poTableBody');
 
     if (!tableBody) return;
 
@@ -5179,6 +5172,10 @@ const OUTGOING_CONFIGS = {
     PULLOUT_FORM: {
         icon: 'fa-file-arrow-down',
         label: 'PULLOUT FORM'
+    },
+    PURCHASE_ORDER_FORM: {
+        icon: 'fa-cart-shopping',
+        label: 'PURCHASE ORDER FORM'
     }
 };
 
@@ -5214,6 +5211,11 @@ async function loadOutgoingModuleCode(container) {
                         <button class="nav-icon-btn btn-3d" onclick="selectOutgoingCategory('PULLOUT_FORM')" style="flex: 1 1 0px; min-width: 220px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; padding: 15px 10px; min-height: 110px; border-radius: 12px; cursor: pointer; background: rgba(144, 168, 168, 0.35); border: 1.5px solid rgba(0, 0, 0, 0.4); color: #111; -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px);">
                             <i class="fa-solid ${OUTGOING_CONFIGS.PULLOUT_FORM.icon} icon-3d-anim" style="font-size: 1.8rem; color: #111;"></i>
                             <span style="font-family: 'Roboto Mono', monospace; font-size: 0.8rem; font-weight: 700; text-align: center; letter-spacing: 1px;">${OUTGOING_CONFIGS.PULLOUT_FORM.label}</span>
+                        </button>
+
+                        <button class="nav-icon-btn btn-3d" onclick="selectOutgoingCategory('PURCHASE_ORDER_FORM')" style="flex: 1 1 0px; min-width: 220px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; padding: 15px 10px; min-height: 110px; border-radius: 12px; cursor: pointer; background: rgba(144, 168, 168, 0.35); border: 1.5px solid rgba(0, 0, 0, 0.4); color: #111; -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px);">
+                            <i class="fa-solid ${OUTGOING_CONFIGS.PURCHASE_ORDER_FORM.icon} icon-3d-anim" style="font-size: 1.8rem; color: #111;"></i>
+                            <span style="font-family: 'Roboto Mono', monospace; font-size: 0.8rem; font-weight: 700; text-align: center; letter-spacing: 1px;">${OUTGOING_CONFIGS.PURCHASE_ORDER_FORM.label}</span>
                         </button>
                     </div>
                 </div>
@@ -5265,6 +5267,10 @@ function selectOutgoingCategory(categoryKey) {
             break;
         case 'PULLOUT_FORM':
             loadPulloutFormModuleCode(targetView);
+            break;
+        case 'PURCHASE_ORDER_FORM':
+            poFormOpenedFromReports = false;
+            loadPurchaseOrderFormModuleCode(targetView);
             break;
     }
 }
@@ -5420,6 +5426,306 @@ async function loadPulloutFormModuleCode(container) {
 
 function closePulloutModal() {
     returnToOutgoingCategories('PULLOUT_FORM');
+}
+
+// ==========================================
+// PURCHASE ORDER FORM
+// ==========================================
+// Replicates the REQUEST AND RELEASED FORM's process (department field +
+// Add Product from a catalog + qty/remarks per row + auto serial + save &
+// print) with two differences:
+//   1. No INCOMING DEPARTMENT field — this form only has one department
+//      field (the requesting department), labeled simply "DEPARTMENT".
+//   2. "Add Product" pulls from the COMMISSARY INVENTORY sheet (see
+//      preloadCommissaryProductCatalog / openPurchaseOrderProductListModal)
+//      instead of the per-department DATA sheet.
+// Serial numbers use the POR- prefix, 7-digit padding (POR-0000001) —
+// see SERIAL_CONFIG.PURCHASE_ORDER in Code.gs.
+//
+// Unlike the other 3 outgoing forms, this one is NOT wired into
+// WORKFLOW_FORM_MAP — it only has the direct Save & Print flow (no
+// submit-for-admin-approval step). Ask if you want that added too.
+async function loadPurchaseOrderFormModuleCode(container) {
+    if (!container) return;
+    try {
+        container.innerHTML = `<p style="padding: 20px; font-family: 'Roboto Mono', monospace; color: #fff;">Loading Purchase Order Form...</p>`;
+
+        const formHtml = `
+            <div style="margin-bottom: 25px; padding-bottom: 15px; border-bottom: 2px solid #000; display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 15px;">
+                <div style="display: flex; align-items: center; gap: 15px;">
+                    <img src="LOGO.PNG" alt="Logo" style="height: 55px; width: auto; object-fit: contain;" onerror="this.style.display='none';">
+                    <h2 style="margin: 0; font-family: 'Roboto Mono', monospace; font-size: 1.3rem; letter-spacing: 1px; font-weight: 800;">PURCHASE ORDER FORM</h2>
+                </div>
+                <div style="display: flex; gap: 25px; align-items: flex-end;">
+                    <div style="display: flex; flex-direction: column; gap: 4px;">
+                        <label style="font-size: 0.7rem; font-weight: 700; letter-spacing: 1px;">NO.:</label>
+                        <input type="text" id="serialNoDisplay" readonly style="border: none; border-bottom: 1.5px solid #000; background: transparent; font-family: 'Roboto Mono', monospace; font-weight: 700; font-size: 0.95rem; padding: 2px 4px; width: 170px;">
+                    </div>
+                    <div style="display: flex; flex-direction: column; gap: 4px;">
+                        <label style="font-size: 0.7rem; font-weight: 700; letter-spacing: 1px;">DATE:</label>
+                        <input type="text" id="formattedDateDisplay" readonly style="border: none; border-bottom: 1.5px solid #000; background: transparent; font-family: 'Roboto Mono', monospace; font-weight: 700; font-size: 0.95rem; padding: 2px 4px; width: 170px;">
+                    </div>
+                </div>
+            </div>
+
+            <div style="display: flex; gap: 20px; margin-bottom: 20px; flex-wrap: wrap;">
+                <div style="flex: 1 1 320px; display: flex; flex-direction: column; gap: 4px;">
+                    <label style="font-size: 0.75rem; font-weight: 700; letter-spacing: 1px;">DEPARTMENT:</label>
+                    <input type="text" id="outletSearch" list="outletList" placeholder="Select or type department" style="border: none; border-bottom: 1.5px solid #000; background: transparent; font-family: 'Roboto Mono', monospace; font-size: 0.9rem; padding: 6px 4px;">
+                    <datalist id="outletList"></datalist>
+                </div>
+                <div style="flex: 1 1 320px; display: flex; flex-direction: column; gap: 4px;">
+                    <label style="font-size: 0.75rem; font-weight: 700; letter-spacing: 1px;">REMARKS:</label>
+                    <input type="text" id="outgoingRemarks" placeholder="Optional remarks for this purchase order" style="border: none; border-bottom: 1.5px solid #000; background: transparent; font-family: 'Roboto Mono', monospace; font-size: 0.9rem; padding: 6px 4px;">
+                </div>
+            </div>
+
+            <div class="no-print" style="margin-bottom: 12px;">
+                <button type="button" id="productListBtn" class="btn-3d" onclick="openPurchaseOrderProductListModal()" style="padding: 10px 18px; border-radius: 8px; border: 1.5px solid #000; background: #90a8a8; color: #111; font-family: 'Roboto Mono', monospace; font-weight: 700; font-size: 0.8rem; letter-spacing: 1px; cursor: pointer;">
+                    <i class="fa-solid fa-plus" style="margin-right: 8px;"></i>ADD PRODUCT
+                </button>
+            </div>
+
+            <div style="flex: 1; overflow: auto; border: 1px solid #000;">
+                <table style="width: 100%; border-collapse: collapse; font-family: 'Roboto Mono', monospace; font-size: 0.78rem;">
+                    <thead>
+                        <tr style="background: #e9ecef;">
+                            <th style="padding: 8px; border: 1px solid #000;">SKU</th>
+                            <th style="padding: 8px; border: 1px solid #000;">DESCRIPTION</th>
+                            <th style="padding: 8px; border: 1px solid #000;">UOM</th>
+                            <th style="padding: 8px; border: 1px solid #000;">EXP DATE</th>
+                            <th style="padding: 8px; border: 1px solid #000;">QTY ON HAND</th>
+                            <th style="padding: 8px; border: 1px solid #000;">TOTAL ON HAND</th>
+                            <th style="padding: 8px; border: 1px solid #000;">COST</th>
+                            <th style="padding: 8px; border: 1px solid #000;">SRP</th>
+                            <th style="padding: 8px; border: 1px solid #000;">QTY</th>
+                            <th style="padding: 8px; border: 1px solid #000;">REMARKS</th>
+                            <th class="no-print" style="padding: 8px; border: 1px solid #000;"></th>
+                        </tr>
+                    </thead>
+                    <tbody id="poTableBody"></tbody>
+                </table>
+            </div>
+
+            <div class="no-print" style="margin-top: 20px; display: flex; justify-content: flex-end; gap: 12px;">
+                <button type="button" onclick="triggerPrintPurchaseOrderForm()" class="btn-3d" style="padding: 12px 24px; border-radius: 8px; border: none; background: #28a745; color: #fff; font-family: 'Roboto Mono', monospace; font-weight: 700; font-size: 0.85rem; letter-spacing: 1px; cursor: pointer;">
+                    <i class="fa-solid fa-floppy-disk" style="margin-right: 8px;"></i>SAVE &amp; PRINT
+                </button>
+            </div>
+        `;
+
+        container.innerHTML = `
+            <div style="position: fixed; top: 0; left: 0; width: 100vw; height: 98%; background: rgba(0, 0, 0, 0.75); -webkit-backdrop-filter: blur(8px); backdrop-filter: blur(8px); display: flex; justify-content: center; align-items: center; z-index: 3000; box-sizing: border-box; padding: 20px 50px 20px 20px;">
+                <div class="glass-card" style="position: relative; width: 100%; height:100%; max-width: none; max-height: none; overflow-y: auto; background: rgba(20, 20, 25, 0.95); border: 1px solid rgba(255, 255, 255, 0.2); border-radius: 16px; padding: 60px; box-sizing: border-box; display: flex; flex-direction: column; align-items: stretch; box-shadow: 0 30px 60px rgba(0,0,0,0.7);">
+                    <div style="position: absolute; top: 18px; right: 25px; z-index: 10; display: flex; gap: 12px; align-items: center;">
+                        <button class="app-close-btn" onclick="closePurchaseOrderFormModal()" title="Close">
+                            <i class="fa-solid fa-xmark"></i>
+                        </button>
+                    </div>
+                    <div style="color: #111; flex: 1; display: flex; flex-direction: column;">
+                        ${formHtml}
+                    </div>
+                </div>
+            </div>
+        `;
+
+        if (typeof loadOutletFilterFromConfig === 'function') loadOutletFilterFromConfig();
+        if (typeof setTransferDate === 'function') setTransferDate();
+        applyPulloutOutgoingLockForNonAdmin(container); // reuses the same "lock to own dept for non-admins" behavior on #outletSearch
+        loadNextSerialPreview('mod-PURCHASE_ORDER_FORM', 'PURCHASE_ORDER');
+        preloadCommissaryProductCatalog().catch(error => {
+            console.error('Commissary catalog preload failed:', error);
+        });
+
+    } catch (error) {
+        console.error(error);
+        container.innerHTML = `<p style="padding: 20px; color: red;">Error loading Purchase Order form: ${escapeHtml(error.message)}</p>`;
+    }
+}
+
+function closePurchaseOrderFormModal() {
+    if (poFormOpenedFromReports) {
+        poFormOpenedFromReports = false;
+        const container = document.getElementById('mod-PURCHASE_ORDER_FORM');
+        if (container) {
+            container.style.display = 'none';
+            container.innerHTML = '';
+        }
+        return;
+    }
+    returnToOutgoingCategories('PURCHASE_ORDER_FORM');
+}
+
+async function triggerPrintPurchaseOrderForm() {
+    const container = document.getElementById('mod-PURCHASE_ORDER_FORM');
+    const deptInput = container?.querySelector('#outletSearch');
+    const dateInput = container?.querySelector('#formattedDateDisplay');
+    const deptValue = deptInput ? deptInput.value.trim() : '';
+    const formDate = dateInput ? dateInput.value.trim() : '';
+
+    const remarksInput = container?.querySelector('#outgoingRemarks');
+    const remarksValue = remarksInput ? remarksInput.value.trim() : '';
+
+    if (!deptValue) return showCustomAlert('Please select or type a DEPARTMENT before printing.', deptInput);
+
+    const tableBody = container?.querySelector('#poTableBody');
+    const rows = tableBody ? tableBody.querySelectorAll('tr') : [];
+    if (rows.length === 0) return showCustomAlert('Please add at least one product before printing.');
+
+    const rowsToSave = [];
+    rows.forEach(row => {
+        const cells = row.querySelectorAll('td');
+        if (cells.length < 11) return;
+
+        const getCellText = (idx) => cells[idx] ? cells[idx].innerText.trim() : '';
+        const getInputValue = (idx) => {
+            const input = cells[idx] ? cells[idx].querySelector('input') : null;
+            return input ? input.value.trim() : '';
+        };
+
+        const itemRemarks = getInputValue(9);
+
+        // A dept | B,C,D sku/desc/uom | E exp | F,G onhand/total |
+        // H,I cost/srp | J qty | K date | L serial (stamped by backend) |
+        // M form remarks | N item remarks
+        rowsToSave.push([
+            deptValue,
+            getCellText(0), getCellText(1), getCellText(2),
+            getCellText(3),
+            getCellText(4), getCellText(5),
+            getCellText(6), getCellText(7),
+            getInputValue(8),
+            formDate,
+            '',
+            remarksValue,
+            itemRemarks
+        ]);
+    });
+
+    if (typeof showSeaWaveLoader === 'function') showSeaWaveLoader("SAVING DATA...");
+
+    try {
+        const response = await fetch(window.API, {
+            method: "POST",
+            body: JSON.stringify({ action: "savePurchaseOrderData", sheetName: "PURCHASE_ORDER", formKey: "PURCHASE_ORDER", rows: rowsToSave, token: window.API_TOKEN })
+        });
+
+        const result = await response.json();
+        if (!result.success) throw new Error(result.message || "Failed to save data.");
+
+        const serialField = container?.querySelector('#serialNoDisplay');
+        if (serialField && result.serial) serialField.value = result.serial;
+
+        printOnly('mod-PURCHASE_ORDER_FORM');
+        const poTableBody = container?.querySelector('#poTableBody');
+        if (poTableBody) poTableBody.innerHTML = '';
+        if (remarksInput) remarksInput.value = '';
+        loadNextSerialPreview('mod-PURCHASE_ORDER_FORM', 'PURCHASE_ORDER');
+    } catch (error) {
+        console.error("Save Error:", error);
+        showCustomAlert("Error saving record: " + error.message);
+    } finally {
+        if (typeof hideSeaWaveLoader === 'function') hideSeaWaveLoader();
+    }
+}
+
+// ---- Product catalog sourced from the COMMISSARY INVENTORY sheet -------
+// Mirrors preloadProductCatalog()/openProductListModal() but reads the
+// COMMISSARY INVENTORY sheet instead of DATA, and is NOT filtered by
+// department — assumed to be one shared central stock list rather than
+// a per-outlet one. Columns are assumed to match DATA's layout minus the
+// outlet column (A SKU, B DESCRIPTION, C UOM, D EXP DATE, E QTY ON HAND,
+// F TOTAL ON HAND, G COST, H SRP). Adjust the column indices below if
+// your COMMISSARY INVENTORY sheet is laid out differently.
+let commissaryCatalogCache = null;
+let commissaryCatalogPromise = null;
+let allFetchedCommissaryProducts = [];
+
+async function preloadCommissaryProductCatalog() {
+    if (commissaryCatalogCache) return commissaryCatalogCache;
+    if (commissaryCatalogPromise) return commissaryCatalogPromise;
+
+    commissaryCatalogPromise = (async () => {
+        const url = `${window.API}?sheet=${encodeURIComponent('COMMISSARY INVENTORY')}&range=A1:H&token=${encodeURIComponent(window.API_TOKEN)}`;
+        const response = await fetch(url);
+        const result = await response.json();
+        const rawData = Array.isArray(result) ? result : (result.values || result.data || []);
+
+        commissaryCatalogCache = [];
+        rawData.forEach((row, index) => {
+            if (index === 0 || !Array.isArray(row)) return;
+
+            const sku = row[0] || '';
+            const description = row[1] || '';
+            if (sku === '' && description === '') return;
+
+            commissaryCatalogCache.push({
+                sku,
+                description,
+                uom: row[2] || '-',
+                expDate: formatExpirationDate(row[3]),
+                qtyOnhand: row[4] || '0',
+                totalOnhand: row[5] || '0',
+                cost: row[6] || '0',
+                srp: row[7] || '0'
+            });
+        });
+
+        return commissaryCatalogCache;
+    })().catch(error => {
+        commissaryCatalogPromise = null;
+        throw error;
+    });
+
+    return commissaryCatalogPromise;
+}
+
+async function openPurchaseOrderProductListModal() {
+    const container = document.getElementById('mod-PURCHASE_ORDER_FORM');
+    const deptInput = container?.querySelector('#outletSearch');
+    const deptValue = deptInput ? deptInput.value.trim() : '';
+
+    if (!deptValue) {
+        showCustomAlert("Please select or type a DEPARTMENT first.", deptInput);
+        return;
+    }
+
+    const modalTitleEl = document.getElementById('productListModalTitle')
+        || document.querySelector('#productListModal h2, #productListModal h3');
+    if (modalTitleEl) {
+        modalTitleEl.innerText = `SELECT PRODUCT FOR ${deptValue.toUpperCase()}`;
+    }
+
+    const modal = document.getElementById('productListModal');
+    if (modal) modal.style.display = 'flex';
+
+    const tableBody = document.getElementById('productListTableBody');
+    if (tableBody) {
+        tableBody.innerHTML = commissaryCatalogCache
+            ? ''
+            : '<tr><td colspan="7" style="text-align:center; padding:15px; border:1px solid #000;">Loading products...</td></tr>';
+    }
+
+    try {
+        if (!window.API) return;
+
+        if (commissaryCatalogCache) {
+            allFetchedProducts = commissaryCatalogCache;
+            allFetchedCommissaryProducts = commissaryCatalogCache;
+            renderProductTable(allFetchedProducts);
+        }
+
+        await preloadCommissaryProductCatalog();
+        allFetchedProducts = commissaryCatalogCache;
+        allFetchedCommissaryProducts = commissaryCatalogCache;
+        renderProductTable(allFetchedProducts);
+
+    } catch (error) {
+        console.error("Failed to load products from COMMISSARY INVENTORY sheet:", error);
+        if (tableBody) {
+            tableBody.innerHTML = '<tr><td colspan="7" style="text-align:center; color:red; padding:15px; border:1px solid #000;">Failed to load products.</td></tr>';
+        }
+    }
 }
 
 // ==========================================
