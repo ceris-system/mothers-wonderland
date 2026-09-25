@@ -758,6 +758,53 @@ function injectAppPrintStyles() {
             .print-target-active .no-print {
                 display: none !important;
             }
+
+            /* INVENTORY FORM print layout: the generic auto table-layout
+               above was giving SKU CODE / ITEM DESCRIPTION / UOM / SRP
+               almost no room — those 4 columns' headers are short words,
+               so auto-layout starved them in favor of the longer
+               "EXPIRATION DATE n" headers even though those columns are
+               otherwise just blank boxes. Fixed layout + explicit percent
+               widths hands the code/description/uom/srp columns real
+               space and lets the date/qty boxes stay narrower. */
+            #inventoryFormPrintableArea table {
+                table-layout: fixed !important;
+            }
+            #inventoryFormPrintableArea table th:nth-child(1),
+            #inventoryFormPrintableArea table td:nth-child(1) { width: 9% !important; }   /* SKU CODE */
+            #inventoryFormPrintableArea table th:nth-child(2),
+            #inventoryFormPrintableArea table td:nth-child(2) { width: 25% !important; }  /* ITEM DESCRIPTION */
+            #inventoryFormPrintableArea table th:nth-child(3),
+            #inventoryFormPrintableArea table td:nth-child(3) { width: 5% !important; }   /* UOM */
+            #inventoryFormPrintableArea table th:nth-child(4),
+            #inventoryFormPrintableArea table td:nth-child(4) { width: 6% !important; }   /* SRP */
+            #inventoryFormPrintableArea table th:nth-child(5),
+            #inventoryFormPrintableArea table td:nth-child(5) { width: 8% !important; }   /* TOTAL QTY ONHAND */
+            #inventoryFormPrintableArea table th:nth-child(6),
+            #inventoryFormPrintableArea table td:nth-child(6),
+            #inventoryFormPrintableArea table th:nth-child(8),
+            #inventoryFormPrintableArea table td:nth-child(8),
+            #inventoryFormPrintableArea table th:nth-child(10),
+            #inventoryFormPrintableArea table td:nth-child(10) { width: 10% !important; } /* EXPIRATION DATE 1/2/3 */
+            #inventoryFormPrintableArea table th:nth-child(7),
+            #inventoryFormPrintableArea table td:nth-child(7),
+            #inventoryFormPrintableArea table th:nth-child(9),
+            #inventoryFormPrintableArea table td:nth-child(9),
+            #inventoryFormPrintableArea table th:nth-child(11),
+            #inventoryFormPrintableArea table td:nth-child(11) { width: 4% !important; }  /* QTY */
+            #inventoryFormPrintableArea table th:nth-child(12),
+            #inventoryFormPrintableArea table td:nth-child(12) { width: 5% !important; }  /* ENDING QUANTITY */
+
+            /* Selected area/department — hidden on screen (the dropdown
+               above the table already shows it), printed right next to
+               the "INVENTORY FORM" title so the paper copy is still
+               identifiable once it's off the screen. */
+            .print-target-active #ivfPrintAreaLabel {
+                display: inline !important;
+                color: #000 !important;
+                font-weight: 700;
+                font-size: 12pt;
+            }
         }
     `;
     document.head.appendChild(style);
@@ -1337,6 +1384,18 @@ async function loadReportModuleCode(container) {
                             <span style="font-family: 'Roboto Mono', monospace; font-size: 0.8rem; font-weight: 700; text-align: center; letter-spacing: 1px;">SUMMARY REPORT${scope.isAdmin ? '' : ' <i class=\'fa-solid fa-lock\' style=\'font-size: 0.7rem; margin-left: 4px;\'></i>'}</span>
                         </button>
                     </div>
+
+                    <div style="display: flex; justify-content: center; gap: 20px; width: 100%; max-width: 800px;">
+                        <button class="nav-icon-btn" onclick="selectReportCategory('INVENTORY_FORM')" style="flex: 0 0 240px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; padding: 15px 10px; min-height: 110px; border-radius: 12px; cursor: pointer; background: rgba(144, 168, 168, 0.35); border: 1.5px solid rgba(0, 0, 0, 0.4); color: #111; -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px); transition: all 0.3s ease;">
+                            <i class="fa-solid fa-clipboard-list" style="font-size: 1.8rem; color: #111;"></i>
+                            <span style="font-family: 'Roboto Mono', monospace; font-size: 0.8rem; font-weight: 700; text-align: center; letter-spacing: 1px;">INVENTORY FORM</span>
+                        </button>
+
+                        <button class="nav-icon-btn" onclick="selectReportCategory('PO_FORM')" style="flex: 0 0 240px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; padding: 15px 10px; min-height: 110px; border-radius: 12px; cursor: pointer; background: rgba(144, 168, 168, 0.35); border: 1.5px solid rgba(0, 0, 0, 0.4); color: #111; -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px); transition: all 0.3s ease;">
+                            <i class="fa-solid fa-cart-shopping" style="font-size: 1.8rem; color: #111;"></i>
+                            <span style="font-family: 'Roboto Mono', monospace; font-size: 0.8rem; font-weight: 700; text-align: center; letter-spacing: 1px;">P.O FORM</span>
+                        </button>
+                    </div>
                 </div>
             </div>
         `;
@@ -1372,6 +1431,12 @@ function selectReportCategory(category) {
         }
         logButtonClick('SUMMARY_REPORT_BUTTON_CLICKED');
         openSummaryReportModal();
+    } else if (category === 'INVENTORY_FORM') {
+        logButtonClick('INVENTORY_FORM_BUTTON_CLICKED');
+        openInventoryFormModal();
+    } else if (category === 'PO_FORM') {
+        logButtonClick('PO_FORM_BUTTON_CLICKED');
+        openPOFormModal();
     } else if (HISTORY_CONFIGS[category]) {
         const logLabel = (HISTORY_CONFIGS[category].title || category).toUpperCase().replace(/\s+/g, '_') + '_BUTTON_CLICKED';
         logButtonClick(logLabel);
@@ -1381,6 +1446,329 @@ function selectReportCategory(category) {
     }
 }
 
+// ---- P.O FORM (placeholder shell) ----
+// This button was added to the REPORTS SYSTEM panel before the actual
+// field list / target sheet was specified. Rather than invent fields that
+// likely wouldn't match the real sheet layout, it opens a simple modal
+// shell (title, close button, placeholder note) so the navigation is
+// wired up now; the real form fields/save logic can be dropped into
+// #poFormBody once they're defined.
+
+function buildSimpleFormModal(modalId, titleText, bodyId) {
+    let modal = document.getElementById(modalId);
+    if (modal) return modal;
+
+    const modalHTML = `
+        <div id="${modalId}" style="display: none; position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; background: rgba(0, 0, 0, 0.85); -webkit-backdrop-filter: blur(8px); backdrop-filter: blur(8px); z-index: 9999; justify-content: center; align-items: center;">
+            <div style="background: rgba(18, 24, 38, 0.98); border: 1.5px solid rgba(0, 219, 255, 0.4); box-shadow: 0 0 25px rgba(0, 219, 255, 0.2); padding: 25px; width: 92vw; max-width: 720px; max-height: 85vh; color: #fff; font-family: 'Roboto Mono', monospace; display: flex; flex-direction: column; box-sizing: border-box; border-radius: 8px;">
+                <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid rgba(0, 219, 255, 0.3); padding-bottom: 12px; margin-bottom: 15px;">
+                    <h2 style="color: #00dbff; margin: 0; font-size: 1.2rem; letter-spacing: 1px;">${srEsc(titleText)}</h2>
+                    <button class="app-close-btn" onclick="document.getElementById('${modalId}').style.display='none'" title="Close"><i class="fa-solid fa-xmark"></i></button>
+                </div>
+                <div id="${bodyId}" style="flex: 1; overflow-y: auto; color: #a8b4c8; font-size: 0.85rem; line-height: 1.6;">
+                    Form fields for this haven't been set up yet \u2014 let me know what it should capture (and which sheet it should save to) and I'll build it out.
+                </div>
+            </div>
+        </div>`;
+    document.body.insertAdjacentHTML('beforeend', modalHTML);
+    return document.getElementById(modalId);
+}
+
+function openPOFormModal() {
+    const modal = buildSimpleFormModal('poFormModal', 'P.O FORM', 'poFormBody');
+    modal.style.display = 'flex';
+}
+
+// ==========================================
+// INVENTORY FORM (physical stock count sheet)
+// ==========================================
+// Filter dropdown ("SELECT AREA"): AREA sheet A1:A, same source list as
+// the History modal's department filter — reuses fetchAreaList() /
+// cachedAreaList (declared further down this file) instead of a second
+// fetch of the same range.
+//
+// Every item field comes from the DATA sheet (range A2:I), kept only
+// where that row's column G matches the selected filter value:
+//   SKU CODE            <- DATA column A
+//   ITEM DESCRIPTION    <- DATA column B
+//   UOM                 <- DATA column C
+//   SRP                 <- DATA column I
+//   TOTAL QTY ONHAND    <- DATA column F
+// (AREA is used only for the filter dropdown's option list — none of the
+// row data itself is read from AREA.)
+// EXPIRATION DATE 1/2/3, their QTY fields, and ENDING QUANTITY are left
+// blank for manual entry — this is a physical count sheet, not a report.
+
+let ivfDataRows = [];   // raw DATA!A2:I rows
+let ivfSourceLoaded = false;
+let ivfItems = [];      // built rows for the currently selected area
+
+const IVF_DATA_RANGE = 'A2:I';
+
+async function ivfLoadSource() {
+    if (ivfSourceLoaded) return;
+    if (!window.API) return;
+
+    const url = `${window.API}?sheet=DATA&range=${encodeURIComponent(IVF_DATA_RANGE)}&token=${encodeURIComponent(window.API_TOKEN)}`;
+    const result = await fetch(url).then(r => r.json());
+
+    ivfDataRows = Array.isArray(result) ? result : (result.values || result.data || []);
+    ivfSourceLoaded = true;
+}
+
+function ivfBuildItems(selectedArea) {
+    const area = String(selectedArea || '').trim().toUpperCase();
+    const items = [];
+    if (!area) return items;
+
+    ivfDataRows.forEach(row => {
+        if (!Array.isArray(row)) return;
+        const rowArea = String(row[6] || '').trim().toUpperCase(); // col G
+        if (rowArea !== area) return;
+
+        const sku = row[0] || '';      // col A
+        const desc = row[1] || '';     // col B
+        const uom = row[2] || '';      // col C
+        const totalQty = row[5] || ''; // col F
+        const srp = row[8] || '';      // col I
+
+        if (!String(sku).trim() && !String(desc).trim()) return; // skip blank rows
+
+        items.push({
+            sku: String(sku).trim(),
+            desc: String(desc).trim(),
+            uom: String(uom).trim(),
+            totalQty: String(totalQty).trim(),
+            srp: String(srp).trim()
+        });
+    });
+
+    return items;
+}
+
+// No separate box around each field — the table cell's own border (set on
+// the <td> in ivfRenderRows) is the only border these show; the input
+// itself is just transparent/borderless so it blends into that cell.
+const IVF_INPUT_STYLE = "width: 100%; box-sizing: border-box; padding: 5px 6px; background: transparent; border: none; outline: none; color: #fff; font-family: inherit; font-size: 0.78rem;";
+
+function buildInventoryFormModal() {
+    let modal = document.getElementById('inventoryFormModal');
+    if (modal) return modal;
+
+    const modalHTML = `
+        <div id="inventoryFormModal" style="display: none; position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; background: rgba(0, 0, 0, 0.85); -webkit-backdrop-filter: blur(8px); backdrop-filter: blur(8px); z-index: 9999; justify-content: center; align-items: center;">
+            <div id="inventoryFormPrintableArea" style="background: rgba(18, 24, 38, 0.98); border: 1.5px solid rgba(0, 219, 255, 0.4); box-shadow: 0 0 25px rgba(0, 219, 255, 0.2); padding: 25px; width: 96vw; max-width: 1400px; height: 90vh; color: #fff; font-family: 'Roboto Mono', monospace; display: flex; flex-direction: column; box-sizing: border-box; border-radius: 8px;">
+                <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid rgba(0, 219, 255, 0.3); padding-bottom: 12px; margin-bottom: 15px;">
+                    <div style="display: flex; align-items: baseline; gap: 14px;">
+                        <h2 style="color: #00dbff; margin: 0; font-size: 1.2rem; letter-spacing: 1px;">INVENTORY FORM</h2>
+                        <span id="ivfPrintAreaLabel" style="display: none;"></span>
+                    </div>
+                    <button class="app-close-btn" onclick="document.getElementById('inventoryFormModal').style.display='none'" title="Close"><i class="fa-solid fa-xmark"></i></button>
+                </div>
+
+                <div class="no-print" style="display: flex; gap: 15px; margin-bottom: 15px; align-items: flex-end; flex-wrap: wrap;">
+                    <div style="display: flex; flex-direction: column; flex: 1; min-width: 220px; max-width: 340px; gap: 6px; position: relative;">
+                        <label for="ivfAreaInput" style="color: #00dbff; font-size: 0.75rem; font-weight: bold; letter-spacing: 1px; text-transform: uppercase;">SELECT AREA</label>
+                        <div style="position: relative; width: 100%;">
+                            <input type="text" id="ivfAreaInput" placeholder="Type or select area..." style="width: 100%; padding: 10px 35px 10px 14px; border-radius: 4px; border: 1px solid rgba(0, 219, 255, 0.4); background: #0c101a; color: #fff; outline: none; box-sizing: border-box; font-family: inherit; font-size: 0.85rem;" autocomplete="off">
+                            <span id="ivfAreaArrow" style="position: absolute; right: 12px; top: 50%; transform: translateY(-50%); color: #00dbff; cursor: pointer; font-size: 0.7rem;">\u25bc</span>
+                        </div>
+                        <div id="ivfAreaMenu" style="display: none; position: absolute; top: 100%; left: 0; width: 100%; max-height: 250px; overflow-y: auto; background: #121826; border: 1px solid #00dbff; border-radius: 4px; box-shadow: 0 8px 16px rgba(0,0,0,0.8); z-index: 10000; margin-top: 4px;"></div>
+                    </div>
+
+                    <button id="ivfRefreshBtn" style="padding: 10px 20px; background: rgba(0, 219, 255, 0.15); border: 1px solid #00dbff; color: #00dbff; font-weight: bold; border-radius: 4px; cursor: pointer; display: flex; align-items: center; gap: 6px; height: 40px;">
+                        <i class="fa-solid fa-rotate-right"></i> REFRESH
+                    </button>
+
+                    <button id="ivfPrintBtn" onclick="printOnly('inventoryFormPrintableArea')" style="padding: 10px 20px; background: rgba(0, 255, 136, 0.2); border: 1px solid #00ff88; color: #00ff88; font-weight: bold; border-radius: 4px; cursor: pointer; display: flex; align-items: center; gap: 6px; height: 40px;">
+                        <i class="fa-solid fa-print"></i> PRINT
+                    </button>
+
+                    <div id="ivfItemCount" style="margin-left: auto; color: #a8b4c8; font-size: 0.8rem; align-self: center;"></div>
+                </div>
+
+                <div style="flex: 1; overflow: auto; border: 1px solid rgba(255, 255, 255, 0.1); background: rgba(0, 0, 0, 0.4);">
+                    <table style="width: 100%; border-collapse: collapse; font-size: 0.78rem;">
+                        <thead style="position: sticky; top: 0; background: rgba(18, 24, 38, 1); color: #00dbff; z-index: 1;">
+                            <tr>
+                                <th style="padding: 8px; border: 1px solid rgba(0,219,255,0.2); text-align: left; white-space: nowrap;">SKU CODE</th>
+                                <th style="padding: 8px; border: 1px solid rgba(0,219,255,0.2); text-align: left;">ITEM DESCRIPTION</th>
+                                <th style="padding: 8px; border: 1px solid rgba(0,219,255,0.2); white-space: nowrap;">UOM</th>
+                                <th style="padding: 8px; border: 1px solid rgba(0,219,255,0.2); white-space: nowrap;">SRP</th>
+                                <th style="padding: 8px; border: 1px solid rgba(0,219,255,0.2); white-space: nowrap;">TOTAL QTY ONHAND</th>
+                                <th style="padding: 8px; border: 1px solid rgba(0,219,255,0.2); white-space: nowrap;">EXPIRATION DATE 1</th>
+                                <th style="padding: 8px; border: 1px solid rgba(0,219,255,0.2); white-space: nowrap;">QTY</th>
+                                <th style="padding: 8px; border: 1px solid rgba(0,219,255,0.2); white-space: nowrap;">EXPIRATION DATE 2</th>
+                                <th style="padding: 8px; border: 1px solid rgba(0,219,255,0.2); white-space: nowrap;">QTY</th>
+                                <th style="padding: 8px; border: 1px solid rgba(0,219,255,0.2); white-space: nowrap;">EXPIRATION DATE 3</th>
+                                <th style="padding: 8px; border: 1px solid rgba(0,219,255,0.2); white-space: nowrap;">QTY</th>
+                                <th style="padding: 8px; border: 1px solid rgba(0,219,255,0.2); white-space: nowrap;">ENDING QUANTITY</th>
+                            </tr>
+                        </thead>
+                        <tbody id="ivfTableBody">
+                            <tr><td colspan="12" style="text-align: center; padding: 30px; color: #a8b4c8;">Select an area above to load items.</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>`;
+    document.body.insertAdjacentHTML('beforeend', modalHTML);
+    return document.getElementById('inventoryFormModal');
+}
+
+function ivfRenderRows() {
+    const tbody = document.getElementById('ivfTableBody');
+    const countEl = document.getElementById('ivfItemCount');
+    if (!tbody) return;
+
+    if (!ivfItems.length) {
+        tbody.innerHTML = `<tr><td colspan="12" style="text-align: center; padding: 30px; color: #a8b4c8;">No items found for this area.</td></tr>`;
+        if (countEl) countEl.textContent = '';
+        return;
+    }
+
+    tbody.innerHTML = ivfItems.map(item => `
+        <tr>
+            <td style="padding: 7px; border: 1px solid rgba(0,219,255,0.1); white-space: nowrap;">${escapeHtml(item.sku)}</td>
+            <td style="padding: 7px; border: 1px solid rgba(0,219,255,0.1);">${escapeHtml(item.desc)}</td>
+            <td style="padding: 7px; border: 1px solid rgba(0,219,255,0.1); text-align: center; white-space: nowrap;">${escapeHtml(item.uom)}</td>
+            <td style="padding: 7px; border: 1px solid rgba(0,219,255,0.1); text-align: center; white-space: nowrap;">${escapeHtml(item.srp)}</td>
+            <td style="padding: 7px; border: 1px solid rgba(0,219,255,0.1); text-align: center; white-space: nowrap;">${escapeHtml(item.totalQty)}</td>
+            <td style="padding: 4px; border: 1px solid rgba(0,219,255,0.1); min-width: 130px;"><input type="text" class="ivf-exp1" data-no-uppercase="true" style="${IVF_INPUT_STYLE}"></td>
+            <td style="padding: 4px; border: 1px solid rgba(0,219,255,0.1); min-width: 70px;"><input type="number" class="ivf-qty1" data-no-uppercase="true" style="${IVF_INPUT_STYLE}"></td>
+            <td style="padding: 4px; border: 1px solid rgba(0,219,255,0.1); min-width: 130px;"><input type="text" class="ivf-exp2" data-no-uppercase="true" style="${IVF_INPUT_STYLE}"></td>
+            <td style="padding: 4px; border: 1px solid rgba(0,219,255,0.1); min-width: 70px;"><input type="number" class="ivf-qty2" data-no-uppercase="true" style="${IVF_INPUT_STYLE}"></td>
+            <td style="padding: 4px; border: 1px solid rgba(0,219,255,0.1); min-width: 130px;"><input type="text" class="ivf-exp3" data-no-uppercase="true" style="${IVF_INPUT_STYLE}"></td>
+            <td style="padding: 4px; border: 1px solid rgba(0,219,255,0.1); min-width: 70px;"><input type="number" class="ivf-qty3" data-no-uppercase="true" style="${IVF_INPUT_STYLE}"></td>
+            <td style="padding: 4px; border: 1px solid rgba(0,219,255,0.1); min-width: 80px;"><input type="number" class="ivf-ending" data-no-uppercase="true" style="${IVF_INPUT_STYLE}"></td>
+        </tr>
+    `).join('');
+
+    if (countEl) countEl.textContent = `${ivfItems.length} ITEM${ivfItems.length === 1 ? '' : 'S'}`;
+}
+
+async function ivfApplyFilter() {
+    const input = document.getElementById('ivfAreaInput');
+    const selected = input ? input.value.trim() : '';
+    const tbody = document.getElementById('ivfTableBody');
+    const printLabel = document.getElementById('ivfPrintAreaLabel');
+
+    if (!selected) {
+        if (tbody) tbody.innerHTML = `<tr><td colspan="12" style="text-align: center; padding: 30px; color: #a8b4c8;">Select an area above to load items.</td></tr>`;
+        const countEl = document.getElementById('ivfItemCount');
+        if (countEl) countEl.textContent = '';
+        if (printLabel) printLabel.textContent = '';
+        return;
+    }
+
+    if (printLabel) printLabel.textContent = `AREA: ${selected.toUpperCase()}`;
+    if (tbody) tbody.innerHTML = `<tr><td colspan="12" style="text-align: center; padding: 30px; color: #00dbff;">Loading items...</td></tr>`;
+
+    try {
+        await ivfLoadSource();
+        ivfItems = ivfBuildItems(selected);
+        ivfRenderRows();
+    } catch (error) {
+        console.error("Failed to load Inventory Form items:", error);
+        if (tbody) tbody.innerHTML = `<tr><td colspan="12" style="text-align: center; padding: 30px; color: #ff4d4d;">Failed to load items.</td></tr>`;
+    }
+}
+
+function ivfRenderAreaDropdown(filterText = '') {
+    const menu = document.getElementById('ivfAreaMenu');
+    if (!menu) return;
+
+    const term = filterText.trim().toLowerCase();
+    const filtered = cachedAreaList.filter(item => item.toLowerCase().includes(term));
+
+    if (!filtered.length) {
+        menu.innerHTML = `<div style="padding: 10px 14px; color: #ff4d4d; font-size: 0.8rem;">No matching areas</div>`;
+    } else {
+        menu.innerHTML = filtered.map(item => `
+            <div class="ivf-area-item" data-value="${escapeHtml(item)}" style="padding: 10px 14px; color: #fff; font-size: 0.8rem; cursor: pointer; border-bottom: 1px solid rgba(255,255,255,0.05); text-transform: uppercase;">
+                ${escapeHtml(item)}
+            </div>
+        `).join('');
+
+        menu.querySelectorAll('.ivf-area-item').forEach(el => {
+            el.onmouseenter = () => el.style.background = 'rgba(0, 219, 255, 0.2)';
+            el.onmouseleave = () => el.style.background = 'transparent';
+            el.onclick = () => {
+                const selectedVal = el.getAttribute('data-value');
+                const input = document.getElementById('ivfAreaInput');
+                if (input) input.value = selectedVal;
+                menu.style.display = 'none';
+                ivfApplyFilter();
+            };
+        });
+    }
+
+    menu.style.display = 'block';
+}
+
+async function openInventoryFormModal() {
+    const modal = buildInventoryFormModal();
+    modal.style.display = 'flex';
+
+    const scope = getSessionScope();
+    const input = document.getElementById('ivfAreaInput');
+    const menu = document.getElementById('ivfAreaMenu');
+    const arrow = document.getElementById('ivfAreaArrow');
+    const refreshBtn = document.getElementById('ivfRefreshBtn');
+
+    await fetchAreaList();
+
+    if (input) {
+        if (scope.isAdmin) {
+            input.readOnly = false;
+            input.placeholder = 'Type or select area...';
+            input.style.cursor = 'text';
+            input.style.opacity = '1';
+            input.onfocus = () => ivfRenderAreaDropdown(input.value);
+            input.oninput = () => { ivfRenderAreaDropdown(input.value); ivfApplyFilter(); };
+        } else {
+            // Non-admins are locked to their own client, same UX rule as the
+            // History modal's department filter — server-side scoping is the
+            // real guard, this is just so they aren't offered other areas.
+            input.value = scope.client || '';
+            input.readOnly = true;
+            input.placeholder = scope.client ? '' : 'No area on this account';
+            input.style.cursor = 'not-allowed';
+            input.style.opacity = '0.8';
+            input.onfocus = null;
+            input.oninput = null;
+        }
+    }
+
+    if (arrow) {
+        arrow.style.display = scope.isAdmin ? '' : 'none';
+        arrow.onclick = (e) => {
+            e.stopPropagation();
+            if (menu.style.display === 'block') {
+                menu.style.display = 'none';
+            } else {
+                input.focus();
+                ivfRenderAreaDropdown(input.value);
+            }
+        };
+    }
+
+    document.onclick = (e) => {
+        if (!e.target.closest('#ivfAreaInput') && !e.target.closest('#ivfAreaMenu') && !e.target.closest('#ivfAreaArrow')) {
+            if (menu) menu.style.display = 'none';
+        }
+    };
+
+    if (refreshBtn) {
+        refreshBtn.onclick = () => {
+            ivfSourceLoaded = false; // force a fresh AREA/DATA fetch
+            ivfApplyFilter();
+        };
+    }
+
+    ivfApplyFilter();
+}
+
 // ==========================================
 // SUMMARY REPORT DASHBOARD (admin only)
 // ==========================================
@@ -1388,17 +1776,18 @@ function selectReportCategory(category) {
 // system, so a few of the ten requested reports are built from the
 // closest real data actually available. Documenting the mapping here
 // so it doesn't get lost:
-//   - CRITICAL STOCK / OUT OF STOCK / STOCK AVAILABILITY read the same
-//     per-row stock-status formula column (col AB, index 27: "CRITICAL" /
-//     "LOW IN STOCK" / "OUT OF STOCK") that the existing per-department
-//     stockAvailabilityModal popup already uses — just aggregated across
-//     every department instead of one.
+//   - CRITICAL STOCK / OUT OF STOCK / STOCK AVAILABILITY read the "DATA"
+//     sheet's own STATUS column (M) directly (see SR_STOCK_COL below) —
+//     not the per-department multi-fetch.
 //   - NEAR EXPIRATION / EXPIRED ITEMS (tab id EXPIRATION_MONITORING) read
-//     the same days-to-expiry formula column (col AA, index 26) the
-//     existing nearExpiryModal popup uses. NEAR EXPIRATION = 0–90 days
-//     out (not yet expired). EXPIRED ITEMS = days < 0 only, worst-first —
-//     split out from a former "everything" view that just duplicated
-//     NEAR EXPIRATION's 0-90 day window.
+//     the "DATA" sheet's own expiry column (col N, index 13). That cell
+//     holds one of three things per row: the text tag "EXPIRED", a plain
+//     number of days remaining until expiration (e.g. "24"), or blank
+//     (no expiration date tracked for that item). NEAR EXPIRATION = a
+//     numeric value from 0–90 days out (not yet expired). EXPIRED ITEMS =
+//     the "EXPIRED" tag, or a numeric value < 0, worst-first — split out
+//     from a former "everything" view that just duplicated NEAR
+//     EXPIRATION's 0-90 day window.
 //   - "SALES" has no source sheet, so these are built from the
 //     REQUEST_RELEASED sheet's QTY RELEASED + DATE columns (items
 //     released out to a department) — the only outbound-transaction log
@@ -1459,26 +1848,28 @@ const SR_TR_RANGE = 'BU3:CB';
 const SR_TR_COL = { DEPT: 0, DEPT_QTY: 1, DEPT_AMOUNT: 2, SKU: 4, DESC: 5, PROD_QTY: 6, PROD_AMOUNT: 7 };
 
 // STOCK HEALTH (CRITICAL STOCK / LOW STOCK / OUT OF STOCK / STOCK AVAILABILITY)
-// source: the "DATA" sheet's own STATUS column (M), read directly instead of
-// being derived from the multi-department inventory fetch.
+// and EXPIRATION (NEAR EXPIRATION / EXPIRED ITEMS / AGING) both source: the
+// "DATA" sheet, read directly (one shared fetch) instead of being derived
+// from the multi-department inventory fetch.
 //   A2:A = SKU CODE            F2:F = TOTAL ONHAND
 //   B2:B = ITEM DESCRIPTION    G2:G = DEPARTMENT
 //   J2:J = LAST DATE RECEIVED  M2:M = STATUS
 //     "CRITICAL IN STOCK" -> Critical Stock, "LOW STOCK" -> Low Stock,
 //     "OUT OF STOCK" -> Out of Stock, "IN STOCK" -> Stock Availability.
+//   N2:N = EXPIRY \u2014 the tag "EXPIRED", a plain number of days remaining
+//     until expiration (e.g. "24"), or blank (no expiration tracked).
 const SR_STOCK_SHEET_NAME = 'DATA';
-const SR_STOCK_RANGE = 'A2:M';
-const SR_STOCK_COL = { SKU: 0, DESC: 1, ONHAND: 5, DEPT: 6, LAST_RECEIVED: 9, STATUS: 12 };
+const SR_STOCK_RANGE = 'A2:N';
+const SR_STOCK_COL = { SKU: 0, DESC: 1, EXP_DATE: 3, ONHAND: 5, DEPT: 6, LAST_RECEIVED: 9, STATUS: 12, EXPIRY: 13 };
 
 const srState = {
-    inventoryRows: [],
     salesRows: [],
     dailySalesRows: [],   // flattened from the "sales" sheet (see srParseDailySalesSheet)
     dailySalesError: null,
     topRankDeptRows: [],    // pre-ranked from "sales" BU:BW -> [{label, qty, value}]
     topRankProductRows: [], // pre-ranked from "sales" BY:CB -> [{sku, desc, qty, value}]
     topRankError: null,
-    stockRows: [],   // flattened from the "DATA" sheet: {dept, sku, desc, onhand, lastReceived, status}
+    stockRows: [],   // flattened from the "DATA" sheet: {dept, sku, desc, onhand, lastReceived, status, expiry}
     stockError: null,
     topRank: { mode: 'MONTH', day: '', month: '' },   // Top Rank period picker ('' = today / this month)
     historyMonths: [],          // saved monthly backups on the server, newest first: [{month, rows, days, units, amount, savedAt}]
@@ -1775,6 +2166,21 @@ function openSummaryReportModal() {
             .sr-btn-refresh { background: linear-gradient(135deg, #22d3ee, #60a5fa); box-shadow: 0 6px 18px rgba(34,211,238,0.35); }
             .sr-btn-print { background: linear-gradient(135deg, #4ade80, #bef264); box-shadow: 0 6px 18px rgba(74,222,128,0.32); }
 
+            /* Refresh progress bar \u2014 shown only while a foreground refresh
+               (the REFRESH button, or the initial load) is in flight, so the
+               person can see the dashboard is actively pulling fresh data
+               instead of wondering whether it's frozen. */
+            .sr-progress-wrap {
+                display: none; align-items: center; gap: 10px; padding: 6px 22px;
+                border-bottom: 1px solid rgba(255,255,255,0.08); background: rgba(0,0,0,0.18);
+            }
+            .sr-progress-track { flex: 1; height: 6px; border-radius: 0; background: rgba(255,255,255,0.10); overflow: hidden; }
+            .sr-progress-fill {
+                height: 100%; width: 0%; background: linear-gradient(90deg, #ff4fd8, #a78bfa, #22d3ee);
+                transition: width 0.2s ease;
+            }
+            .sr-progress-label { font-size: 0.65rem; font-weight: 700; letter-spacing: 0.5px; color: var(--sr-muted); min-width: 34px; text-align: right; }
+
             /* ---------- sidebar ---------- */
             #srSidebar {
                 width: 280px; flex-shrink: 0; overflow-y: auto; padding: 18px 12px;
@@ -1987,7 +2393,7 @@ function openSummaryReportModal() {
             /* One line up to ~32 characters (the old fixed column cut names off at ~12),
                then an ellipsis + hover tooltip, so one freak-long name can't push the
                whole table into a horizontal scrollbar. */
-            .sr-dept { max-width: 32ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+            .sr-dept { max-width: 40ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
             .sr-table .c-num { font-weight: 700; font-variant-numeric: tabular-nums; color: #fff; }
             .sr-table .c-money { font-weight: 700; font-variant-numeric: tabular-nums; color: var(--sr-success); }
             .sr-table td.sr-empty-cell { text-align: center; padding: 26px; color: var(--sr-muted-dim); white-space: normal; }
@@ -2079,11 +2485,11 @@ function openSummaryReportModal() {
             <div id="srPrintableArea">
 
                 <div class="no-print sr-header">
-                    <div style="display: flex; align-items: center; gap: 14px;">
-                        <div class="sr-logo"><i class="fa-solid fa-chart-pie" style="color: inherit;"></i></div>
-                        <div>
-                            <h2 class="sr-title">SUMMARY REPORT</h2>
-                            <p id="srLastUpdated" style="margin: 5px 0 0; font-size: 0.7rem; color: var(--sr-muted);">Loading...</p>
+                    <div style="display: flex; align-items: center; gap: 8px; flex: 0 1 auto; min-width: 0;">
+                        <div class="sr-logo" style="flex-shrink: 0;"><i class="fa-solid fa-chart-pie" style="color: inherit;"></i></div>
+                        <div style="flex-shrink: 0; text-align: left;">
+                            <h2 class="sr-title" style="text-align: left; white-space: nowrap;">SUMMARY REPORT</h2>
+                            <p id="srLastUpdated" style="margin: 5px 0 0; font-size: 0.7rem; color: var(--sr-muted); text-align: left; white-space: nowrap;">Loading...</p>
                         </div>
                     </div>
                     <div style="display: flex; align-items: center; gap: 10px;">
@@ -2095,6 +2501,11 @@ function openSummaryReportModal() {
                         </button>
                         <button class="app-close-btn" onclick="closeSummaryReportModal()" title="Close"><i class="fa-solid fa-xmark"></i></button>
                     </div>
+                </div>
+
+                <div id="srRefreshProgressWrap" class="no-print sr-progress-wrap">
+                    <div class="sr-progress-track"><div id="srRefreshProgressFill" class="sr-progress-fill"></div></div>
+                    <span id="srRefreshProgressLabel" class="sr-progress-label">0%</span>
                 </div>
 
                 <div style="flex: 1; display: flex; min-height: 0;">
@@ -2148,11 +2559,38 @@ async function srRefreshAll(showSpinner) {
     const statusEl = document.getElementById('srLastUpdated');
     if (statusEl && showSpinner) statusEl.textContent = 'Refreshing live data...';
 
+    // Progress bar only for a foreground refresh (button click / first
+    // open) \u2014 the silent 60s auto-refresh stays silent, same as the
+    // spinner icon and status text above.
+    const progressWrap = document.getElementById('srRefreshProgressWrap');
+    const progressFill = document.getElementById('srRefreshProgressFill');
+    const progressLabel = document.getElementById('srRefreshProgressLabel');
+    const steps = [srFetchSalesAll, srFetchDailySalesAll, srFetchTopRankRanked, srFetchStockAll, srFetchHistoryList];
+    const totalSteps = steps.length + 1; // +1 for srSyncRecentHistory below
+    let completedSteps = 0;
+    const bumpProgress = () => {
+        completedSteps++;
+        if (!showSpinner) return;
+        const pct = Math.round((completedSteps / totalSteps) * 100);
+        if (progressFill) progressFill.style.width = pct + '%';
+        if (progressLabel) progressLabel.textContent = pct + '%';
+    };
+
+    if (showSpinner && progressWrap) {
+        progressWrap.style.display = 'flex';
+        if (progressFill) progressFill.style.width = '0%';
+        if (progressLabel) progressLabel.textContent = '0%';
+    }
+
     try {
-        await Promise.all([srFetchInventoryAll(), srFetchSalesAll(), srFetchDailySalesAll(), srFetchTopRankRanked(), srFetchStockAll(), srFetchHistoryList()]);
+        // Each fetch reports in via bumpProgress() as soon as IT resolves,
+        // while they all still run concurrently \u2014 so the bar reflects how
+        // many of the 6 refresh steps are actually done, not a fake timer.
+        await Promise.all(steps.map(fn => fn().then(bumpProgress)));
         await srSyncRecentHistory();
+        bumpProgress();
         srState.lastUpdated = new Date();
-        if (statusEl) statusEl.textContent = `Live \u00b7 last updated ${srState.lastUpdated.toLocaleTimeString()} \u00b7 auto-refreshes every 60s`;
+        if (statusEl) statusEl.textContent = `Live \u00b7 ${srState.lastUpdated.toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })} \u00b7 last updated ${srState.lastUpdated.toLocaleTimeString()} \u00b7 auto-refreshes every 60s`;
         srRenderActiveTab();
     } catch (err) {
         console.error('[Summary Report] refresh failed:', err);
@@ -2160,28 +2598,11 @@ async function srRefreshAll(showSpinner) {
     } finally {
         srState.loading = false;
         if (icon) icon.classList.remove('fa-spin');
-    }
-}
-
-async function srFetchInventoryAll() {
-    await fetchAreaList();
-    const username = window.sessionUser || localStorage.getItem('activeUser') || '';
-    const depts = cachedAreaList.length ? cachedAreaList : [];
-
-    const results = await Promise.all(depts.map(async dept => {
-        try {
-            const url = `${window.API}?action=getScopedInventory&user=${encodeURIComponent(username)}&department=${encodeURIComponent(dept)}&token=${encodeURIComponent(window.API_TOKEN)}`;
-            const res = await fetch(url);
-            const json = await res.json();
-            if (!json.success) return [];
-            return (json.data || []).map(row => { row._dept = dept; return row; });
-        } catch (e) {
-            console.error(`[Summary Report] inventory fetch failed for ${dept}:`, e);
-            return [];
+        if (showSpinner && progressWrap) {
+            // Brief pause at 100% so the bar doesn't just vanish mid-fill.
+            setTimeout(() => { progressWrap.style.display = 'none'; }, 450);
         }
-    }));
-
-    srState.inventoryRows = results.flat();
+    }
 }
 
 async function srFetchSalesAll() {
@@ -2373,7 +2794,9 @@ async function srFetchStockAll() {
                 onhand: srNum(row[SR_STOCK_COL.ONHAND]),
                 dept: String(row[SR_STOCK_COL.DEPT] ?? '').trim(),
                 lastReceived: row[SR_STOCK_COL.LAST_RECEIVED],
-                status: String(row[SR_STOCK_COL.STATUS] ?? '').trim().toUpperCase()
+                status: String(row[SR_STOCK_COL.STATUS] ?? '').trim().toUpperCase(),
+                expiry: row[SR_STOCK_COL.EXPIRY],
+                expDate: row[SR_STOCK_COL.EXP_DATE]
             }))
             .filter(r => r.sku || r.desc);
         srState.stockError = null;
@@ -2688,9 +3111,9 @@ function srRenderTopRank() {
         ${srStatCard('UNITS RELEASED', periodTotals.qty.toLocaleString('en-US'), isDay ? 'that day' : 'that month', 'var(--sr-success)', 'fa-boxes-stacked')}
     </div>`;
 
-    // Section A \u2014 by department: read straight off the sheet's own
-    // pre-ranked columns (BU:BW), already sorted by amount, top 10.
-    const topDept = srState.topRankDeptRows.slice(0, 10);
+    // Section A \u2014 by department: aggregated from the daily sales rows
+    // for the selected day/month, so it actually follows the VIEW picker.
+    const topDept = srAggregateDailyByDept(allRows, start, end).slice(0, 10);
     const deptRowsHTML = topDept.map((item, i) => `<tr>
         <td class="c-fit c-center">${srRankBadge(i)}</td>
         <td style="font-weight: 700;">${srEsc(item.label)}</td>
@@ -2698,8 +3121,9 @@ function srRenderTopRank() {
         <td class="c-fit c-right c-money">${srMoney(item.value)}</td>
     </tr>`).join('');
 
-    // Section B \u2014 by product: same idea, from BY:CB.
-    const topItem = srState.topRankProductRows.slice(0, 10);
+    // Section B \u2014 by product: same idea, aggregated per SKU for the
+    // selected period.
+    const topItem = srAggregateDailyBySku(allRows, start, end).slice(0, 10);
     const itemRowsHTML = topItem.map((item, i) => `<tr>
         <td class="c-fit c-center">${srRankBadge(i)}</td>
         <td class="c-sku c-fit">${srEsc(item.sku)}</td>
@@ -2708,11 +3132,11 @@ function srRenderTopRank() {
         <td class="c-fit c-right c-money">${srMoney(item.value)}</td>
     </tr>`).join('');
 
-    const emptyMsg = 'No rank data found on the sheet.';
+    const emptyMsg = 'No rank data found for this period.';
     const trErr = srState.topRankError
         ? `<div class="sr-note" style="color: var(--sr-danger-light);"><i class="fa-solid fa-triangle-exclamation"></i> Couldn't read the rank columns: ${srEsc(srState.topRankError)}</div>`
         : '';
-    return srDailySalesErrorNote() + trErr + cards + srNote(`Headline totals are for ${periodLabel}. The BY DEPARTMENT and BY PRODUCT tables below are the "${SR_DS_SHEET_NAME}" sheet's own ranked totals (columns BU\u2013BW and BY\u2013CB) \u2014 they aren't filtered by the VIEW picker.`) + controls +
+    return srDailySalesErrorNote() + trErr + cards + srNote(`Headline totals and the BY DEPARTMENT / BY PRODUCT tables below are all for ${periodLabel} \u2014 change the VIEW picker to see a different day or month.`) + controls +
         `<div class="sr-top-rank-grid" style="display: grid; grid-template-columns: 1fr 1fr; gap: 0 20px; align-items: start;">
             <div style="display: block; min-width: 0;">
                 ${srHeading('BY DEPARTMENT', 'fa-building')}
@@ -2938,42 +3362,59 @@ function srRenderStockAvailability() {
 
 // ---- 8/9. Expiration-based reports ----
 
+// Parses the "DATA" sheet's col N expiry cell (index 13). It's one of:
+// the text tag "EXPIRED", a plain number of days remaining (e.g. "24"),
+// or blank (no expiration tracked for that row). Returns:
+//   { expired: true,  days: null }   -> tagged "EXPIRED", exact overdue
+//                                        amount unknown
+//   { expired: true,  days: <n<0> }  -> numeric and already past due
+//   { expired: false, days: <n>=0> } -> numeric, still has days left
+//   null                             -> blank / unusable, skip the row
+function srParseExpiryCell(raw) {
+    if (raw === undefined || raw === null || String(raw).trim() === '') return null;
+    const trimmed = String(raw).trim();
+    if (trimmed.toUpperCase() === 'EXPIRED') return { expired: true, days: null };
+    const days = Number(trimmed);
+    if (isNaN(days)) return null;
+    return { expired: days < 0, days };
+}
+
 function srExpirationRows() {
-    // Returns every inventory row that has a usable days-to-expiry value,
-    // annotated with a parsed `days` number.
-    return srState.inventoryRows
+    // Returns every "DATA" sheet row that has a usable expiry value in col N,
+    // annotated with the parsed `days`/`expired` fields above.
+    return srState.stockRows
         .map(row => {
-            const raw = row[26];
-            if (raw === undefined || raw === null || String(raw).trim() === '') return null;
-            const days = Number(raw);
-            if (isNaN(days)) return null;
-            return { row, days };
+            const parsed = srParseExpiryCell(row.expiry);
+            if (!parsed) return null;
+            return { row, days: parsed.days, expired: parsed.expired };
         })
         .filter(Boolean);
 }
 
 function srRenderNearExpiration() {
-    const items = srExpirationRows().filter(r => r.days >= 0 && r.days <= 90).sort((a, b) => a.days - b.days);
+    const items = srExpirationRows().filter(r => !r.expired && r.days !== null && r.days <= 90).sort((a, b) => a.days - b.days);
 
     const rowsHTML = items.map(({ row, days }) => {
         const pillColor = days <= 30 ? 'var(--sr-danger)' : days <= 60 ? 'var(--sr-warning)' : 'var(--sr-primary-light)';
+        const expDate = formatExpirationDate(row.expDate) || row.expDate || '-';
         return `<tr>
-            <td class="c-fit">${srDept(row._dept)}</td>
-            <td class="c-sku c-fit">${srEsc(row[1] || '')}</td>
-            <td class="c-desc">${srEsc(row[2] || '')}</td>
-            <td class="c-fit c-center">${srEsc(formatExpirationDate(row[23]) || row[23] || '-')}</td>
+            <td class="c-fit">${srDept(row.dept)}</td>
+            <td class="c-sku c-fit">${srEsc(row.sku)}</td>
+            <td class="c-desc">${srEsc(row.desc)}</td>
+            <td class="c-fit c-center">${srEsc(expDate)}</td>
             <td class="c-fit c-center"><span class="sr-pill" style="--c: ${pillColor};">${days} days</span></td>
-            <td class="c-fit c-center c-num">${srEsc(row[24] !== undefined ? row[24] : 0)}</td>
+            <td class="c-fit c-center c-num">${srEsc(row.onhand)}</td>
         </tr>`;
     }).join('');
 
-    return `<div class="sr-cards">${srStatCard('NEAR-EXPIRATION ITEMS', items.length, 'expiring within 90 days, across all departments', 'var(--sr-warning)', 'fa-hourglass-half')}</div>
+    return srStockErrorNote() + srNote(`Source: the "${SR_STOCK_SHEET_NAME}" sheet's expiry column (N) \u2014 numeric values 0\u201390 days out. Expiration date from column D.`) +
+        `<div class="sr-cards">${srStatCard('NEAR-EXPIRATION ITEMS', items.length, 'expiring within 90 days, across all departments', 'var(--sr-warning)', 'fa-hourglass-half')}</div>
         ${srTableWrap(`<table class="sr-table">
             <thead><tr>
                 <th class="c-fit">DEPARTMENT</th>
                 <th class="c-fit">SKU CODE</th>
                 <th>ITEM DESCRIPTION</th>
-                <th class="c-fit c-center">EXP. DATE</th>
+                <th class="c-fit c-center">EXPIRATION DATE</th>
                 <th class="c-fit c-center">DAYS LEFT</th>
                 <th class="c-fit c-center">QTY<br>ONHAND</th>
             </tr></thead>
@@ -2989,7 +3430,15 @@ function srRenderExpirationMonitoring() {
     // already expired and needs to be pulled?" instead of restating
     // near-expiration data.
     const all = srExpirationRows();
-    const expired = all.filter(r => r.days < 0).sort((a, b) => a.days - b.days); // most days expired first
+    // Worst-first: tagged "EXPIRED" rows have no numeric overdue amount, so
+    // they sort ahead of (tie with each other before) numeric negative-day
+    // rows, which then sort longest-expired first.
+    const expired = all.filter(r => r.expired).sort((a, b) => {
+        if (a.days === null && b.days === null) return 0;
+        if (a.days === null) return -1;
+        if (b.days === null) return 1;
+        return a.days - b.days;
+    });
 
     const cards = `<div class="sr-cards">
         ${srStatCard('EXPIRED ITEMS', expired.length, 'already past expiration, across all departments', 'var(--sr-danger)', 'fa-calendar-xmark')}
@@ -2998,23 +3447,26 @@ function srRenderExpirationMonitoring() {
     const CAP = 500;
     const shown = expired.slice(0, CAP);
 
-    const rowsHTML = shown.map(({ row, days }) => `<tr>
-        <td class="c-fit">${srDept(row._dept)}</td>
-        <td class="c-sku c-fit">${srEsc(row[1] || '')}</td>
-        <td class="c-desc">${srEsc(row[2] || '')}</td>
-        <td class="c-fit c-center">${srEsc(formatExpirationDate(row[23]) || row[23] || '-')}</td>
-        <td class="c-fit c-center"><span class="sr-pill" style="--c: var(--sr-danger);">${Math.abs(days)} days</span></td>
-        <td class="c-fit c-center c-num">${srEsc(row[24] !== undefined ? row[24] : 0)}</td>
-    </tr>`).join('');
+    const rowsHTML = shown.map(({ row, days }) => {
+        const expDate = formatExpirationDate(row.expDate) || row.expDate || '-';
+        return `<tr>
+        <td class="c-fit">${srDept(row.dept)}</td>
+        <td class="c-sku c-fit">${srEsc(row.sku)}</td>
+        <td class="c-desc">${srEsc(row.desc)}</td>
+        <td class="c-fit c-center">${srEsc(expDate)}</td>
+        <td class="c-fit c-center"><span class="sr-pill" style="--c: var(--sr-danger);">${days === null ? 'EXPIRED' : Math.abs(days) + ' days'}</span></td>
+        <td class="c-fit c-center c-num">${srEsc(row.onhand)}</td>
+    </tr>`;
+    }).join('');
 
-    return srNote('Already-expired items only \u2014 for the 0\u201390-day-out watchlist, see NEAR EXPIRATION. Sorted longest-expired first.' + (expired.length > CAP ? ` Showing the first ${CAP} of ${expired.length} items.` : '')) +
+    return srStockErrorNote() + srNote('Source: the "' + SR_STOCK_SHEET_NAME + '" sheet\'s expiry column (N) \u2014 the "EXPIRED" tag or a negative day count. Expiration date from column D. For the 0\u201390-day-out watchlist, see NEAR EXPIRATION. Sorted longest-expired first.' + (expired.length > CAP ? ` Showing the first ${CAP} of ${expired.length} items.` : '')) +
         cards +
         srTableWrap(`<table class="sr-table">
             <thead><tr>
                 <th class="c-fit">DEPARTMENT</th>
                 <th class="c-fit">SKU CODE</th>
                 <th>ITEM DESCRIPTION</th>
-                <th class="c-fit c-center">EXP. DATE</th>
+                <th class="c-fit c-center">EXPIRATION DATE</th>
                 <th class="c-fit c-center">DAYS<br>EXPIRED</th>
                 <th class="c-fit c-center">QTY<br>ONHAND</th>
             </tr></thead>
@@ -3024,55 +3476,123 @@ function srRenderExpirationMonitoring() {
 
 // ---- 10. Aging per description ----
 
+// Parses the same raw sheet-cell shapes formatExpirationDate() understands
+// (ISO date/datetime, MM/DD/YYYY, or a Sheets date serial number) and
+// returns the whole number of days elapsed between that date and today, or
+// null if the cell is blank/unparsable. Used to turn the "DATA" sheet's
+// LAST RECEIVED date (column J) into a true days-in-stock figure.
+function srDaysSince(dateVal) {
+    if (!dateVal || String(dateVal).trim() === '' || String(dateVal).trim().toUpperCase() === 'N/A') return null;
+    const strVal = String(dateVal).trim();
+    let year, month, day;
+
+    const isoMatch = strVal.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/);
+    if (isoMatch) {
+        year = Number(isoMatch[1]);
+        month = Number(isoMatch[2]);
+        day = Number(isoMatch[3]);
+    } else if (strVal.includes('/')) {
+        const parts = strVal.split('/');
+        if (parts.length === 3) {
+            month = Number(parts[0]);
+            day = Number(parts[1]);
+            year = Number(parts[2]);
+        }
+    } else if (/^\d+(\.\d+)?$/.test(strVal)) {
+        const serial = parseFloat(strVal);
+        const SHEETS_EPOCH_UTC = Date.UTC(1899, 11, 30);
+        const asUtcMs = SHEETS_EPOCH_UTC + Math.round(serial) * 86400000;
+        const utcDate = new Date(asUtcMs);
+        year = utcDate.getUTCFullYear();
+        month = utcDate.getUTCMonth() + 1;
+        day = utcDate.getUTCDate();
+    }
+
+    let parsedDate;
+    if (year && month && day) parsedDate = new Date(year, month - 1, day);
+    else parsedDate = new Date(strVal);
+    if (!parsedDate || isNaN(parsedDate.getTime())) return null;
+
+    const today = new Date();
+    const todayMidnight = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+    return Math.floor((todayMidnight.getTime() - parsedDate.getTime()) / 86400000);
+}
+
 function srRenderAging() {
-    const all = srExpirationRows();
-    const bySku = {};
-    all.forEach(({ row, days }) => {
-        const sku = row[1] || '(no SKU)';
-        const desc = row[2] || '(no description)';
-        const key = sku + '\u0001' + desc;
-        if (!bySku[key]) bySku[key] = { sku, desc, expired: 0, d30: 0, d60: 0, d90: 0, over90: 0, total: 0 };
-        const qty = srNum(row[24]);
-        bySku[key].total += qty;
-        if (days < 0) bySku[key].expired += qty;
-        else if (days <= 30) bySku[key].d30 += qty;
-        else if (days <= 60) bySku[key].d60 += qty;
-        else if (days <= 90) bySku[key].d90 += qty;
-        else bySku[key].over90 += qty;
+    // True days-in-stock aging, based on the "DATA" sheet's LAST RECEIVED
+    // date (column J, already read into row.lastReceived for the stock
+    // health tables) rather than days-remaining-until-expiration \u2014 that
+    // shelf-life view already lives on NEAR EXPIRATION / EXPIRED ITEMS.
+    // Covers every row with quantity on hand, not just rows that happen to
+    // carry a parsed expiry value.
+    const bySkuDept = {};
+    srState.stockRows.forEach(row => {
+        const sku = row.sku || '(no SKU)';
+        const desc = row.desc || '(no description)';
+        const dept = row.dept || '(no department)';
+        const key = sku + '\u0001' + desc + '\u0001' + dept;
+        if (!bySkuDept[key]) bySkuDept[key] = { sku, desc, dept, noDate: 0, d30: 0, d60: 0, d90: 0, over90: 0, total: 0, soonestExpDate: null, soonestDays: Infinity };
+        const qty = srNum(row.onhand);
+        bySkuDept[key].total += qty;
+
+        const ageDays = srDaysSince(row.lastReceived);
+        if (ageDays === null) bySkuDept[key].noDate += qty;
+        else if (ageDays <= 30) bySkuDept[key].d30 += qty;
+        else if (ageDays <= 60) bySkuDept[key].d60 += qty;
+        else if (ageDays <= 90) bySkuDept[key].d90 += qty;
+        else bySkuDept[key].over90 += qty;
+
+        // Still surface the soonest expiration date per group (column D),
+        // as context alongside the true aging buckets.
+        const parsedExpiry = srParseExpiryCell(row.expiry);
+        if (parsedExpiry) {
+            const sortDays = parsedExpiry.expired ? -Infinity : parsedExpiry.days;
+            if (sortDays < bySkuDept[key].soonestDays) {
+                bySkuDept[key].soonestDays = sortDays;
+                bySkuDept[key].soonestExpDate = row.expDate;
+            }
+        }
     });
 
-    const list = Object.values(bySku).sort((a, b) => b.total - a.total);
+    const list = Object.values(bySkuDept).filter(item => item.total > 0).sort((a, b) => b.total - a.total);
 
-    // Heat-map colouring, hottest (already expired) to coolest (90D+).
-    const BUCKET_COLORS = ['var(--sr-danger)', 'var(--sr-orange)', 'var(--sr-warning)', 'var(--sr-cyan)', 'var(--sr-success)'];
+    // Heat-map colouring, coolest (no date on file) to hottest (90D+ in stock).
+    const BUCKET_COLORS = ['var(--sr-muted-dim)', 'var(--sr-cyan)', 'var(--sr-warning)', 'var(--sr-orange)', 'var(--sr-danger)'];
     const chip = (qty, color) => qty ? `<span class="sr-pill" style="--c: ${color};">${qty}</span>` : '';
 
-    const rowsHTML = list.map(item => `<tr>
+    const rowsHTML = list.map(item => {
+        const expDate = formatExpirationDate(item.soonestExpDate) || item.soonestExpDate || '-';
+        return `<tr>
+        <td class="c-fit">${srDept(item.dept)}</td>
         <td class="c-sku c-fit">${srEsc(item.sku)}</td>
         <td class="c-desc">${srEsc(item.desc)}</td>
-        <td class="c-fit c-center c-tight">${chip(item.expired, BUCKET_COLORS[0])}</td>
+        <td class="c-fit c-center">${srEsc(expDate)}</td>
+        <td class="c-fit c-center c-tight">${chip(item.noDate, BUCKET_COLORS[0])}</td>
         <td class="c-fit c-center c-tight">${chip(item.d30, BUCKET_COLORS[1])}</td>
         <td class="c-fit c-center c-tight">${chip(item.d60, BUCKET_COLORS[2])}</td>
         <td class="c-fit c-center c-tight">${chip(item.d90, BUCKET_COLORS[3])}</td>
         <td class="c-fit c-center c-tight">${chip(item.over90, BUCKET_COLORS[4])}</td>
         <td class="c-fit c-center c-tight c-num">${item.total}</td>
-    </tr>`).join('');
+    </tr>`;
+    }).join('');
 
     const bucketTh = (label, i) => `<th class="c-fit c-center c-tight"><span class="sr-dot" style="background: ${BUCKET_COLORS[i]};"></span>${label}</th>`;
 
-    return srNote('No stock-received date exists anywhere in the sheet, so this buckets by days-remaining-until-expiration (shelf life left) rather than true time-in-stock. Add a received-date column to make this a real aging report.') +
+    return srStockErrorNote() + srNote(`Source: the "${SR_STOCK_SHEET_NAME}" sheet's LAST RECEIVED date (column J) \u2014 true days-in-stock, not shelf life remaining. EXPIRATION DATE (column D) shows the soonest date among each group's rows, for reference. Rows with no parsable received date fall into NO DATE.`) +
         srTableWrap(`<table class="sr-table">
             <thead><tr>
+                <th class="c-fit">DEPARTMENT</th>
                 <th class="c-fit">SKU CODE</th>
                 <th>ITEM DESCRIPTION</th>
-                ${bucketTh('EXPIRED', 0)}
+                <th class="c-fit c-center">EXPIRATION DATE</th>
+                ${bucketTh('NO DATE', 0)}
                 ${bucketTh('0\u201330D', 1)}
                 ${bucketTh('31\u201360D', 2)}
                 ${bucketTh('61\u201390D', 3)}
                 ${bucketTh('90D+', 4)}
                 <th class="c-fit c-center c-tight">TOTAL QTY</th>
             </tr></thead>
-            <tbody>${rowsHTML || `<tr><td colspan="8" class="sr-empty-cell">No items with an expiration date on file.</td></tr>`}</tbody>
+            <tbody>${rowsHTML || `<tr><td colspan="10" class="sr-empty-cell">No stock on hand.</td></tr>`}</tbody>
         </table>`);
 }
 
@@ -5533,7 +6053,7 @@ function checkAndShowNearExpiryModal() {
                             <h3 class="blink-alert" style="color: #ff4444; margin: 0; font-size: 1.1rem; letter-spacing: 1px;">
                                 <i class="fa-solid fa-triangle-exclamation" style="margin-right: 10px;"></i>NEAR EXPIRY ALERT
                             </h3>
-                            <p id="nearExpiryModalSubtitle" style="margin: 6px 0 0; font-size: 0.72rem; color: #b89a9a;">Items in this department meeting the near-expiry condition (col AA &le; 90)</p>
+                            <p id="nearExpiryModalSubtitle" style="margin: 6px 0 0; font-size: 0.72rem; color: #b89a9a;">Items in this department meeting the near-expiry condition (col AA &le; 90 days)</p>
                         </div>
                         <button type="button" class="app-close-btn" onclick="closeNearExpiryModal()" title="Close"><i class="fa-solid fa-xmark"></i></button>
                     </div>
@@ -5567,19 +6087,15 @@ function checkAndShowNearExpiryModal() {
     console.log(`[Near Expiry Check] Scanning ${rows.length} row(s). Sample col AA values:`, rows.slice(0, 5).map(r => r[26]));
 
     rows.forEach(row => {
-        // Column AA is index 26 (was Z/25 before a column was deleted from
-        // the department sheet, which shifted this formula column right by one)
-        const rawZ = row[26];
+        // Column AA (index 26) on this department sheet is "NEAREX AGING"
+        // (the near-expiry checker): the tag "EXPIRED", a plain number of
+        // days remaining, or blank. (Confirmed against the 28-col layout
+        // getScopedInventory returns \u2014 see doGet in the backend.)
+        const parsed = srParseExpiryCell(row[26]);
 
-        // Skip blank/empty/whitespace-only values
-        if (rawZ === undefined || rawZ === null || String(rawZ).trim() === '') {
-            return;
-        }
-
-        const colZVal = Number(rawZ);
-
-        // Condition: Numeric value <= 90
-        if (!isNaN(colZVal) && colZVal <= 90) {
+        // Near-expiry = a numeric, not-yet-expired value within 90 days out.
+        // Already-expired items are handled separately by the expired alert.
+        if (parsed && !parsed.expired && parsed.days !== null && parsed.days <= 90) {
             matchCount++;
             const sku = row[1] || ''; // Col B
             const desc = row[2] || ''; // Col C
@@ -5767,12 +6283,12 @@ function checkAndShowExpiredAlert(rows) {
         const desc = row[2] || 'N/A';
         const qty = row[24] !== undefined && row[24] !== '' ? row[24] : 0; // Col Y
         const expDateStr = row[23] || ''; // Col X
-        const status = row[26] ? String(row[26]).toUpperCase() : ''; // Col AA
+        const parsedExpiry = srParseExpiryCell(row[26]); // Col AA: NEAREX AGING \u2014 "EXPIRED" tag, days number, or blank
 
         let isExpired = false;
 
-        // Check if explicit STATUS column indicates expired
-        if (status.includes('EXPIRED')) {
+        // Check if the col N expiry cell already indicates expired
+        if (parsedExpiry && parsedExpiry.expired) {
             isExpired = true;
         } else if (expDateStr) {
             // Check if expiration date is before today
