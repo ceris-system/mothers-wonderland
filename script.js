@@ -1458,6 +1458,18 @@ const SR_DS = { DEPT: null, DEPT_LIST_COL: 109 /* DF */, SKU: 0, DESC: 1, SRP: 4
 const SR_TR_RANGE = 'BU3:CB';
 const SR_TR_COL = { DEPT: 0, DEPT_QTY: 1, DEPT_AMOUNT: 2, SKU: 4, DESC: 5, PROD_QTY: 6, PROD_AMOUNT: 7 };
 
+// STOCK HEALTH (CRITICAL STOCK / LOW STOCK / OUT OF STOCK / STOCK AVAILABILITY)
+// source: the "DATA" sheet's own STATUS column (M), read directly instead of
+// being derived from the multi-department inventory fetch.
+//   A2:A = SKU CODE            F2:F = TOTAL ONHAND
+//   B2:B = ITEM DESCRIPTION    G2:G = DEPARTMENT
+//   J2:J = LAST DATE RECEIVED  M2:M = STATUS
+//     "CRITICAL IN STOCK" -> Critical Stock, "LOW STOCK" -> Low Stock,
+//     "OUT OF STOCK" -> Out of Stock, "IN STOCK" -> Stock Availability.
+const SR_STOCK_SHEET_NAME = 'DATA';
+const SR_STOCK_RANGE = 'A2:M';
+const SR_STOCK_COL = { SKU: 0, DESC: 1, ONHAND: 5, DEPT: 6, LAST_RECEIVED: 9, STATUS: 12 };
+
 const srState = {
     inventoryRows: [],
     salesRows: [],
@@ -1466,6 +1478,8 @@ const srState = {
     topRankDeptRows: [],    // pre-ranked from "sales" BU:BW -> [{label, qty, value}]
     topRankProductRows: [], // pre-ranked from "sales" BY:CB -> [{sku, desc, qty, value}]
     topRankError: null,
+    stockRows: [],   // flattened from the "DATA" sheet: {dept, sku, desc, onhand, lastReceived, status}
+    stockError: null,
     topRank: { mode: 'MONTH', day: '', month: '' },   // Top Rank period picker ('' = today / this month)
     historyMonths: [],          // saved monthly backups on the server, newest first: [{month, rows, days, units, amount, savedAt}]
     historyByMonth: {},         // 'YYYY-MM' -> loaded rows [{sku, desc, dept, srp, qty, amount, date}]
@@ -2135,7 +2149,7 @@ async function srRefreshAll(showSpinner) {
     if (statusEl && showSpinner) statusEl.textContent = 'Refreshing live data...';
 
     try {
-        await Promise.all([srFetchInventoryAll(), srFetchSalesAll(), srFetchDailySalesAll(), srFetchTopRankRanked(), srFetchHistoryList()]);
+        await Promise.all([srFetchInventoryAll(), srFetchSalesAll(), srFetchDailySalesAll(), srFetchTopRankRanked(), srFetchStockAll(), srFetchHistoryList()]);
         await srSyncRecentHistory();
         srState.lastUpdated = new Date();
         if (statusEl) statusEl.textContent = `Live \u00b7 last updated ${srState.lastUpdated.toLocaleTimeString()} \u00b7 auto-refreshes every 60s`;
@@ -2341,6 +2355,35 @@ async function srFetchTopRankRanked() {
     }
 }
 
+// STOCK HEALTH tabs each just filter this one shared read of the "DATA"
+// sheet's STATUS column client-side.
+async function srFetchStockAll() {
+    try {
+        const url = `${window.API}?sheet=${encodeURIComponent(SR_STOCK_SHEET_NAME)}&range=${encodeURIComponent(SR_STOCK_RANGE)}&token=${encodeURIComponent(window.API_TOKEN)}`;
+        const json = await (await fetch(url)).json();
+        if (!json.success || !Array.isArray(json.values)) {
+            srState.stockRows = [];
+            srState.stockError = json.error || json.message || `Could not read the "${SR_STOCK_SHEET_NAME}" sheet.`;
+            return;
+        }
+        srState.stockRows = json.values
+            .map(row => ({
+                sku: String(row[SR_STOCK_COL.SKU] ?? '').trim(),
+                desc: String(row[SR_STOCK_COL.DESC] ?? '').trim(),
+                onhand: srNum(row[SR_STOCK_COL.ONHAND]),
+                dept: String(row[SR_STOCK_COL.DEPT] ?? '').trim(),
+                lastReceived: row[SR_STOCK_COL.LAST_RECEIVED],
+                status: String(row[SR_STOCK_COL.STATUS] ?? '').trim().toUpperCase()
+            }))
+            .filter(r => r.sku || r.desc);
+        srState.stockError = null;
+    } catch (e) {
+        console.error('[Summary Report] stock fetch failed:', e);
+        srState.stockRows = [];
+        srState.stockError = String(e && e.message || e);
+    }
+}
+
 // ---- render dispatch ----
 
 // animate = true only when the person actually switched tabs. The 60s
@@ -2353,8 +2396,8 @@ function srRenderActiveTab(animate) {
         DAILY_SALES: srRenderDailySales,
         TOP_RANK: srRenderTopRank,
         MONTH_COMPARE: srRenderMonthCompare,
-        CRITICAL_STOCK: () => srRenderStockBucket('CRITICAL', 'CRITICAL STOCK', 'var(--sr-danger)', 'fa-triangle-exclamation'),
-        OUT_OF_STOCK: () => srRenderStockBucket('OUT OF STOCK', 'OUT OF STOCK', 'var(--sr-orange)', 'fa-ban'),
+        CRITICAL_STOCK: srRenderCriticalStock,
+        OUT_OF_STOCK: srRenderOutOfStock,
         STOCK_AVAILABILITY: srRenderStockAvailability,
         NEAR_EXPIRATION: srRenderNearExpiration,
         EXPIRATION_MONITORING: srRenderExpirationMonitoring,
@@ -2817,82 +2860,80 @@ function srRenderMonthCompare() {
 
 // ---- 5/6. Critical stock & out of stock ----
 
-function srRenderStockBucket(status, title, color, icon) {
-    const items = srState.inventoryRows.filter(row => {
-        const s = row[27] ? String(row[27]).trim().toUpperCase() : '';
-        return s === status;
-    });
+// ---- 5/6/7. Stock health \u2014 CRITICAL STOCK, LOW STOCK, OUT OF STOCK,
+// STOCK AVAILABILITY \u2014 all filtered client-side from srState.stockRows
+// (the "DATA" sheet's STATUS column), each sharing the same table shape.
 
-    const rowsHTML = items.map(row => `<tr>
-        <td class="c-fit">${srDept(row._dept)}</td>
-        <td class="c-sku c-fit">${srEsc(row[1] || '')}</td>
-        <td class="c-desc">${srEsc(row[2] || '')}</td>
-        <td class="c-fit c-center c-num">${srEsc(row[20] !== undefined ? row[20] : 0)}</td>
-        <td class="c-fit c-center">${srEsc(formatExpirationDate(row[15]) || row[15] || '-')}</td>
+function srStockErrorNote() {
+    return srState.stockError
+        ? `<div class="sr-note" style="color: var(--sr-danger-light);"><i class="fa-solid fa-triangle-exclamation"></i> Couldn't read the "${srEsc(SR_STOCK_SHEET_NAME)}" sheet: ${srEsc(srState.stockError)}</div>`
+        : '';
+}
+
+function srStockRowsForStatus(status) {
+    const s = status.trim().toUpperCase();
+    return srState.stockRows.filter(r => r.status === s);
+}
+
+function srStockTableHTML(items, emptyMsg) {
+    const rowsHTML = items.map(r => `<tr>
+        <td class="c-fit">${srDept(r.dept)}</td>
+        <td class="c-sku c-fit">${srEsc(r.sku)}</td>
+        <td class="c-desc">${srEsc(r.desc)}</td>
+        <td class="c-fit c-center c-num">${srEsc(r.onhand)}</td>
+        <td class="c-fit c-center">${srEsc(formatExpirationDate(r.lastReceived) || r.lastReceived || '-')}</td>
     </tr>`).join('');
+    return srTableWrap(`<table class="sr-table">
+        <thead><tr>
+            <th class="c-fit">DEPARTMENT</th>
+            <th class="c-fit">SKU CODE</th>
+            <th>ITEM DESCRIPTION</th>
+            <th class="c-fit c-center">TOTAL QTY<br>ONHAND</th>
+            <th class="c-fit c-center">LAST DATE<br>RECEIVED</th>
+        </tr></thead>
+        <tbody>${rowsHTML || `<tr><td colspan="5" class="sr-empty-cell">${emptyMsg}</td></tr>`}</tbody>
+    </table>`);
+}
 
-    return `<div class="sr-cards">${srStatCard(title + ' ITEMS', items.length, 'across all departments', color, icon)}</div>
-        ${srTableWrap(`<table class="sr-table">
-            <thead><tr>
-                <th class="c-fit">DEPARTMENT</th>
-                <th class="c-fit">SKU CODE</th>
-                <th>ITEM DESCRIPTION</th>
-                <th class="c-fit c-center">TOTAL QTY<br>ONHAND</th>
-                <th class="c-fit c-center">LAST DATE<br>RECEIVED</th>
-            </tr></thead>
-            <tbody>${rowsHTML || `<tr><td colspan="5" class="sr-empty-cell">No items currently ${title.toLowerCase()}.</td></tr>`}</tbody>
-        </table>`)}`;
+// CRITICAL STOCK tab now shows two categories side by side, same grid
+// layout as MONTH VS LAST MONTH's BY DEPARTMENT / BY PRODUCT.
+function srRenderCriticalStock() {
+    const critical = srStockRowsForStatus('CRITICAL IN STOCK');
+    const low = srStockRowsForStatus('LOW STOCK');
+
+    const cards = `<div class="sr-cards">
+        ${srStatCard('CRITICAL STOCK ITEMS', critical.length, 'across all departments', 'var(--sr-danger)', 'fa-triangle-exclamation')}
+        ${srStatCard('LOW STOCK ITEMS', low.length, 'across all departments', 'var(--sr-warning)', 'fa-battery-quarter')}
+    </div>`;
+
+    return srStockErrorNote() + srNote(`Source: the "${SR_STOCK_SHEET_NAME}" sheet's STATUS column (M) \u2014 CRITICAL STOCK = "CRITICAL IN STOCK", LOW STOCK = "LOW STOCK".`) +
+        cards +
+        `<div class="sr-top-rank-grid" style="display: grid; grid-template-columns: 1fr 1fr; gap: 0 20px; align-items: start;">
+            <div style="display: block; min-width: 0;">
+                ${srHeading('CRITICAL STOCK', 'fa-triangle-exclamation', 'var(--sr-danger)')}
+                ${srStockTableHTML(critical, 'No items currently critical in stock.')}
+            </div>
+            <div style="display: block; min-width: 0;">
+                ${srHeading('LOW STOCK', 'fa-battery-quarter', 'var(--sr-warning)')}
+                ${srStockTableHTML(low, 'No items currently low in stock.')}
+            </div>
+        </div>`;
+}
+
+function srRenderOutOfStock() {
+    const items = srStockRowsForStatus('OUT OF STOCK');
+    return srStockErrorNote() + srNote(`Source: the "${SR_STOCK_SHEET_NAME}" sheet's STATUS column (M) = "OUT OF STOCK".`) +
+        `<div class="sr-cards">${srStatCard('OUT OF STOCK ITEMS', items.length, 'across all departments', 'var(--sr-orange)', 'fa-ban')}</div>` +
+        srStockTableHTML(items, 'No items currently out of stock.');
 }
 
 // ---- 7. Stock availability ----
 
 function srRenderStockAvailability() {
-    const buckets = { critical: [], low: [], out: [], ok: 0 };
-    srState.inventoryRows.forEach(row => {
-        const s = row[27] ? String(row[27]).trim().toUpperCase() : '';
-        if (s === 'CRITICAL') buckets.critical.push(row);
-        else if (s === 'LOW IN STOCK') buckets.low.push(row);
-        else if (s === 'OUT OF STOCK') buckets.out.push(row);
-        else buckets.ok++;
-    });
-
-    const cards = `<div class="sr-cards">
-        ${srStatCard('CRITICAL', buckets.critical.length, '', 'var(--sr-danger)', 'fa-triangle-exclamation')}
-        ${srStatCard('LOW IN STOCK', buckets.low.length, '', 'var(--sr-warning)', 'fa-battery-quarter')}
-        ${srStatCard('OUT OF STOCK', buckets.out.length, '', 'var(--sr-orange)', 'fa-ban')}
-        ${srStatCard('HEALTHY STOCK', buckets.ok, '', 'var(--sr-success)', 'fa-circle-check')}
-    </div>`;
-
-    // ONE table with a colored banner row per bucket (instead of three
-    // separate tables), so DEPARTMENT / SKU CODE / ITEM DESCRIPTION / QTY
-    // line up at exactly the same width in every section — auto-layout
-    // columns are sized per table, so separate tables would each fit their
-    // own content and drift out of alignment.
-    const section = (label, color, rgb, icon, items) => `
-        <tbody>
-            <tr class="sr-section" style="--sc: ${color}; --sc-rgb: var(${rgb});">
-                <td colspan="4"><i class="fa-solid ${icon}" style="color: inherit; margin-right: 8px;"></i>${label}<span class="sr-count">${items.length}</span></td>
-            </tr>
-            ${items.map(row => `<tr>
-                <td class="c-fit">${srDept(row._dept)}</td>
-                <td class="c-sku c-fit">${srEsc(row[1] || '')}</td>
-                <td class="c-desc">${srEsc(row[2] || '')}</td>
-                <td class="c-fit c-center c-num">${srEsc(row[20] !== undefined ? row[20] : 0)}</td>
-            </tr>`).join('') || `<tr><td colspan="4" class="sr-empty-cell">None.</td></tr>`}
-        </tbody>`;
-
-    return cards +
-        srTableWrap(`<table class="sr-table">
-            <thead><tr>
-                <th class="c-fit">DEPARTMENT</th>
-                <th class="c-fit">SKU CODE</th>
-                <th>ITEM DESCRIPTION</th>
-                <th class="c-fit c-center">QTY</th>
-            </tr></thead>
-            ${section('CRITICAL', 'var(--sr-danger)', '--sr-danger-rgb', 'fa-triangle-exclamation', buckets.critical)}
-            ${section('LOW IN STOCK', 'var(--sr-warning)', '--sr-warning-rgb', 'fa-battery-quarter', buckets.low)}
-            ${section('OUT OF STOCK', 'var(--sr-orange)', '--sr-orange-rgb', 'fa-ban', buckets.out)}
-        </table>`);
+    const items = srStockRowsForStatus('IN STOCK');
+    return srStockErrorNote() + srNote(`Source: the "${SR_STOCK_SHEET_NAME}" sheet's STATUS column (M) = "IN STOCK".`) +
+        `<div class="sr-cards">${srStatCard('IN STOCK ITEMS', items.length, 'across all departments', 'var(--sr-success)', 'fa-circle-check')}</div>` +
+        srStockTableHTML(items, 'No items currently in stock.');
 }
 
 // ---- 8/9. Expiration-based reports ----
