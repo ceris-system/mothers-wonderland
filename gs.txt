@@ -388,6 +388,13 @@ function doGet(e) {
       // two entries of the mapped row — several front-end functions
       // (row[row.length-2] / row[row.length-1]) depend on that position.
       const mappedData = filteredRows.map(row => {
+        if (sheetName.toUpperCase() === "P.O RECEIVED") {
+          // Keep the sheet's real column positions: A..M (0-12), Y = P.O STATUS
+          // (idx 24), Z = DATE RECEIVED (idx 25). Pad to 26 so indices line up.
+          const out = row.slice(0, 26);
+          while (out.length < 26) out.push("");
+          return out;
+        }
         if (sheetName === "TRANSFER") {
           // A..N (14) + OUTGOING REMARKS (S, idx 18) + INCOMING DEPT (O) + DATE (P)
           return row.slice(0, 14).concat([row[18] || "", row[14], row[15]]);
@@ -1282,12 +1289,12 @@ function upsertPurchaseOrderReceived_(ss, sourceSheet, sourceRow, flagStatus) {
   if (!receivedSheet) receivedSheet = ss.insertSheet(receivedSheetName);
 
   if (receivedSheet.getLastRow() === 0) {
-    receivedSheet.getRange(1, 1, 1, 25).setValues([[
+    receivedSheet.getRange(1, 1, 1, 26).setValues([[
       "DEPARTMENT", "SKU CODE", "PRODUCT DESCRIPTION", "UOM", "EXP. DATE",
       "ON HAND", "TOTAL ON HAND", "COST", "SRP", "QTY", "DATE", "SERIAL NO.",
       "REQUESTED BY", "ITEM REMARKS", "WORKFLOW STATUS", "APPROVED BY", "APPROVED DATE",
       "RECEIVED STATUS", "RECEIVED EXP. DATE", "RECEIVED QTY", "RECEIVED UOM",
-      "RECEIVED REMARKS", "SOURCE ROW", "", "FLAG STATUS"
+      "RECEIVED REMARKS", "SOURCE ROW", "", "FLAG STATUS", "DATE RECEIVED"
     ]]);
   }
 
@@ -1310,6 +1317,11 @@ function upsertPurchaseOrderReceived_(ss, sourceSheet, sourceRow, flagStatus) {
   receivedSheet.getRange(targetRow, 1, 1, 22).setValues([sourceValues]);
   receivedSheet.getRange(targetRow, 23).setValue(Number(sourceRow));
   receivedSheet.getRange(targetRow, 25).setValue(flagStatus);
+  if (String(flagStatus).toUpperCase() === "SUCCESS") {
+    receivedSheet.getRange(targetRow, 26).setValue(
+      Utilities.formatDate(new Date(), Session.getScriptTimeZone(), "MMMM d, yyyy h:mm a")
+    );
+  }
   return targetRow;
 }
 

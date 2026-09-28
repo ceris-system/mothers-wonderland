@@ -5803,17 +5803,21 @@ const HISTORY_CONFIGS = {
   },
   PURCHASE_ORDER: {
     title: 'PURCHASE ORDER HISTORY',
-        sheet: 'P.O REQUEST',
-    // Matches the row shape written by triggerPrintPurchaseOrderForm:
+    sheet: 'P.O RECEIVED',
+    // Row shape read from the P.O RECEIVED sheet:
     // A dept | B sku | C desc | D uom | E exp date | F qty onhand |
-    // G total onhand | H cost | I srp | J qty ordered | K date |
-    // L serial (blank client-side, stamped by the backend) | M form
-    // requested by | N per-item remarks. Unlike RTV/REQUEST, every column
-    // here is actually populated, so nothing is hidden.
+    // G total onhand | H cost | I srp | J P.O qty | K date requested |
+    // L serial (stamped by the backend) | M requested by |
+    // N..X (indices 13-23) not shown | Y (24) P.O status | Z (25) date received.
+    // Indices 13-23 stay in `headers` so row[i] lookups line up with the
+    // real sheet columns; they are skipped when rendering via hiddenColumns.
     headers: [
       'DEPARTMENT', 'SKU CODE', 'PRODUCT DESCRIPTION', 'UOM', 'EXP. DATE', 'ON HAND',
-    'TOTAL ON HAND', 'COST', 'SRP', 'QTY', 'DATE', 'SERIAL NO.', 'REQUESTED BY', 'ITEM REMARKS'
-    ]
+      'TOTAL ON HAND', 'COST', 'SRP', 'P.O QTY', 'DATE REQUEST', 'SERIAL NO.', 'REQUESTED BY',
+      '', '', '', '', '', '', '', '', '', '', '',
+      'P.O STATUS', 'DATE RECEIVED'
+    ],
+    hiddenColumns: [13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23]
   }
 };
 
