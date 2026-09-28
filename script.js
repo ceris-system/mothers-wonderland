@@ -752,6 +752,11 @@ function injectAppPrintStyles() {
                 font-weight: 700 !important;
                 letter-spacing: 1.5px !important;
             }
+            .print-target-active .po-serial-display {
+                width: 230px !important;
+                min-width: 230px !important;
+                box-sizing: border-box !important;
+            }
 
             /* Buttons, the close (X) icon, search/filter controls, and
                anything explicitly flagged .no-print are screen-only
@@ -807,6 +812,118 @@ function injectAppPrintStyles() {
                 color: #000 !important;
                 font-weight: 700;
                 font-size: 12pt;
+            }
+
+            /* REQUEST/TRANSFER/PULLOUT FORM print layout — these 3 forms
+               share an identical #printableArea structure. Two real bugs
+               showed up on an actual printed page:
+               1) None of the item table's columns had a %-based width,
+                  so with auto table-layout, PRODUCT DESCRIPTION (the one
+                  column with no explicit width) got starved down to a
+                  few px — the other 9 columns' pixel widths already add
+                  up to more than the printable area on their own — and
+                  every word wrapped one letter per line, blowing a
+                  single product row across several pages.
+               2) The OUTGOING/INCOMING DEPARTMENT row is two flex items
+                  fighting for width at print's larger 12pt font; the
+                  input's placeholder text visibly overlapped the next
+                  field's label instead of wrapping cleanly.
+               Fixed layout + explicit % widths solves (1); stacking the
+               two department fields solves (2) regardless of how long
+               the department name or label text is. */
+            .print-target-active #printableArea table {
+                table-layout: fixed !important;
+                min-width: 0 !important;
+                /* The generic 12pt table rule above is sized for a
+                   handful of wide columns (e.g. the inventory form); at
+                   10 columns here it forces far more line-wrapping than
+                   the form needs. 9pt (close to this table's on-screen
+                   0.78rem) keeps it legible while fitting realistic
+                   product descriptions in 2-3 lines instead of 6-8. */
+                font-size: 9pt !important;
+            }
+            .print-target-active #printableArea table th,
+            .print-target-active #printableArea table td {
+                font-size: 9pt !important;
+                padding: 4px 5px !important;
+            }
+            .print-target-active #printableArea table th:nth-child(1),
+            .print-target-active #printableArea table td:nth-child(1) { width: 10% !important; } /* SKU CODE */
+            .print-target-active #printableArea table th:nth-child(2),
+            .print-target-active #printableArea table td:nth-child(2) { width: 24% !important; } /* PRODUCT DESCRIPTION */
+            .print-target-active #printableArea table th:nth-child(3),
+            .print-target-active #printableArea table td:nth-child(3) { width: 5% !important; }  /* UOM */
+            .print-target-active #printableArea table th:nth-child(4),
+            .print-target-active #printableArea table td:nth-child(4) { width: 10% !important; } /* EXP. DATE */
+            .print-target-active #printableArea table th:nth-child(5),
+            .print-target-active #printableArea table td:nth-child(5) { width: 7% !important; }  /* ON HAND */
+            .print-target-active #printableArea table th:nth-child(6),
+            .print-target-active #printableArea table td:nth-child(6) { width: 7% !important; }  /* TOTAL ON HAND */
+            .print-target-active #printableArea table th:nth-child(7),
+            .print-target-active #printableArea table td:nth-child(7) { width: 6% !important; }  /* COST */
+            .print-target-active #printableArea table th:nth-child(8),
+            .print-target-active #printableArea table td:nth-child(8) { width: 6% !important; }  /* SRP */
+            .print-target-active #printableArea table th:nth-child(9),
+            .print-target-active #printableArea table td:nth-child(9) { width: 8% !important; }  /* TRANSFER QTY */
+            .print-target-active #printableArea table th:nth-child(10),
+            .print-target-active #printableArea table td:nth-child(10) { width: 17% !important; } /* REMARKS */
+
+            /* #formHeaderRow normally lays the department fields out
+               side-by-side against the serial/date block, centered on
+               the cross axis — fine on screen, but at print's larger
+               12pt font the two department fields alone can already
+               overflow the printable width (see above), and centering
+               a shorter serial/date block next to a now-taller stacked
+               department block makes them overlap vertically. Stacking
+               the whole row removes any width/height math that could
+               cause overlap, regardless of department name length. */
+            .print-target-active #formHeaderRow {
+                flex-direction: column !important;
+                align-items: stretch !important;
+            }
+            .print-target-active #deptFieldsRow {
+                flex-direction: column !important;
+                align-items: stretch !important;
+                min-width: 0 !important;
+            }
+            .print-target-active #deptFieldsRow > div {
+                min-width: 0 !important;
+            }
+
+            /* The 55px top margin above the signature block is on-screen
+               breathing room under a scrollable table — on paper it's
+               often just enough to push the whole signature footer onto
+               its own near-empty extra page. Trimmed for print only. */
+            .print-target-active #formSignatureBlock {
+                margin-top: 0.45in !important;
+                padding-bottom: 0.35in !important;
+                gap: 12px !important;
+                align-items: flex-end !important;
+                break-inside: avoid !important;
+                page-break-inside: avoid !important;
+            }
+            .print-target-active #formSignatureBlock > div {
+                flex: 1 1 0 !important;
+                min-width: 0 !important;
+                break-inside: avoid !important;
+                page-break-inside: avoid !important;
+            }
+            .print-target-active #approvedSignatureSlot {
+                min-height: 165px !important;
+                width: 100% !important;
+            }
+            .print-target-active #approvedSignatureSlot .approved-signature-released {
+                height: 165px !important;
+                width: 100% !important;
+            }
+            .print-target-active #approvedSignatureSlot img {
+                top: -85px !important;
+                left: 50% !important;
+                width: 250px !important;
+                height: 250px !important;
+                max-width: none !important;
+                transform: translateX(-50%) scaleX(1.25) !important;
+                object-fit: contain !important;
             }
         }
     `;
@@ -1072,7 +1189,7 @@ async function triggerPrintTransferForm() {
     const rowsToSave = [];
     rows.forEach(row => {
         const cells = row.querySelectorAll('td');
-        if (cells.length < 11) return;
+        if (cells.length < 10) return;
 
         const getCellText = (idx) => cells[idx] ? cells[idx].innerText.trim() : '';
         const getInputValue = (idx) => {
@@ -1170,7 +1287,7 @@ async function triggerPrintPulloutForm() {
     const rowsToSave = [];
     rows.forEach(row => {
         const cells = row.querySelectorAll('td');
-        if (cells.length < 11) return;
+        if (cells.length < 10) return;
 
         const getCellText = (idx) => cells[idx] ? cells[idx].innerText.trim() : '';
         const getInputValue = (idx) => {
@@ -1265,7 +1382,7 @@ async function triggerPrintRequestAndReleasedForm() {
     const rowsToSave = [];
     rows.forEach(row => {
         const cells = row.querySelectorAll('td');
-        if (cells.length < 11) return;
+        if (cells.length < 10) return;
 
         const getCellText = (idx) => cells[idx] ? cells[idx].innerText.trim() : '';
         const getInputValue = (idx) => {
@@ -1398,9 +1515,9 @@ async function loadReportModuleCode(container) {
                             <span style="font-family: 'Roboto Mono', monospace; font-size: 0.8rem; font-weight: 700; text-align: center; letter-spacing: 1px;">INVENTORY FORM</span>
                         </button>
 
-                        <button class="nav-icon-btn" onclick="selectReportCategory('PO_FORM')" style="flex: 0 0 240px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; padding: 15px 10px; min-height: 110px; border-radius: 12px; cursor: pointer; background: rgba(144, 168, 168, 0.35); border: 1.5px solid rgba(0, 0, 0, 0.4); color: #111; -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px); transition: all 0.3s ease;">
+                        <button class="nav-icon-btn" onclick="selectReportCategory('PURCHASE_ORDER')" style="flex: 0 0 240px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; padding: 15px 10px; min-height: 110px; border-radius: 12px; cursor: pointer; background: rgba(144, 168, 168, 0.35); border: 1.5px solid rgba(0, 0, 0, 0.4); color: #111; -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px); transition: all 0.3s ease;">
                             <i class="fa-solid fa-cart-shopping" style="font-size: 1.8rem; color: #111;"></i>
-                            <span style="font-family: 'Roboto Mono', monospace; font-size: 0.8rem; font-weight: 700; text-align: center; letter-spacing: 1px;">P.O FORM</span>
+                            <span style="font-family: 'Roboto Mono', monospace; font-size: 0.8rem; font-weight: 700; text-align: center; letter-spacing: 1px;">P.O HISTORY</span>
                         </button>
                     </div>
                 </div>
@@ -1441,9 +1558,6 @@ function selectReportCategory(category) {
     } else if (category === 'INVENTORY_FORM') {
         logButtonClick('INVENTORY_FORM_BUTTON_CLICKED');
         openInventoryFormModal();
-    } else if (category === 'PO_FORM') {
-        logButtonClick('PO_FORM_BUTTON_CLICKED');
-        openPOFormModal();
     } else if (HISTORY_CONFIGS[category]) {
         const logLabel = (HISTORY_CONFIGS[category].title || category).toUpperCase().replace(/\s+/g, '_') + '_BUTTON_CLICKED';
         logButtonClick(logLabel);
@@ -1451,28 +1565,6 @@ function selectReportCategory(category) {
     } else {
         console.warn("Unknown report category:", category);
     }
-}
-
-// ---- P.O FORM ----
-// Opens the same Purchase Order entry form used under OUTGOING FORMS →
-// Purchase Order Form (loadPurchaseOrderFormModuleCode / mod-
-// PURCHASE_ORDER_FORM), so REPORTS SYSTEM's "P.O FORM" button and the
-// OUTGOING category button both lead to the exact same form/save/print
-// logic instead of two separate implementations.
-//
-// poFormOpenedFromReports tracks which entry point was used: normally,
-// closing this form (closePurchaseOrderFormModal) returns to the
-// OUTGOING category picker (returnToOutgoingCategories) — but when it
-// was opened from here, there's no OUTGOING picker to return to, so the
-// close button should just hide the form instead.
-let poFormOpenedFromReports = false;
-
-function openPOFormModal() {
-    const container = document.getElementById('mod-PURCHASE_ORDER_FORM');
-    if (!container) return;
-    poFormOpenedFromReports = true;
-    container.style.display = 'block';
-    loadPurchaseOrderFormModuleCode(container);
 }
 
 // ==========================================
@@ -4996,10 +5088,10 @@ function addSelectedProducts() {
                 <input type="number" min="1" value="1" style="${inputStyle} text-align: center; font-weight: 600;">
             </td>
             <td style="${tdStyle}">
-                <input type="text" class="row-remarks" aria-label="Remarks for ${escapeHtml(item.description)}" placeholder="Product remarks" style="${inputStyle}">
-            </td>
-            <td style="${tdStyle} text-align: center;" class="no-print">
-                <button type="button" onclick="removeTransferRow('${rowId}')" title="Remove Row" style="background: transparent; border: none; color: #ff4d4d; cursor: pointer; font-size: 1.2rem; font-weight: bold; line-height: 1; padding: 2px 5px;">✕</button>
+                <div style="display: flex; align-items: center; gap: 6px;">
+                    <input type="text" class="row-remarks" aria-label="Remarks for ${escapeHtml(item.description)}" placeholder="Product remarks" style="${inputStyle}">
+                    <button type="button" class="no-print" onclick="removeTransferRow('${rowId}')" title="Remove Row" aria-label="Remove ${escapeHtml(item.description)}" style="flex: 0 0 auto; background: transparent; border: none; color: #ff4d4d; cursor: pointer; font-size: 1.1rem; line-height: 1; padding: 2px 5px;">✕</button>
+                </div>
             </td>
         `;
 
@@ -5197,23 +5289,23 @@ async function loadOutgoingModuleCode(container) {
                 </div>
 
                 <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; width: 100%; gap: 20px; margin: auto 0;">
-                    <div style="display: flex; justify-content: center; gap: 20px; width: 100%; max-width: 900px; flex-wrap: wrap;">
-                        <button class="nav-icon-btn btn-3d" onclick="selectOutgoingCategory('REQUEST_AND_RELEASED_FORM')" style="flex: 1 1 0px; min-width: 220px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; padding: 15px 10px; min-height: 110px; border-radius: 12px; cursor: pointer; background: rgba(144, 168, 168, 0.35); border: 1.5px solid rgba(0, 0, 0, 0.4); color: #111; -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px);">
+                    <div style="display: flex; justify-content: center; gap: 20px; width: 100%; max-width: 980px; flex-wrap: wrap;">
+                        <button class="nav-icon-btn btn-3d" onclick="selectOutgoingCategory('REQUEST_AND_RELEASED_FORM')" style="flex: 0 1 220px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; padding: 15px 10px; min-height: 110px; border-radius: 12px; cursor: pointer; background: rgba(144, 168, 168, 0.35); border: 1.5px solid rgba(0, 0, 0, 0.4); color: #111; -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px);">
                             <i class="fa-solid ${OUTGOING_CONFIGS.REQUEST_AND_RELEASED_FORM.icon} icon-3d-anim" style="font-size: 1.8rem; color: #111;"></i>
                             <span style="font-family: 'Roboto Mono', monospace; font-size: 0.8rem; font-weight: 700; text-align: center; letter-spacing: 1px;">${OUTGOING_CONFIGS.REQUEST_AND_RELEASED_FORM.label}</span>
                         </button>
 
-                        <button class="nav-icon-btn btn-3d" onclick="selectOutgoingCategory('TRANSFER_FORM')" style="flex: 1 1 0px; min-width: 220px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; padding: 15px 10px; min-height: 110px; border-radius: 12px; cursor: pointer; background: rgba(144, 168, 168, 0.35); border: 1.5px solid rgba(0, 0, 0, 0.4); color: #111; -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px);">
+                        <button class="nav-icon-btn btn-3d" onclick="selectOutgoingCategory('TRANSFER_FORM')" style="flex: 0 1 220px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; padding: 15px 10px; min-height: 110px; border-radius: 12px; cursor: pointer; background: rgba(144, 168, 168, 0.35); border: 1.5px solid rgba(0, 0, 0, 0.4); color: #111; -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px);">
                             <i class="fa-solid ${OUTGOING_CONFIGS.TRANSFER_FORM.icon} icon-3d-anim" style="font-size: 1.8rem; color: #111;"></i>
                             <span style="font-family: 'Roboto Mono', monospace; font-size: 0.8rem; font-weight: 700; text-align: center; letter-spacing: 1px;">${OUTGOING_CONFIGS.TRANSFER_FORM.label}</span>
                         </button>
 
-                        <button class="nav-icon-btn btn-3d" onclick="selectOutgoingCategory('PULLOUT_FORM')" style="flex: 1 1 0px; min-width: 220px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; padding: 15px 10px; min-height: 110px; border-radius: 12px; cursor: pointer; background: rgba(144, 168, 168, 0.35); border: 1.5px solid rgba(0, 0, 0, 0.4); color: #111; -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px);">
+                        <button class="nav-icon-btn btn-3d" onclick="selectOutgoingCategory('PULLOUT_FORM')" style="flex: 0 1 220px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; padding: 15px 10px; min-height: 110px; border-radius: 12px; cursor: pointer; background: rgba(144, 168, 168, 0.35); border: 1.5px solid rgba(0, 0, 0, 0.4); color: #111; -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px);">
                             <i class="fa-solid ${OUTGOING_CONFIGS.PULLOUT_FORM.icon} icon-3d-anim" style="font-size: 1.8rem; color: #111;"></i>
                             <span style="font-family: 'Roboto Mono', monospace; font-size: 0.8rem; font-weight: 700; text-align: center; letter-spacing: 1px;">${OUTGOING_CONFIGS.PULLOUT_FORM.label}</span>
                         </button>
 
-                        <button class="nav-icon-btn btn-3d" onclick="selectOutgoingCategory('PURCHASE_ORDER_FORM')" style="flex: 1 1 0px; min-width: 220px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; padding: 15px 10px; min-height: 110px; border-radius: 12px; cursor: pointer; background: rgba(144, 168, 168, 0.35); border: 1.5px solid rgba(0, 0, 0, 0.4); color: #111; -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px);">
+                        <button class="nav-icon-btn btn-3d" onclick="selectOutgoingCategory('PURCHASE_ORDER_FORM')" style="flex: 0 1 220px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; padding: 15px 10px; min-height: 110px; border-radius: 12px; cursor: pointer; background: rgba(144, 168, 168, 0.35); border: 1.5px solid rgba(0, 0, 0, 0.4); color: #111; -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px);">
                             <i class="fa-solid ${OUTGOING_CONFIGS.PURCHASE_ORDER_FORM.icon} icon-3d-anim" style="font-size: 1.8rem; color: #111;"></i>
                             <span style="font-family: 'Roboto Mono', monospace; font-size: 0.8rem; font-weight: 700; text-align: center; letter-spacing: 1px;">${OUTGOING_CONFIGS.PURCHASE_ORDER_FORM.label}</span>
                         </button>
@@ -5269,7 +5361,6 @@ function selectOutgoingCategory(categoryKey) {
             loadPulloutFormModuleCode(targetView);
             break;
         case 'PURCHASE_ORDER_FORM':
-            poFormOpenedFromReports = false;
             loadPurchaseOrderFormModuleCode(targetView);
             break;
     }
@@ -5433,86 +5524,27 @@ function closePulloutModal() {
 // ==========================================
 // Replicates the REQUEST AND RELEASED FORM's process (department field +
 // Add Product from a catalog + qty/remarks per row + auto serial + save &
-// print) with two differences:
+// submit/release/receive process with two differences:
 //   1. No INCOMING DEPARTMENT field — this form only has one department
 //      field (the requesting department), labeled simply "DEPARTMENT".
-//   2. "Add Product" pulls from the COMMISSARY INVENTORY sheet (see
-//      preloadCommissaryProductCatalog / openPurchaseOrderProductListModal)
-//      instead of the per-department DATA sheet.
+//   2. "Add Product" reads DATA and filters column G to the selected
+//      department, matching the other outgoing forms.
 // Serial numbers use the POR- prefix, 7-digit padding (POR-0000001) —
 // see SERIAL_CONFIG.PURCHASE_ORDER in Code.gs.
 //
-// Unlike the other 3 outgoing forms, this one is NOT wired into
-// WORKFLOW_FORM_MAP — it only has the direct Save & Print flow (no
-// submit-for-admin-approval step). Ask if you want that added too.
+// PO requests use the shared approval workflow and are marked received
+// from the Incoming module.
 async function loadPurchaseOrderFormModuleCode(container) {
     if (!container) return;
     try {
         container.innerHTML = `<p style="padding: 20px; font-family: 'Roboto Mono', monospace; color: #fff;">Loading Purchase Order Form...</p>`;
 
-        const formHtml = `
-            <div style="margin-bottom: 25px; padding-bottom: 15px; border-bottom: 2px solid #000; display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 15px;">
-                <div style="display: flex; align-items: center; gap: 15px;">
-                    <img src="LOGO.PNG" alt="Logo" style="height: 55px; width: auto; object-fit: contain;" onerror="this.style.display='none';">
-                    <h2 style="margin: 0; font-family: 'Roboto Mono', monospace; font-size: 1.3rem; letter-spacing: 1px; font-weight: 800;">PURCHASE ORDER FORM</h2>
-                </div>
-                <div style="display: flex; gap: 25px; align-items: flex-end;">
-                    <div style="display: flex; flex-direction: column; gap: 4px;">
-                        <label style="font-size: 0.7rem; font-weight: 700; letter-spacing: 1px;">NO.:</label>
-                        <input type="text" id="serialNoDisplay" readonly style="border: none; border-bottom: 1.5px solid #000; background: transparent; font-family: 'Roboto Mono', monospace; font-weight: 700; font-size: 0.95rem; padding: 2px 4px; width: 170px;">
-                    </div>
-                    <div style="display: flex; flex-direction: column; gap: 4px;">
-                        <label style="font-size: 0.7rem; font-weight: 700; letter-spacing: 1px;">DATE:</label>
-                        <input type="text" id="formattedDateDisplay" readonly style="border: none; border-bottom: 1.5px solid #000; background: transparent; font-family: 'Roboto Mono', monospace; font-weight: 700; font-size: 0.95rem; padding: 2px 4px; width: 170px;">
-                    </div>
-                </div>
-            </div>
-
-            <div style="display: flex; gap: 20px; margin-bottom: 20px; flex-wrap: wrap;">
-                <div style="flex: 1 1 320px; display: flex; flex-direction: column; gap: 4px;">
-                    <label style="font-size: 0.75rem; font-weight: 700; letter-spacing: 1px;">DEPARTMENT:</label>
-                    <input type="text" id="outletSearch" list="outletList" placeholder="Select or type department" style="border: none; border-bottom: 1.5px solid #000; background: transparent; font-family: 'Roboto Mono', monospace; font-size: 0.9rem; padding: 6px 4px;">
-                    <datalist id="outletList"></datalist>
-                </div>
-                <div style="flex: 1 1 320px; display: flex; flex-direction: column; gap: 4px;">
-                    <label style="font-size: 0.75rem; font-weight: 700; letter-spacing: 1px;">REMARKS:</label>
-                    <input type="text" id="outgoingRemarks" placeholder="Optional remarks for this purchase order" style="border: none; border-bottom: 1.5px solid #000; background: transparent; font-family: 'Roboto Mono', monospace; font-size: 0.9rem; padding: 6px 4px;">
-                </div>
-            </div>
-
-            <div class="no-print" style="margin-bottom: 12px;">
-                <button type="button" id="productListBtn" class="btn-3d" onclick="openPurchaseOrderProductListModal()" style="padding: 10px 18px; border-radius: 8px; border: 1.5px solid #000; background: #90a8a8; color: #111; font-family: 'Roboto Mono', monospace; font-weight: 700; font-size: 0.8rem; letter-spacing: 1px; cursor: pointer;">
-                    <i class="fa-solid fa-plus" style="margin-right: 8px;"></i>ADD PRODUCT
-                </button>
-            </div>
-
-            <div style="flex: 1; overflow: auto; border: 1px solid #000;">
-                <table style="width: 100%; border-collapse: collapse; font-family: 'Roboto Mono', monospace; font-size: 0.78rem;">
-                    <thead>
-                        <tr style="background: #e9ecef;">
-                            <th style="padding: 8px; border: 1px solid #000;">SKU</th>
-                            <th style="padding: 8px; border: 1px solid #000;">DESCRIPTION</th>
-                            <th style="padding: 8px; border: 1px solid #000;">UOM</th>
-                            <th style="padding: 8px; border: 1px solid #000;">EXP DATE</th>
-                            <th style="padding: 8px; border: 1px solid #000;">QTY ON HAND</th>
-                            <th style="padding: 8px; border: 1px solid #000;">TOTAL ON HAND</th>
-                            <th style="padding: 8px; border: 1px solid #000;">COST</th>
-                            <th style="padding: 8px; border: 1px solid #000;">SRP</th>
-                            <th style="padding: 8px; border: 1px solid #000;">QTY</th>
-                            <th style="padding: 8px; border: 1px solid #000;">REMARKS</th>
-                            <th class="no-print" style="padding: 8px; border: 1px solid #000;"></th>
-                        </tr>
-                    </thead>
-                    <tbody id="poTableBody"></tbody>
-                </table>
-            </div>
-
-            <div class="no-print" style="margin-top: 20px; display: flex; justify-content: flex-end; gap: 12px;">
-                <button type="button" onclick="triggerPrintPurchaseOrderForm()" class="btn-3d" style="padding: 12px 24px; border-radius: 8px; border: none; background: #28a745; color: #fff; font-family: 'Roboto Mono', monospace; font-weight: 700; font-size: 0.85rem; letter-spacing: 1px; cursor: pointer;">
-                    <i class="fa-solid fa-floppy-disk" style="margin-right: 8px;"></i>SAVE &amp; PRINT
-                </button>
-            </div>
-        `;
+        const response = await fetch('modules/purchase_order_form/index.html');
+        if (!response.ok) throw new Error(`HTTP ${response.status}: Failed to load Purchase Order Form.`);
+        const htmlContent = (await response.text()).replace(
+            /src=["'](?:LOGO\.PNG|logo\.png)["']/gi,
+            `src="${new URL('logo.png', document.baseURI).href}"`
+        );
 
         container.innerHTML = `
             <div style="position: fixed; top: 0; left: 0; width: 100vw; height: 98%; background: rgba(0, 0, 0, 0.75); -webkit-backdrop-filter: blur(8px); backdrop-filter: blur(8px); display: flex; justify-content: center; align-items: center; z-index: 3000; box-sizing: border-box; padding: 20px 50px 20px 20px;">
@@ -5523,19 +5555,28 @@ async function loadPurchaseOrderFormModuleCode(container) {
                         </button>
                     </div>
                     <div style="color: #111; flex: 1; display: flex; flex-direction: column;">
-                        ${formHtml}
+                        ${htmlContent}
                     </div>
                 </div>
             </div>
         `;
 
-        if (typeof loadOutletFilterFromConfig === 'function') loadOutletFilterFromConfig();
+        if (typeof loadOutletFilterFromConfig === 'function') await loadOutletFilterFromConfig();
         if (typeof setTransferDate === 'function') setTransferDate();
-        applyPulloutOutgoingLockForNonAdmin(container); // reuses the same "lock to own dept for non-admins" behavior on #outletSearch
+        const scope = getSessionScope();
+        const departmentInput = container.querySelector('#outletSearch');
+        const requestedByInput = container.querySelector('#requestedBy');
+        if (!scope.isAdmin) {
+            [departmentInput, requestedByInput].forEach(input => {
+                if (!input) return;
+                input.value = scope.client;
+                input.readOnly = false;
+                input.setAttribute('list', 'outletList');
+                input.placeholder = scope.client ? 'Search your department' : 'No department on this account';
+            });
+        }
         loadNextSerialPreview('mod-PURCHASE_ORDER_FORM', 'PURCHASE_ORDER');
-        preloadCommissaryProductCatalog().catch(error => {
-            console.error('Commissary catalog preload failed:', error);
-        });
+        initFormWorkflow('mod-PURCHASE_ORDER_FORM');
 
     } catch (error) {
         console.error(error);
@@ -5544,15 +5585,6 @@ async function loadPurchaseOrderFormModuleCode(container) {
 }
 
 function closePurchaseOrderFormModal() {
-    if (poFormOpenedFromReports) {
-        poFormOpenedFromReports = false;
-        const container = document.getElementById('mod-PURCHASE_ORDER_FORM');
-        if (container) {
-            container.style.display = 'none';
-            container.innerHTML = '';
-        }
-        return;
-    }
     returnToOutgoingCategories('PURCHASE_ORDER_FORM');
 }
 
@@ -5563,8 +5595,8 @@ async function triggerPrintPurchaseOrderForm() {
     const deptValue = deptInput ? deptInput.value.trim() : '';
     const formDate = dateInput ? dateInput.value.trim() : '';
 
-    const remarksInput = container?.querySelector('#outgoingRemarks');
-    const remarksValue = remarksInput ? remarksInput.value.trim() : '';
+    const requestedByInput = container?.querySelector('#requestedBy');
+    const requestedBy = requestedByInput ? requestedByInput.value.trim() : '';
 
     if (!deptValue) return showCustomAlert('Please select or type a DEPARTMENT before printing.', deptInput);
 
@@ -5575,7 +5607,7 @@ async function triggerPrintPurchaseOrderForm() {
     const rowsToSave = [];
     rows.forEach(row => {
         const cells = row.querySelectorAll('td');
-        if (cells.length < 11) return;
+        if (cells.length < 10) return;
 
         const getCellText = (idx) => cells[idx] ? cells[idx].innerText.trim() : '';
         const getInputValue = (idx) => {
@@ -5587,7 +5619,7 @@ async function triggerPrintPurchaseOrderForm() {
 
         // A dept | B,C,D sku/desc/uom | E exp | F,G onhand/total |
         // H,I cost/srp | J qty | K date | L serial (stamped by backend) |
-        // M form remarks | N item remarks
+        // M requested by | N item remarks
         rowsToSave.push([
             deptValue,
             getCellText(0), getCellText(1), getCellText(2),
@@ -5597,7 +5629,7 @@ async function triggerPrintPurchaseOrderForm() {
             getInputValue(8),
             formDate,
             '',
-            remarksValue,
+            requestedBy,
             itemRemarks
         ]);
     });
@@ -5607,7 +5639,7 @@ async function triggerPrintPurchaseOrderForm() {
     try {
         const response = await fetch(window.API, {
             method: "POST",
-            body: JSON.stringify({ action: "savePurchaseOrderData", sheetName: "PURCHASE_ORDER", formKey: "PURCHASE_ORDER", rows: rowsToSave, token: window.API_TOKEN })
+            body: JSON.stringify({ action: "savePurchaseOrderData", sheetName: "P.O REQUEST", formKey: "PURCHASE_ORDER", rows: rowsToSave, token: window.API_TOKEN })
         });
 
         const result = await response.json();
@@ -5619,7 +5651,7 @@ async function triggerPrintPurchaseOrderForm() {
         printOnly('mod-PURCHASE_ORDER_FORM');
         const poTableBody = container?.querySelector('#poTableBody');
         if (poTableBody) poTableBody.innerHTML = '';
-        if (remarksInput) remarksInput.value = '';
+        if (requestedByInput) requestedByInput.value = '';
         loadNextSerialPreview('mod-PURCHASE_ORDER_FORM', 'PURCHASE_ORDER');
     } catch (error) {
         console.error("Save Error:", error);
@@ -5627,57 +5659,6 @@ async function triggerPrintPurchaseOrderForm() {
     } finally {
         if (typeof hideSeaWaveLoader === 'function') hideSeaWaveLoader();
     }
-}
-
-// ---- Product catalog sourced from the COMMISSARY INVENTORY sheet -------
-// Mirrors preloadProductCatalog()/openProductListModal() but reads the
-// COMMISSARY INVENTORY sheet instead of DATA, and is NOT filtered by
-// department — assumed to be one shared central stock list rather than
-// a per-outlet one. Columns are assumed to match DATA's layout minus the
-// outlet column (A SKU, B DESCRIPTION, C UOM, D EXP DATE, E QTY ON HAND,
-// F TOTAL ON HAND, G COST, H SRP). Adjust the column indices below if
-// your COMMISSARY INVENTORY sheet is laid out differently.
-let commissaryCatalogCache = null;
-let commissaryCatalogPromise = null;
-let allFetchedCommissaryProducts = [];
-
-async function preloadCommissaryProductCatalog() {
-    if (commissaryCatalogCache) return commissaryCatalogCache;
-    if (commissaryCatalogPromise) return commissaryCatalogPromise;
-
-    commissaryCatalogPromise = (async () => {
-        const url = `${window.API}?sheet=${encodeURIComponent('COMMISSARY INVENTORY')}&range=A1:H&token=${encodeURIComponent(window.API_TOKEN)}`;
-        const response = await fetch(url);
-        const result = await response.json();
-        const rawData = Array.isArray(result) ? result : (result.values || result.data || []);
-
-        commissaryCatalogCache = [];
-        rawData.forEach((row, index) => {
-            if (index === 0 || !Array.isArray(row)) return;
-
-            const sku = row[0] || '';
-            const description = row[1] || '';
-            if (sku === '' && description === '') return;
-
-            commissaryCatalogCache.push({
-                sku,
-                description,
-                uom: row[2] || '-',
-                expDate: formatExpirationDate(row[3]),
-                qtyOnhand: row[4] || '0',
-                totalOnhand: row[5] || '0',
-                cost: row[6] || '0',
-                srp: row[7] || '0'
-            });
-        });
-
-        return commissaryCatalogCache;
-    })().catch(error => {
-        commissaryCatalogPromise = null;
-        throw error;
-    });
-
-    return commissaryCatalogPromise;
 }
 
 async function openPurchaseOrderProductListModal() {
@@ -5701,7 +5682,7 @@ async function openPurchaseOrderProductListModal() {
 
     const tableBody = document.getElementById('productListTableBody');
     if (tableBody) {
-        tableBody.innerHTML = commissaryCatalogCache
+        tableBody.innerHTML = productCatalogCache
             ? ''
             : '<tr><td colspan="7" style="text-align:center; padding:15px; border:1px solid #000;">Loading products...</td></tr>';
     }
@@ -5709,19 +5690,18 @@ async function openPurchaseOrderProductListModal() {
     try {
         if (!window.API) return;
 
-        if (commissaryCatalogCache) {
-            allFetchedProducts = commissaryCatalogCache;
-            allFetchedCommissaryProducts = commissaryCatalogCache;
+        const selectedDepartment = deptValue.trim().toLowerCase();
+        if (productCatalogCache) {
+            allFetchedProducts = productCatalogCache.filter(item => item.outlet === selectedDepartment);
             renderProductTable(allFetchedProducts);
         }
 
-        await preloadCommissaryProductCatalog();
-        allFetchedProducts = commissaryCatalogCache;
-        allFetchedCommissaryProducts = commissaryCatalogCache;
+        await preloadProductCatalog();
+        allFetchedProducts = productCatalogCache.filter(item => item.outlet === selectedDepartment);
         renderProductTable(allFetchedProducts);
 
     } catch (error) {
-        console.error("Failed to load products from COMMISSARY INVENTORY sheet:", error);
+        console.error("Failed to load products from DATA sheet:", error);
         if (tableBody) {
             tableBody.innerHTML = '<tr><td colspan="7" style="text-align:center; color:red; padding:15px; border:1px solid #000;">Failed to load products.</td></tr>';
         }
@@ -5788,6 +5768,20 @@ const HISTORY_CONFIGS = {
     // up with the real sheet columns — only rendering skips them, via
     // renderHistoryRows/openHistoryModal checking this list.
     hiddenColumns: [10, 11, 12, 13, 18]
+  },
+  PURCHASE_ORDER: {
+    title: 'PURCHASE ORDER HISTORY',
+        sheet: 'P.O REQUEST',
+    // Matches the row shape written by triggerPrintPurchaseOrderForm:
+    // A dept | B sku | C desc | D uom | E exp date | F qty onhand |
+    // G total onhand | H cost | I srp | J qty ordered | K date |
+    // L serial (blank client-side, stamped by the backend) | M form
+    // requested by | N per-item remarks. Unlike RTV/REQUEST, every column
+    // here is actually populated, so nothing is hidden.
+    headers: [
+      'DEPARTMENT', 'SKU CODE', 'PRODUCT DESCRIPTION', 'UOM', 'EXP. DATE', 'ON HAND',
+    'TOTAL ON HAND', 'COST', 'SRP', 'QTY', 'DATE', 'SERIAL NO.', 'REQUESTED BY', 'ITEM REMARKS'
+    ]
   }
 };
 
@@ -6706,6 +6700,17 @@ function closeExpiredAlertModal() {
 // ==========================================
 
 const INCOMING_CONFIGS = {
+    PURCHASE_ORDER: {
+        sheet: 'PURCHASE_ORDER',
+        title: 'INCOMING PURCHASE ORDER',
+        qtyLabel: 'ORDER QUANTITY',
+        incomingCol: 'A',
+        dateCol: 'K',
+        statusCol: 'R',
+        writeBackStartCol: 'S',
+        writeBackLabel: 'QTY RECEIVED',
+        destSheet: 'P.O REQUEST'
+    },
     REQUEST: {
         sheet: 'REQUEST',
         title: 'INCOMING REQUEST AND RELEASED FORM',
@@ -7117,6 +7122,11 @@ async function loadIncomingModuleCode(container) {
                             <i class="fa-solid fa-file-arrow-down icon-3d-anim" style="font-size: 1.8rem; color: #111;"></i>
                             <span style="font-family: 'Roboto Mono', monospace; font-size: 0.8rem; font-weight: 700; text-align: center; letter-spacing: 1px;">INCOMING PULL OUT / GATE PASS FORM</span>
                         </button>
+
+                        <button class="nav-icon-btn btn-3d" onclick="selectIncomingCategory('PURCHASE_ORDER')" style="flex: 1 1 0px; min-width: 220px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; padding: 15px 10px; min-height: 110px; border-radius: 12px; cursor: pointer; background: rgba(144, 168, 168, 0.35); border: 1.5px solid rgba(0, 0, 0, 0.4); color: #111; -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px);">
+                            <i class="fa-solid fa-cart-shopping icon-3d-anim" style="font-size: 1.8rem; color: #111;"></i>
+                            <span style="font-family: 'Roboto Mono', monospace; font-size: 0.8rem; font-weight: 700; text-align: center; letter-spacing: 1px;">INCOMING PURCHASE ORDER</span>
+                        </button>
                     </div>
                 </div>
             </div>
@@ -7511,11 +7521,13 @@ async function submitIncomingReceived() {
                         action: "markIncomingReceived",
                         sourceSheet: cfg.sheet,
                         rowIndex: item.rowIndex,
+                        serial: item.serial || '',
+                        sku: item.sku || '',
                         expDate: expDate,
                         qty: qty,
                         uom: item.uom,
                         remarks: remarks,
-                        user: window.sessionUser || '',
+                        user: window.sessionUser || loggedInUser || localStorage.getItem('activeUser') || '',
                         token: window.API_TOKEN
                     })
                 }).then(r => r.json());
@@ -7536,7 +7548,10 @@ async function submitIncomingReceived() {
 
         hideIncomingProgressModal();
 
-        showModal("RECEIVED", "SUCCESSFULLY RECEIVED... INVENTORY UPDATED..", "success");
+        const successMessage = activeIncomingKey === 'PURCHASE_ORDER'
+            ? 'PURCHASE ORDER MARKED AS RECEIVED.'
+            : 'SUCCESSFULLY RECEIVED... INVENTORY UPDATED..';
+        showModal("RECEIVED", successMessage, "success");
 
         clearIncomingForm();
     } catch (error) {
@@ -7581,8 +7596,18 @@ const ADMIN_APPROVER_NAME = "JASMIN, CLYDIE ANN AICA MANLOGON";
 const WORKFLOW_FORM_MAP = {
     'mod-TRANSFER_FORM': { formKey: 'TRANSFER', tableSel: '#transferTableBody', isTransfer: true },
     'mod-PULLOUT_FORM': { formKey: 'PULLOUT', tableSel: '#pulloutTableBody', isTransfer: false },
-    'mod-REQUEST_AND_RELEASED_FORM': { formKey: 'REQUEST_RELEASED', tableSel: '#transferTableBody', isTransfer: false }
+    'mod-REQUEST_AND_RELEASED_FORM': { formKey: 'REQUEST_RELEASED', tableSel: '#transferTableBody', isTransfer: false },
+    'mod-PURCHASE_ORDER_FORM': { formKey: 'PURCHASE_ORDER', tableSel: '#poTableBody', isTransfer: false, isPurchaseOrder: true }
 };
+
+async function readWorkflowResponse(response, action) {
+    const body = await response.text();
+    try {
+        return JSON.parse(body);
+    } catch (error) {
+        throw new Error(`Apps Script returned a non-JSON response for ${action}. Deploy the latest gs.txt backend and verify the API deployment URL. (HTTP ${response.status})`);
+    }
+}
 
 function getActiveWorkflowModuleId() {
     for (const id of Object.keys(WORKFLOW_FORM_MAP)) {
@@ -7617,21 +7642,28 @@ function renderApprovedSignature(container) {
     const slot = container.querySelector('#approvedSignatureSlot');
     if (!slot) return;
     const status = container.dataset.workflowStatus || '';
+    const isReleased = status === 'RELEASED_TO_OUTGOING';
 
     // Shown to EVERYONE viewing the form — admin and the outgoing
     // department alike — once it has actually been approved/released.
     // Before that point (still pending, or a fresh unsubmitted form)
     // everyone just sees the blank signature line.
-    if (status === 'RELEASED_TO_OUTGOING') {
+    if (isReleased) {
         slot.innerHTML = `
-            <div style="width: 100%; height: 120px; position: relative; display: flex; align-items: flex-end; justify-content: center; overflow: visible;">
-                <div style="position: absolute; left: 0; right: 0; bottom: 18px; border-bottom: 1.5px solid #000; z-index: 1;"></div>
-                <img src="${new URL('SIG.png?v=2', document.baseURI).href}" alt="Signature" onerror="this.onerror=null; this.src='SIG.png?v=2';" style="position: absolute; z-index: 3; left: 50%; top: -72px; transform: translateX(-50%); display: block; width: 300px; height: 170px; max-width: none; object-fit: contain;">
+            <div class="approved-signature-mark approved-signature-released" style="width: 100%; height: 165px; position: relative; overflow: visible;">
+                <img class="approved-signature-image" src="${new URL('SIG.png?v=2', document.baseURI).href}" alt="Signature" onerror="this.onerror=null; this.src='SIG.png?v=2';" style="position: absolute; z-index: 1; left: 50%; top: -85px; transform: translateX(-50%) scaleX(1.25); display: block; width: 250px; height: 250px; max-width: none; object-fit: contain;">
+                <div style="position: absolute; z-index: 3; left: 0; right: 0; top: 85px; font-weight: 400; font-size: 0.9rem; text-align: center;">APPROVED BY</div>
+                <div style="position: absolute; z-index: 2; left: 0; right: 0; top: 144px; border-bottom: 1.5px solid #000;"></div>
+                <div style="position: absolute; z-index: 3; left: 0; right: 0; top: 152px; font-weight: 400; font-size: 0.85rem; text-align: center; white-space: nowrap;">${ADMIN_APPROVER_NAME}</div>
             </div>
-            <div style="margin-top: -2px; font-weight: bold; font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.5px; text-align: center;">${ADMIN_APPROVER_NAME}</div>
         `;
     } else {
-        slot.innerHTML = `<div style="width: 100%; border-bottom: 1.5px solid #000; margin-bottom: 6px; height: 38px;"></div>`;
+        slot.innerHTML = `
+            <div style="width: 100%; height: 68px; position: relative;">
+                <div style="position: absolute; left: 0; right: 0; bottom: 8px; border-bottom: 1.5px solid #000;"></div>
+            </div>
+            <div style="margin-top: 2px; font-weight: 400; font-size: 0.9rem; text-align: center;">APPROVED BY</div>
+        `;
     }
 }
 
@@ -7758,7 +7790,7 @@ async function submitFormForApproval(container, map) {
     const outgoingInput = container.querySelector('#outletSearch');
     const incomingInput = container.querySelector('#incomingOutletSearch');
     const dateInput = container.querySelector('#formattedDateDisplay');
-    const remarksInput = container.querySelector('#outgoingRemarks');
+    const remarksInput = container.querySelector(map.isPurchaseOrder ? '#requestedBy' : '#outgoingRemarks');
 
     const outgoingValue = outgoingInput ? outgoingInput.value.trim() : '';
     const incomingValue = incomingInput ? incomingInput.value.trim() : '';
@@ -7766,7 +7798,8 @@ async function submitFormForApproval(container, map) {
     const remarksValue = remarksInput ? remarksInput.value.trim() : '';
 
     if (!outgoingValue) return showCustomAlert('Please select or type an OUTGOING DEPARTMENT before submitting.', outgoingInput);
-    if (!incomingValue) return showCustomAlert('Please select or type an INCOMING DEPARTMENT before submitting.', incomingInput);
+    if (!map.isPurchaseOrder && !incomingValue) return showCustomAlert('Please select or type an INCOMING DEPARTMENT before submitting.', incomingInput);
+    if (map.isPurchaseOrder && !remarksValue) return showCustomAlert('Please select or type a REQUESTED BY department.', remarksInput);
 
     const tableBody = container.querySelector(map.tableSel);
     const rows = tableBody ? tableBody.querySelectorAll('tr') : [];
@@ -7775,7 +7808,7 @@ async function submitFormForApproval(container, map) {
     const rowsToSave = [];
     rows.forEach(row => {
         const cells = row.querySelectorAll('td');
-        if (cells.length < 11) return;
+        if (cells.length < 10) return;
         const getCellText = (idx) => cells[idx] ? cells[idx].innerText.trim() : '';
         const getInputValue = (idx) => {
             const input = cells[idx] ? cells[idx].querySelector('input') : null;
@@ -7790,6 +7823,12 @@ async function submitFormForApproval(container, map) {
                 outgoingValue, getCellText(0), getCellText(1), getCellText(2), getCellText(3),
                 getCellText(4), getCellText(5), getCellText(6), getCellText(7), getInputValue(8),
                 '', '', '', '', incomingValue, formDate, '', '', remarksValue, itemRemarks
+            ]);
+        } else if (map.isPurchaseOrder) {
+            rowsToSave.push([
+                outgoingValue, getCellText(0), getCellText(1), getCellText(2), getCellText(3),
+                getCellText(4), getCellText(5), getCellText(6), getCellText(7), getInputValue(8),
+                formDate, '', remarksValue, itemRemarks
             ]);
         } else {
             // A..J base cols, K-N + O-R blank, S incoming, T date, U status,
@@ -7806,9 +7845,15 @@ async function submitFormForApproval(container, map) {
     try {
         const response = await fetch(window.API, {
             method: "POST",
-            body: JSON.stringify({ action: "submitOutgoingForApproval", formKey: map.formKey, rows: rowsToSave, token: window.API_TOKEN })
+            body: JSON.stringify({
+                action: "submitOutgoingForApproval",
+                formKey: map.formKey,
+                rows: rowsToSave,
+                user: window.sessionUser || loggedInUser || localStorage.getItem('activeUser') || '',
+                token: window.API_TOKEN
+            })
         });
-        const result = await response.json();
+        const result = await readWorkflowResponse(response, 'form submission');
         if (!result.success) throw new Error(result.error || result.message || "Failed to submit.");
 
         const serialField = container.querySelector('#serialNoDisplay');
@@ -7857,6 +7902,7 @@ async function adminApproveAndRelease(container, map) {
             body: JSON.stringify({
                 action: "adminReleaseForm",
                 formKey: map.formKey,
+                user: window.sessionUser || loggedInUser || localStorage.getItem('activeUser') || '',
                 serial: container.dataset.workflowSerial,
                 department: container.dataset.workflowDept || '',
                 items: items,
@@ -7864,7 +7910,7 @@ async function adminApproveAndRelease(container, map) {
                 token: window.API_TOKEN
             })
         });
-        const result = await response.json();
+        const result = await readWorkflowResponse(response, 'admin approval');
         if (!result.success) throw new Error(result.error || result.message || "Failed to approve.");
 
         container.dataset.workflowStatus = 'RELEASED_TO_OUTGOING';
@@ -7917,7 +7963,8 @@ async function loadPendingApprovalsList(container, map) {
     try {
         const url = `${window.API}?action=getPendingApprovals&form=${encodeURIComponent(map.formKey)}&token=${encodeURIComponent(window.API_TOKEN)}`;
         const res = await fetch(url);
-        const result = await res.json();
+        const result = await readWorkflowResponse(res, 'pending approval list');
+        if (!result.success) throw new Error(result.error || result.message || 'Request failed.');
         const groups = (result && result.success) ? result.groups : [];
         if (!groups.length) { listEl.innerText = ' None pending.'; return; }
         listEl.innerHTML = groups.map(g =>
@@ -7930,7 +7977,7 @@ async function loadPendingApprovalsList(container, map) {
             };
         });
     } catch (e) {
-        listEl.innerText = ' Failed to load.';
+        listEl.innerText = ` Failed to load: ${e.message}`;
     }
 }
 
@@ -7940,7 +7987,8 @@ async function loadReleasedForOutgoingList(container, map) {
     try {
         const url = `${window.API}?action=getReleasedForOutgoing&form=${encodeURIComponent(map.formKey)}&department=${encodeURIComponent(scope.client || '')}&token=${encodeURIComponent(window.API_TOKEN)}`;
         const res = await fetch(url);
-        const result = await res.json();
+        const result = await readWorkflowResponse(res, 'released forms list');
+        if (!result.success) throw new Error(result.error || result.message || 'Request failed.');
         const groups = (result && result.success) ? result.groups : [];
         if (!groups.length) { listEl.innerText = ' None released yet.'; return; }
         listEl.innerHTML = groups.map(g =>
@@ -7953,7 +8001,7 @@ async function loadReleasedForOutgoingList(container, map) {
             };
         });
     } catch (e) {
-        listEl.innerText = ' Failed to load.';
+        listEl.innerText = ` Failed to load: ${e.message}`;
     }
 }
 
@@ -7983,7 +8031,6 @@ function loadGroupIntoTable(container, map, group, status, department, editableQ
             <td style="${tdStyle}">${editableQty || (status === 'RELEASED_TO_OUTGOING' && !getSessionScope().isAdmin)
                 ? `<input type="text" class="row-remarks" value="${escapeHtml(item.remarks || '')}" aria-label="Remarks for ${escapeHtml(item.description)}" placeholder="Product remarks" style="width:100%; border:1px solid #ccc; border-radius:4px; padding:4px 6px; box-sizing:border-box;">`
                 : escapeHtml(item.remarks || '')}</td>
-            <td class="no-print"></td>
         `;
         tableBody.appendChild(tr);
     });
@@ -8002,8 +8049,12 @@ function loadGroupIntoTable(container, map, group, status, department, editableQ
     // when re-opening an already-submitted/released form — expects the
     // backend's getPendingApprovals/getReleasedForOutgoing group objects
     // to include `remarks` and `adminRemarks`.
-    const outgoingRemarksField = container.querySelector('#outgoingRemarks');
-    if (outgoingRemarksField) outgoingRemarksField.value = group.remarks || '';
+    const outgoingRemarksField = container.querySelector(map.isPurchaseOrder ? '#requestedBy' : '#outgoingRemarks');
+    if (outgoingRemarksField) {
+        outgoingRemarksField.value = map.isPurchaseOrder
+            ? group.items[0]?.requestedBy || ''
+            : group.remarks || '';
+    }
 
     renderWorkflowButton(container);
     renderApprovedSignature(container);
@@ -8115,7 +8166,7 @@ async function refreshWorkflowBadge() {
         // can leave old unread notification rows behind. Verify that at least
         // one matching pending/released form still exists before showing the
         // dashboard badge. Start every validation request together.
-        const formKeys = ['REQUEST_RELEASED', 'TRANSFER', 'PULLOUT'];
+        const formKeys = ['REQUEST_RELEASED', 'TRANSFER', 'PULLOUT', 'PURCHASE_ORDER'];
         const notificationPromise = fetch(notificationUrl)
             .then(response => response.json())
             .catch(() => null);
@@ -8161,7 +8212,8 @@ async function refreshWorkflowBadge() {
                 formLabels: activeFormKeys.map(formKey => ({
                     REQUEST_RELEASED: 'REQUEST & RELEASED',
                     TRANSFER: 'TRANSFER',
-                    PULLOUT: 'PULL OUT'
+                    PULLOUT: 'PULL OUT',
+                    PURCHASE_ORDER: 'PURCHASE ORDER'
                 }[formKey]))
             };
             try {
@@ -8195,9 +8247,11 @@ function updateFormCategoryNotificationBadges() {
         { selector: '[onclick*="selectOutgoingCategory(\'REQUEST_AND_RELEASED_FORM\')"]', count: outgoingCounts.REQUEST_RELEASED || 0 },
         { selector: '[onclick*="selectOutgoingCategory(\'TRANSFER_FORM\')"]', count: outgoingCounts.TRANSFER || 0 },
         { selector: '[onclick*="selectOutgoingCategory(\'PULLOUT_FORM\')"]', count: outgoingCounts.PULLOUT || 0 },
+        { selector: '[onclick*="selectOutgoingCategory(\'PURCHASE_ORDER_FORM\')"]', count: outgoingCounts.PURCHASE_ORDER || 0 },
         { selector: '[onclick*="selectIncomingCategory(\'REQUEST\')"]', count: incomingCategories.REQUEST?.total || 0 },
         { selector: '[onclick*="selectIncomingCategory(\'TRANSFER\')"]', count: incomingCategories.TRANSFER?.total || 0 },
-        { selector: '[onclick*="selectIncomingCategory(\'PULLOUT\')"]', count: incomingCategories.RTV?.total || 0 }
+        { selector: '[onclick*="selectIncomingCategory(\'PULLOUT\')"]', count: incomingCategories.RTV?.total || 0 },
+        { selector: '[onclick*="selectIncomingCategory(\'PURCHASE_ORDER\')"]', count: incomingCategories.PURCHASE_ORDER?.total || 0 }
     ];
 
     buttonGroups.forEach(({ selector, count }) => {

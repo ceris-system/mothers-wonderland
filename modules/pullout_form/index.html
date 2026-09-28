@@ -8,10 +8,10 @@
     </div>
 
     <!-- Outlet Filter Search & Automatic Date Row -->
-    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; font-size: 0.85rem; gap: 15px; flex-wrap: wrap;">
+    <div id="formHeaderRow" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; font-size: 0.85rem; gap: 15px; flex-wrap: wrap;">
         
         <!-- Outgoing & Incoming Departments Container -->
-        <div style="display: flex; align-items: center; gap: 20px; flex: 1; min-width: 500px; flex-wrap: wrap;">
+        <div id="deptFieldsRow" style="display: flex; align-items: center; gap: 20px; flex: 1; min-width: 500px; flex-wrap: wrap;">
             
             <!-- Outgoing Department Search -->
             <div style="display: flex; align-items: center; gap: 8px; flex: 1; min-width: 240px;">
@@ -79,7 +79,7 @@
                 <thead>
                     <!-- Section Group Headers -->
                     <tr style="background: #f8f9fa; color: #555; text-transform: uppercase; font-size: 0.7rem; letter-spacing: 0.5px; border-bottom: 1px solid #e0e0e0;">
-                        <th colspan="11" style="padding: 8px 10px; font-weight: 700; color: #111;">PRODUCT INFORMATION</th>
+                        <th colspan="10" style="padding: 8px 10px; font-weight: 700; color: #111;">PRODUCT INFORMATION</th>
                     </tr>
                     <!-- Main Column Headers -->
                     <tr style="background: #111; color: #fff; position: sticky; top: 0; z-index: 2;">
@@ -94,7 +94,6 @@
                         <th style="padding: 10px 8px; font-weight: 700; text-align: center; width: 60px;">SRP</th>
                         <th style="padding: 10px 8px; font-weight: 600; text-align: center; width: 80px;">TRANSFER QTY</th>
                         <th style="padding: 10px 8px; font-weight: 600; width: 130px;">REMARKS</th>
-                        <th style="padding: 10px 8px; font-weight: 600; text-align: center; width: 40px;" class="no-print"></th>
                     </tr>
                 </thead>
                 <tbody id="pulloutTableBody">
@@ -106,7 +105,7 @@
     </div>
 
     <!-- Signatures & Approval Footer Block -->
-    <div style="margin-top: 55px; margin-bottom: 20px; display: flex; justify-content: space-between; align-items: flex-end; width: 100%; gap: 30px;">
+    <div id="formSignatureBlock" style="margin-top: 55px; margin-bottom: 20px; display: flex; justify-content: space-between; align-items: flex-end; width: 100%; gap: 30px;">
         
         <!-- Requested By -->
         <div style="flex: 1; display: flex; flex-direction: column; align-items: center;">
@@ -121,13 +120,10 @@
 
         <!-- Approved By -->
         <div style="flex: 1; display: flex; flex-direction: column; align-items: center;">
-            <div style="font-weight: bold; font-size: 0.75rem; text-transform: uppercase; margin-bottom: 4px; letter-spacing: 0.5px;">
-                APPROVED BY
-            </div>
             <!-- Filled by renderApprovedSignature() in script.js. Only rendered
                  with the e-signature image + name when the logged-in user is
                  an ADMIN account; everyone else sees a blank line to sign. -->
-            <div id="approvedSignatureSlot" style="width: 100%; min-height: 145px; display: flex; flex-direction: column; align-items: center; justify-content: flex-end;"></div>
+            <div id="approvedSignatureSlot" style="width: 100%; min-height: 165px; display: flex; flex-direction: column; align-items: center; justify-content: flex-end;"></div>
         </div>
 
         <!-- Received By -->
