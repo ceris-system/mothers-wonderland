@@ -1967,6 +1967,7 @@ const srState = {
     historyError: null,
     historyVersion: 0,          // bumped whenever historyByMonth changes (invalidates the combined-rows cache)
     histView: { month: 'LIVE', search: '', status: '', busy: false },
+    stockSearch: '',
     lastUpdated: null,
     activeTab: 'DAILY_SALES',
     refreshTimer: null,
@@ -3383,6 +3384,37 @@ function srStockRowsForStatus(status) {
     return srState.stockRows.filter(r => r.status === s);
 }
 
+function srMatchesStockSearch(item) {
+    const query = srState.stockSearch.trim().toLowerCase();
+    if (!query) return true;
+    return [item.dept, item.sku, item.desc]
+        .some(value => String(value || '').toLowerCase().includes(query));
+}
+
+function srStockSearchControls() {
+    return `<div class="sr-period">
+        <input id="srStockSearch" class="sr-input" type="search" placeholder="Search department, SKU or description" value="${srEsc(srState.stockSearch)}" oninput="srSetStockSearch(this.value)" aria-label="Search stock and expiration reports">
+    </div>`;
+}
+
+function srSetStockSearch(value) {
+    const input = document.getElementById('srStockSearch');
+    const selectionStart = input ? input.selectionStart : null;
+    const selectionEnd = input ? input.selectionEnd : null;
+    const content = document.getElementById('srContent');
+    const scrollTop = content ? content.scrollTop : 0;
+    srState.stockSearch = value;
+    srRenderActiveTab();
+    const nextInput = document.getElementById('srStockSearch');
+    if (nextInput) {
+        nextInput.focus();
+        if (selectionStart !== null && selectionEnd !== null) {
+            nextInput.setSelectionRange(selectionStart, selectionEnd);
+        }
+    }
+    if (content) content.scrollTop = scrollTop;
+}
+
 function srStockTableHTML(items, emptyMsg) {
     const rowsHTML = items.map(r => `<tr>
         <td class="c-fit">${srDept(r.dept)}</td>
@@ -3406,15 +3438,15 @@ function srStockTableHTML(items, emptyMsg) {
 // CRITICAL STOCK tab now shows two categories side by side, same grid
 // layout as MONTH VS LAST MONTH's BY DEPARTMENT / BY PRODUCT.
 function srRenderCriticalStock() {
-    const critical = srStockRowsForStatus('CRITICAL IN STOCK');
-    const low = srStockRowsForStatus('LOW STOCK');
+    const critical = srStockRowsForStatus('CRITICAL IN STOCK').filter(srMatchesStockSearch);
+    const low = srStockRowsForStatus('LOW STOCK').filter(srMatchesStockSearch);
 
     const cards = `<div class="sr-cards">
         ${srStatCard('CRITICAL STOCK ITEMS', critical.length, 'across all departments', 'var(--sr-danger)', 'fa-triangle-exclamation')}
         ${srStatCard('LOW STOCK ITEMS', low.length, 'across all departments', 'var(--sr-warning)', 'fa-battery-quarter')}
     </div>`;
 
-    return srStockErrorNote() + srNote(`Source: the "${SR_STOCK_SHEET_NAME}" sheet's STATUS column (M) \u2014 CRITICAL STOCK = "CRITICAL IN STOCK", LOW STOCK = "LOW STOCK".`) +
+    return srStockSearchControls() + srStockErrorNote() + srNote(`Source: the "${SR_STOCK_SHEET_NAME}" sheet's STATUS column (M) \u2014 CRITICAL STOCK = "CRITICAL IN STOCK", LOW STOCK = "LOW STOCK".`) +
         cards +
         `<div class="sr-top-rank-grid" style="display: grid; grid-template-columns: 1fr 1fr; gap: 0 20px; align-items: start;">
             <div style="display: block; min-width: 0;">
@@ -3429,8 +3461,8 @@ function srRenderCriticalStock() {
 }
 
 function srRenderOutOfStock() {
-    const items = srStockRowsForStatus('OUT OF STOCK');
-    return srStockErrorNote() + srNote(`Source: the "${SR_STOCK_SHEET_NAME}" sheet's STATUS column (M) = "OUT OF STOCK".`) +
+    const items = srStockRowsForStatus('OUT OF STOCK').filter(srMatchesStockSearch);
+    return srStockSearchControls() + srStockErrorNote() + srNote(`Source: the "${SR_STOCK_SHEET_NAME}" sheet's STATUS column (M) = "OUT OF STOCK".`) +
         `<div class="sr-cards">${srStatCard('OUT OF STOCK ITEMS', items.length, 'across all departments', 'var(--sr-orange)', 'fa-ban')}</div>` +
         srStockTableHTML(items, 'No items currently out of stock.');
 }
@@ -3438,8 +3470,8 @@ function srRenderOutOfStock() {
 // ---- 7. Stock availability ----
 
 function srRenderStockAvailability() {
-    const items = srStockRowsForStatus('IN STOCK');
-    return srStockErrorNote() + srNote(`Source: the "${SR_STOCK_SHEET_NAME}" sheet's STATUS column (M) = "IN STOCK".`) +
+    const items = srStockRowsForStatus('IN STOCK').filter(srMatchesStockSearch);
+    return srStockSearchControls() + srStockErrorNote() + srNote(`Source: the "${SR_STOCK_SHEET_NAME}" sheet's STATUS column (M) = "IN STOCK".`) +
         `<div class="sr-cards">${srStatCard('IN STOCK ITEMS', items.length, 'across all departments', 'var(--sr-success)', 'fa-circle-check')}</div>` +
         srStockTableHTML(items, 'No items currently in stock.');
 }
@@ -3476,7 +3508,7 @@ function srExpirationRows() {
 }
 
 function srRenderNearExpiration() {
-    const items = srExpirationRows().filter(r => !r.expired && r.days !== null && r.days <= 90).sort((a, b) => a.days - b.days);
+    const items = srExpirationRows().filter(r => !r.expired && r.days !== null && r.days <= 90 && srMatchesStockSearch(r.row)).sort((a, b) => a.days - b.days);
 
     const rowsHTML = items.map(({ row, days }) => {
         const pillColor = days <= 30 ? 'var(--sr-danger)' : days <= 60 ? 'var(--sr-warning)' : 'var(--sr-primary-light)';
@@ -3491,7 +3523,7 @@ function srRenderNearExpiration() {
         </tr>`;
     }).join('');
 
-    return srStockErrorNote() + srNote(`Source: the "${SR_STOCK_SHEET_NAME}" sheet's expiry column (N) \u2014 numeric values 0\u201390 days out. Expiration date from column D.`) +
+    return srStockSearchControls() + srStockErrorNote() + srNote(`Source: the "${SR_STOCK_SHEET_NAME}" sheet's expiry column (N) \u2014 numeric values 0\u201390 days out. Expiration date from column D.`) +
         `<div class="sr-cards">${srStatCard('NEAR-EXPIRATION ITEMS', items.length, 'expiring within 90 days, across all departments', 'var(--sr-warning)', 'fa-hourglass-half')}</div>
         ${srTableWrap(`<table class="sr-table">
             <thead><tr>
@@ -3517,7 +3549,7 @@ function srRenderExpirationMonitoring() {
     // Worst-first: tagged "EXPIRED" rows have no numeric overdue amount, so
     // they sort ahead of (tie with each other before) numeric negative-day
     // rows, which then sort longest-expired first.
-    const expired = all.filter(r => r.expired).sort((a, b) => {
+    const expired = all.filter(r => r.expired && srMatchesStockSearch(r.row)).sort((a, b) => {
         if (a.days === null && b.days === null) return 0;
         if (a.days === null) return -1;
         if (b.days === null) return 1;
@@ -3543,7 +3575,7 @@ function srRenderExpirationMonitoring() {
     </tr>`;
     }).join('');
 
-    return srStockErrorNote() + srNote('Source: the "' + SR_STOCK_SHEET_NAME + '" sheet\'s expiry column (N) \u2014 the "EXPIRED" tag or a negative day count. Expiration date from column D. For the 0\u201390-day-out watchlist, see NEAR EXPIRATION. Sorted longest-expired first.' + (expired.length > CAP ? ` Showing the first ${CAP} of ${expired.length} items.` : '')) +
+    return srStockSearchControls() + srStockErrorNote() + srNote('Source: the "' + SR_STOCK_SHEET_NAME + '" sheet\'s expiry column (N) \u2014 the "EXPIRED" tag or a negative day count. Expiration date from column D. For the 0\u201390-day-out watchlist, see NEAR EXPIRATION. Sorted longest-expired first.' + (expired.length > CAP ? ` Showing the first ${CAP} of ${expired.length} items.` : '')) +
         cards +
         srTableWrap(`<table class="sr-table">
             <thead><tr>
@@ -3638,7 +3670,7 @@ function srRenderAging() {
         }
     });
 
-    const list = Object.values(bySkuDept).filter(item => item.total > 0).sort((a, b) => b.total - a.total);
+    const list = Object.values(bySkuDept).filter(item => item.total > 0 && srMatchesStockSearch(item)).sort((a, b) => b.total - a.total);
 
     // Heat-map colouring, coolest (no date on file) to hottest (90D+ in stock).
     const BUCKET_COLORS = ['var(--sr-muted-dim)', 'var(--sr-cyan)', 'var(--sr-warning)', 'var(--sr-orange)', 'var(--sr-danger)'];
@@ -3662,7 +3694,7 @@ function srRenderAging() {
 
     const bucketTh = (label, i) => `<th class="c-fit c-center c-tight"><span class="sr-dot" style="background: ${BUCKET_COLORS[i]};"></span>${label}</th>`;
 
-    return srStockErrorNote() + srNote(`Source: the "${SR_STOCK_SHEET_NAME}" sheet's LAST RECEIVED date (column J) \u2014 true days-in-stock, not shelf life remaining. EXPIRATION DATE (column D) shows the soonest date among each group's rows, for reference. Rows with no parsable received date fall into NO DATE.`) +
+    return srStockSearchControls() + srStockErrorNote() + srNote(`Source: the "${SR_STOCK_SHEET_NAME}" sheet's LAST RECEIVED date (column J) \u2014 true days-in-stock, not shelf life remaining. EXPIRATION DATE (column D) shows the soonest date among each group's rows, for reference. Rows with no parsable received date fall into NO DATE.`) +
         srTableWrap(`<table class="sr-table">
             <thead><tr>
                 <th class="c-fit">DEPARTMENT</th>
