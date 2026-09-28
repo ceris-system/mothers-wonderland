@@ -501,6 +501,14 @@ function restoreSessionOnReload() {
     const savedUser = localStorage.getItem('activeUser');
     if (!savedUser) return; // no saved session — normal login flow
 
+    const lastActivity = Number(localStorage.getItem(IDLE_ACTIVITY_KEY));
+    if (lastActivity && (Date.now() - lastActivity >= IDLE_LOGOUT_MS)) {
+        // Machine/browser was off or closed longer than the idle window —
+        // treat the saved session as expired rather than restoring it.
+        clearSessionSilently();
+        return;
+    }
+
     const savedClient = localStorage.getItem('sessionClient') || '';
     const savedIsAdmin = localStorage.getItem('sessionIsAdmin') === '1';
 
@@ -511,6 +519,58 @@ function restoreSessionOnReload() {
 
     showDashboard(savedClient, savedUser);
 }
+
+// ==========================================
+// AUTO LOGOUT ON IDLE / UNIT SHUTDOWN
+// ==========================================
+// Two triggers share the same clearSessionSilently()/logoutSystem() exit:
+//   1. IDLE: no mouse/keyboard/touch activity for IDLE_LOGOUT_MINUTES while
+//      the tab stays open -> logoutSystem() runs (checked every 30s).
+//   2. SHUTDOWN / CLOSED TAB: the OS/browser can vanish with no warning, so
+//      there is no reliable "shutting down" event to listen for. Instead,
+//      every activity tick timestamps localStorage.lastActivityAt. On the
+//      NEXT page load (restoreSessionOnReload, right below) we compare that
+//      timestamp to now — if more time has passed than the idle limit, the
+//      machine was off/closed longer than that, so the saved session is
+//      treated as expired and the user lands back on the LOGIN screen
+//      instead of being auto-restored into the dashboard.
+// Change the number below to adjust how long "idle" means.
+const IDLE_LOGOUT_MINUTES = 15;
+const IDLE_LOGOUT_MS = IDLE_LOGOUT_MINUTES * 60 * 1000;
+const IDLE_ACTIVITY_KEY = 'lastActivityAt';
+const IDLE_CHECK_INTERVAL_MS = 30 * 1000;
+
+function recordActivityNow() {
+    try { localStorage.setItem(IDLE_ACTIVITY_KEY, String(Date.now())); } catch (err) { /* storage unavailable — idle check just no-ops */ }
+}
+
+function clearSessionSilently() {
+    // Same keys logoutSystem() clears, but with no beacon call and no
+    // reload — used when we discover a session went stale between loads,
+    // i.e. before the dashboard has been shown at all.
+    localStorage.removeItem('activeUser');
+    localStorage.removeItem('sessionClient');
+    localStorage.removeItem('sessionIsAdmin');
+    localStorage.removeItem('cached_area_outlets');
+    localStorage.removeItem(IDLE_ACTIVITY_KEY);
+}
+
+function startIdleWatcher() {
+    ['mousemove', 'mousedown', 'keydown', 'touchstart', 'scroll', 'wheel'].forEach(function (evt) {
+        document.addEventListener(evt, recordActivityNow, { passive: true });
+    });
+    recordActivityNow();
+
+    setInterval(function () {
+        if (!localStorage.getItem('activeUser')) return; // not logged in — nothing to expire
+        const last = Number(localStorage.getItem(IDLE_ACTIVITY_KEY)) || Date.now();
+        if (Date.now() - last >= IDLE_LOGOUT_MS) {
+            logoutSystem();
+        }
+    }, IDLE_CHECK_INTERVAL_MS);
+}
+startIdleWatcher();
+
 
 // ==========================================
 // MODAL CONTROLS & MODULE ROUTING
