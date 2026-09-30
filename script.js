@@ -983,6 +983,35 @@ function injectAppPrintStyles() {
             .print-target-active #deptFieldsRow > div {
                 min-width: 0 !important;
             }
+            /* OUTGOING (requested from) / INCOMING (requesting) department
+               values: bold and solid black on paper. Once a form is
+               locked the inputs are disabled, and browsers print
+               disabled inputs greyed out; force them fully black. */
+            .print-target-active .dept-field,
+            .print-target-active .dept-field:disabled {
+                border: none !important;
+                border-bottom: 1.5px solid #000 !important;
+                border-radius: 0 !important;
+                background: transparent !important;
+                color: #000 !important;
+                -webkit-text-fill-color: #000 !important;
+                opacity: 1 !important;
+                font-weight: 700 !important;
+                text-transform: uppercase !important;
+                padding: 2px 0 !important;
+                -webkit-appearance: none;
+                appearance: none;
+            }
+            .print-target-active .dept-field::-webkit-calendar-picker-indicator {
+                display: none !important;
+            }
+            /* Empty inputs must print blank, never their on-screen
+               placeholder hint (e.g. "Type to search outlet..."). */
+            .print-target-active input::placeholder,
+            .print-target-active textarea::placeholder {
+                color: transparent !important;
+                opacity: 0 !important;
+            }
 
             /* The 55px top margin above the signature block is on-screen
                breathing room under a scrollable table — on paper it's
@@ -1003,18 +1032,18 @@ function injectAppPrintStyles() {
                 page-break-inside: avoid !important;
             }
             .print-target-active #approvedSignatureSlot {
-                min-height: 165px !important;
+                min-height: 130px !important;
                 width: 100% !important;
             }
             .print-target-active #approvedSignatureSlot .approved-signature-released {
-                height: 165px !important;
+                height: 130px !important;
                 width: 100% !important;
             }
             .print-target-active #approvedSignatureSlot img {
-                top: -85px !important;
+                top: -62px !important;
                 left: 50% !important;
-                width: 250px !important;
-                height: 250px !important;
+                width: 190px !important;
+                height: 190px !important;
                 max-width: none !important;
                 transform: translateX(-50%) scaleX(1.25) !important;
                 object-fit: contain !important;
@@ -5215,7 +5244,7 @@ function addSelectedProducts() {
             </td>
             <td style="${tdStyle}">
                 <div style="display: flex; align-items: center; gap: 6px;">
-                    <input type="text" class="row-remarks" aria-label="Remarks for ${escapeHtml(item.description)}" placeholder="Product remarks" style="${inputStyle}">
+                    <input type="text" class="row-remarks" aria-label="Remarks for ${escapeHtml(item.description)}" style="${inputStyle}">
                     <button type="button" class="no-print" onclick="removeTransferRow('${rowId}')" title="Remove Row" aria-label="Remove ${escapeHtml(item.description)}" style="flex: 0 0 auto; background: transparent; border: none; color: #ff4d4d; cursor: pointer; font-size: 1.1rem; line-height: 1; padding: 2px 5px;">✕</button>
                 </div>
             </td>
@@ -7754,6 +7783,10 @@ function initFormWorkflow(moduleId) {
     container.dataset.workflowStatus = '';
     container.dataset.workflowSerial = '';
     container.dataset.workflowDept = '';
+    container.dataset.deptVerified = '';
+    container.dataset.verifiedOutgoing = '';
+    container.dataset.verifiedIncoming = '';
+    setDeptFieldsLocked(container, false);
     renderWorkflowButton(container);
     renderApprovedSignature(container);
     renderAdminRemarksSlot(container, '');
@@ -7780,11 +7813,11 @@ function renderApprovedSignature(container) {
     // everyone just sees the blank signature line.
     if (isReleased) {
         slot.innerHTML = `
-            <div class="approved-signature-mark approved-signature-released" style="width: 100%; height: 165px; position: relative; overflow: visible;">
-                <img class="approved-signature-image" src="${new URL('SIG.png?v=2', document.baseURI).href}" alt="Signature" onerror="this.onerror=null; this.src='SIG.png?v=2';" style="position: absolute; z-index: 1; left: 50%; top: -85px; transform: translateX(-50%) scaleX(1.25); display: block; width: 250px; height: 250px; max-width: none; object-fit: contain;">
-                <div style="position: absolute; z-index: 3; left: 0; right: 0; top: 85px; font-weight: 400; font-size: 0.9rem; text-align: center;">APPROVED BY</div>
-                <div style="position: absolute; z-index: 2; left: 0; right: 0; top: 144px; border-bottom: 1.5px solid #000;"></div>
-                <div style="position: absolute; z-index: 3; left: 0; right: 0; top: 152px; font-weight: 400; font-size: 0.85rem; text-align: center; white-space: nowrap;">${ADMIN_APPROVER_NAME}</div>
+            <div class="approved-signature-mark approved-signature-released" style="width: 100%; height: 130px; position: relative; overflow: visible;">
+                <img class="approved-signature-image" src="${new URL('SIG.png?v=2', document.baseURI).href}" alt="Signature" onerror="this.onerror=null; this.src='SIG.png?v=2';" style="position: absolute; z-index: 1; left: 50%; top: -62px; transform: translateX(-50%) scaleX(1.25); display: block; width: 190px; height: 190px; max-width: none; object-fit: contain;">
+                <div style="position: absolute; z-index: 3; left: 0; right: 0; top: 66px; font-weight: 400; font-size: 0.9rem; text-align: center;">APPROVED BY</div>
+                <div style="position: absolute; z-index: 2; left: 0; right: 0; top: 109px; border-bottom: 1.5px solid #000;"></div>
+                <div style="position: absolute; z-index: 3; left: 0; right: 0; top: 116px; font-weight: 400; font-size: 0.85rem; text-align: center; white-space: nowrap;">${ADMIN_APPROVER_NAME}</div>
             </div>
         `;
     } else {
@@ -7853,11 +7886,30 @@ function renderWorkflowButton(container) {
     btn.style.display = '';
 
     if (scope.isAdmin && status === 'PENDING_ADMIN_APPROVAL') {
-        btn.innerText = '✅ ADMIN APPROVED';
-        btn.style.background = '#0d6efd';
+        // ADMIN APPROVED only works once the OUTGOING / INCOMING
+        // departments have been fetched from the spreadsheet by serial
+        // number (see fillDepartmentsBySerial). deptVerified is
+        // 'pending' while the lookup runs, '0' if it failed, '1' when OK.
+        const v = container.dataset.deptVerified;
+        if (v === '1') {
+            btn.innerText = '✅ ADMIN APPROVED';
+            btn.style.background = '#0d6efd';
+            btn.disabled = false;
+            btn.style.opacity = '';
+            btn.style.cursor = 'pointer';
+        } else {
+            btn.innerText = v === '0' ? '⚠ DEPARTMENTS NOT VERIFIED' : '⏳ VERIFYING DEPARTMENTS…';
+            btn.style.background = v === '0' ? '#c0392b' : '#6c757d';
+            btn.disabled = true;
+            btn.style.opacity = '0.75';
+            btn.style.cursor = 'not-allowed';
+        }
     } else {
         btn.innerText = '📤 SUBMIT';
         btn.style.background = '#28a745';
+        btn.disabled = false;
+        btn.style.opacity = '';
+        btn.style.cursor = 'pointer';
     }
 }
 
@@ -7868,7 +7920,8 @@ function showFormNotification(container, message, tone) {
     const colors = {
         info: { bg: '#e7f1ff', border: '#0d6efd', text: '#0d47a1' },
         success: { bg: '#e6f7ec', border: '#28a745', text: '#155d27' },
-        warn: { bg: '#fff8e1', border: '#e0a800', text: '#6b5300' }
+        warn: { bg: '#fff8e1', border: '#e0a800', text: '#6b5300' },
+        error: { bg: '#fdecea', border: '#dc3545', text: '#7a1c24' }
     };
     const c = colors[tone] || colors.info;
     banner.style.background = c.bg;
@@ -8022,6 +8075,12 @@ async function adminApproveAndRelease(container, map) {
 
     if (items.length === 0) return showCustomAlert('Nothing to approve — open a pending submission from PENDING APPROVALS first.');
 
+    // Hard stop: the departments must have been verified against the
+    // spreadsheet for THIS serial before anything can be approved.
+    if (container.dataset.deptVerified !== '1') {
+        return showCustomAlert('The OUTGOING / INCOMING departments have not been verified from the spreadsheet yet. Click the serial number under PENDING APPROVALS again.');
+    }
+
     const adminRemarksInput = container.querySelector('#adminRemarksInput');
     const adminRemarksValue = adminRemarksInput ? adminRemarksInput.value.trim() : '';
 
@@ -8035,6 +8094,8 @@ async function adminApproveAndRelease(container, map) {
                 user: window.sessionUser || loggedInUser || localStorage.getItem('activeUser') || '',
                 serial: container.dataset.workflowSerial,
                 department: container.dataset.workflowDept || '',
+                outgoingDepartment: container.dataset.verifiedOutgoing || '',
+                incomingDepartment: container.dataset.verifiedIncoming || '',
                 items: items,
                 adminRemarks: adminRemarksValue,
                 token: window.API_TOKEN
@@ -8098,7 +8159,7 @@ async function loadPendingApprovalsList(container, map) {
         const groups = (result && result.success) ? result.groups : [];
         if (!groups.length) { listEl.innerText = ' None pending.'; return; }
         listEl.innerHTML = groups.map(g =>
-            `<button type="button" class="workflow-pick-btn" data-serial="${escapeHtml(g.serial)}" style="margin: 2px 4px; padding: 3px 8px; font-size: 0.72rem;">${escapeHtml(g.serial)} — ${escapeHtml(g.items[0].department)}</button>`
+            `<button type="button" class="workflow-pick-btn" data-serial="${escapeHtml(g.serial)}" style="margin: 2px 4px; padding: 3px 8px; font-size: 0.72rem;">${escapeHtml(g.serial)} — ${escapeHtml(g.items[0].department)}${getGroupIncomingDept(g) ? ' ⇄ ' + escapeHtml(getGroupIncomingDept(g)) : ''}</button>`
         ).join('');
         listEl.querySelectorAll('.workflow-pick-btn').forEach(btn => {
             btn.onclick = () => {
@@ -8122,7 +8183,7 @@ async function loadReleasedForOutgoingList(container, map) {
         const groups = (result && result.success) ? result.groups : [];
         if (!groups.length) { listEl.innerText = ' None released yet.'; return; }
         listEl.innerHTML = groups.map(g =>
-            `<button type="button" class="workflow-pick-btn" data-serial="${escapeHtml(g.serial)}" style="margin: 2px 4px; padding: 3px 8px; font-size: 0.72rem;">${escapeHtml(g.serial)}</button>`
+            `<button type="button" class="workflow-pick-btn" data-serial="${escapeHtml(g.serial)}" style="margin: 2px 4px; padding: 3px 8px; font-size: 0.72rem;">${escapeHtml(g.serial)}${getGroupIncomingDept(g) ? ' — ⇄ ' + escapeHtml(getGroupIncomingDept(g)) : ''}</button>`
         ).join('');
         listEl.querySelectorAll('.workflow-pick-btn').forEach(btn => {
             btn.onclick = () => {
@@ -8132,6 +8193,107 @@ async function loadReleasedForOutgoingList(container, map) {
         });
     } catch (e) {
         listEl.innerText = ` Failed to load: ${e.message}`;
+    }
+}
+
+// The requesting (INCOMING) department for a fetched group. Accepts it on
+// the group itself or on the first item, so it works whichever way the
+// backend returns it.
+function getGroupIncomingDept(group) {
+    if (!group) return '';
+    const first = (group.items && group.items[0]) || {};
+    return String(group.incomingDepartment || first.incomingDepartment || '').trim();
+}
+
+// Locks / unlocks the OUTGOING + INCOMING department inputs while an admin
+// is reviewing a pending form, so what's on screen is exactly what was
+// verified from the spreadsheet. Only unlocks fields THIS function locked
+// (flagged with data-verify-locked) so the normal non-admin locks
+// (applyIncomingDeptLockForNonAdmin etc.) are never undone.
+function setDeptFieldsLocked(container, locked) {
+    ['#outletSearch', '#incomingOutletSearch'].forEach(sel => {
+        const el = container.querySelector(sel);
+        if (!el) return;
+        if (locked) {
+            if (el.readOnly) return; // already locked by something else
+            el.readOnly = true;
+            el.dataset.verifyLocked = '1';
+            el.style.background = '#eef6ee';
+            el.style.cursor = 'not-allowed';
+        } else if (el.dataset.verifyLocked === '1') {
+            el.readOnly = false;
+            delete el.dataset.verifyLocked;
+            el.style.background = '#fff';
+            el.style.cursor = '';
+        }
+    });
+}
+
+// Looks the two departments up in the spreadsheet by the form's SERIAL
+// NUMBER (unique per submission) and fills OUTGOING and INCOMING. The
+// serial + form key pick the right sheet, so it works the same for
+// Request & Released, Transfer and Pull Out. Needs the backend action
+// `getFormDepartments`.
+//
+// For an ADMIN reviewing a PENDING form this is the verification step:
+//   - success  -> fields filled + locked, ADMIN APPROVED enabled
+//   - anything else (request failed, serial not found, blank department
+//     in the sheet) -> a visible red error and ADMIN APPROVED stays
+//     disabled. It never fails silently.
+// Released forms viewed by the outgoing department just get filled in.
+async function fillDepartmentsBySerial(container, map, serial) {
+    if (!serial) return false;
+    const reviewing = getSessionScope().isAdmin
+        && container.dataset.workflowStatus === 'PENDING_ADMIN_APPROVAL';
+    // Ignore a late answer if the user has already opened another form.
+    const stale = () => container.dataset.workflowSerial !== serial;
+
+    try {
+        const url = `${window.API}?action=getFormDepartments&form=${encodeURIComponent(map.formKey)}`
+            + `&serial=${encodeURIComponent(serial)}&token=${encodeURIComponent(window.API_TOKEN)}`;
+        const res = await fetch(url);
+        const result = await readWorkflowResponse(res, 'form departments');
+        if (!result.success) throw new Error(result.error || result.message || 'Request failed.');
+        if (stale()) return false;
+
+        const outgoing = String(result.outgoingDepartment || '').trim();
+        const incoming = String(result.incomingDepartment || '').trim();
+        if (reviewing && (!outgoing || !incoming)) {
+            throw new Error(`the spreadsheet has no ${!outgoing ? 'OUTGOING' : 'INCOMING'} DEPARTMENT saved for ${serial}`);
+        }
+
+        const outEl = container.querySelector('#outletSearch');
+        const inEl = container.querySelector('#incomingOutletSearch');
+        if (outEl && outgoing) outEl.value = outgoing;
+        if (inEl && incoming) inEl.value = incoming;
+        if (outgoing) container.dataset.workflowDept = outgoing;
+
+        if (reviewing) {
+            container.dataset.verifiedOutgoing = outgoing;
+            container.dataset.verifiedIncoming = incoming;
+            container.dataset.deptVerified = '1';
+            setDeptFieldsLocked(container, true);
+            renderWorkflowButton(container);
+            showFormNotification(container,
+                `Verified from spreadsheet — ${serial}: ${outgoing} ⇄ ${incoming}. Adjust quantities if needed, then click ADMIN APPROVED.`,
+                'success');
+        }
+        return true;
+    } catch (e) {
+        console.error('fillDepartmentsBySerial:', e);
+        if (stale()) return false;
+        if (reviewing) {
+            container.dataset.deptVerified = '0';
+            container.dataset.verifiedOutgoing = '';
+            container.dataset.verifiedIncoming = '';
+            renderWorkflowButton(container);
+            showFormNotification(container,
+                `Could not verify the departments for ${serial}: ${e.message}. Click the serial number again to retry — approval is blocked until this succeeds.`,
+                'error');
+        } else {
+            showFormNotification(container, 'Could not load the departments for ' + serial + ': ' + e.message, 'warn');
+        }
+        return false;
     }
 }
 
@@ -8159,7 +8321,7 @@ function loadGroupIntoTable(container, map, group, status, department, editableQ
                 ? `<input type="number" min="1" value="${escapeHtml(item.qty)}" style="width:100%; text-align:center; font-weight:600; border:1px solid #ccc; border-radius:4px;">`
                 : escapeHtml(item.qty)}</td>
             <td style="${tdStyle}">${editableQty || (status === 'RELEASED_TO_OUTGOING' && !getSessionScope().isAdmin)
-                ? `<input type="text" class="row-remarks" value="${escapeHtml(item.remarks || '')}" aria-label="Remarks for ${escapeHtml(item.description)}" placeholder="Product remarks" style="width:100%; border:1px solid #ccc; border-radius:4px; padding:4px 6px; box-sizing:border-box;">`
+                ? `<input type="text" class="row-remarks" value="${escapeHtml(item.remarks || '')}" aria-label="Remarks for ${escapeHtml(item.description)}" style="width:100%; border:1px solid #ccc; border-radius:4px; padding:4px 6px; box-sizing:border-box;">`
                 : escapeHtml(item.remarks || '')}</td>
         `;
         tableBody.appendChild(tr);
@@ -8168,11 +8330,26 @@ function loadGroupIntoTable(container, map, group, status, department, editableQ
     container.dataset.workflowStatus = status;
     container.dataset.workflowSerial = group.serial;
     container.dataset.workflowDept = department;
+    // Every (re)load starts unverified; fillDepartmentsBySerial below
+    // flips this to '1' once the spreadsheet confirms both departments.
+    // Purchase orders have no incoming department, so nothing to verify.
+    const needsDeptVerify = !map.isPurchaseOrder;
+    const adminReviewing = getSessionScope().isAdmin && status === 'PENDING_ADMIN_APPROVAL';
+    container.dataset.deptVerified = (adminReviewing && needsDeptVerify) ? 'pending' : '1';
+    container.dataset.verifiedOutgoing = '';
+    container.dataset.verifiedIncoming = '';
+    setDeptFieldsLocked(container, false);
 
     const serialField = container.querySelector('#serialNoDisplay');
     if (serialField) serialField.value = group.serial;
     const outgoingInput = container.querySelector('#outletSearch');
     if (outgoingInput) outgoingInput.value = department;
+    // INCOMING (requesting) department: needs the backend to include
+    // `incomingDepartment` on the group or on its items (see
+    // getGroupIncomingDept). Left untouched if the backend doesn't send it.
+    const incomingDeptValue = getGroupIncomingDept(group);
+    const incomingInputEl = container.querySelector('#incomingOutletSearch');
+    if (incomingInputEl && incomingDeptValue) incomingInputEl.value = incomingDeptValue;
 
     // Restore the outgoing department's own remarks (entered at submit
     // time) and the admin's remarks (if any) so both sides stay visible
@@ -8192,9 +8369,16 @@ function loadGroupIntoTable(container, map, group, status, department, editableQ
     setFormLocked(container, status === 'RELEASED_TO_OUTGOING');
     if (status === 'RELEASED_TO_OUTGOING') {
         showFormNotification(container, `Released for pickup/print. Approved by ${group.approvedBy || ADMIN_APPROVER_NAME} on ${group.approvedDate || ''}.`, 'success');
+    } else if (needsDeptVerify) {
+        showFormNotification(container, `Verifying OUTGOING / INCOMING departments of ${group.serial} against the spreadsheet…`, 'info');
     } else {
         showFormNotification(container, `Reviewing ${group.serial}. Adjust quantities if needed, then click ADMIN APPROVED.`, 'warn');
     }
+
+    // Fetch OUTGOING + INCOMING from the spreadsheet by serial number.
+    // For an admin reviewing a pending form this gates ADMIN APPROVED.
+    if (needsDeptVerify) return fillDepartmentsBySerial(container, map, group.serial);
+    return Promise.resolve(true);
 }
 
 // ---- Print-only, for the outgoing department's PRINT FORM button.

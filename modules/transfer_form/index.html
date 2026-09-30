@@ -15,14 +15,14 @@
             
             <!-- Outgoing Department Search -->
             <div style="display: flex; align-items: center; gap: 8px; flex: 1; min-width: 240px;">
-                <span style="font-weight: bold; color: #000; text-transform: uppercase; white-space: nowrap;">OUTGOING DEPARTMENT:</span>
-                <input type="text" id="outletSearch" placeholder="Type to search outlet..." style="padding: 6px 10px; background: #fff; border: 1px solid #000; border-radius: 4px; color: #000; font-family: inherit; outline: none; flex: 1;" list="outletList">
+                <div style="display: flex; flex-direction: column; line-height: 1.15;"><span style="font-weight: bold; color: #000; text-transform: uppercase; white-space: nowrap;">OUTGOING DEPARTMENT:</span><span style="font-size: 0.62rem; color: #444; text-transform: uppercase; letter-spacing: 0.4px;">(Requested from)</span></div>
+                <input type="text" id="outletSearch" class="dept-field" placeholder="Type to search outlet..." style="padding: 6px 10px; background: #fff; border: 1px solid #000; border-radius: 4px; color: #000; font-family: inherit; outline: none; flex: 1;" list="outletList">
             </div>
 
             <!-- Incoming Department Search -->
             <div style="display: flex; align-items: center; gap: 8px; flex: 1; min-width: 240px;">
-                <span style="font-weight: bold; color: #000; text-transform: uppercase; white-space: nowrap;">INCOMING DEPARTMENT:</span>
-                <input type="text" id="incomingOutletSearch" placeholder="Type to search outlet..." style="padding: 6px 10px; background: #fff; border: 1px solid #000; border-radius: 4px; color: #000; font-family: inherit; outline: none; flex: 1;" list="outletList">
+                <div style="display: flex; flex-direction: column; line-height: 1.15;"><span style="font-weight: bold; color: #000; text-transform: uppercase; white-space: nowrap;">INCOMING DEPARTMENT:</span><span style="font-size: 0.62rem; color: #444; text-transform: uppercase; letter-spacing: 0.4px;">(Requesting)</span></div>
+                <input type="text" id="incomingOutletSearch" class="dept-field" placeholder="Type to search outlet..." style="padding: 6px 10px; background: #fff; border: 1px solid #000; border-radius: 4px; color: #000; font-family: inherit; outline: none; flex: 1;" list="outletList">
             </div>
 
             <!-- Shared Dynamic Datalist -->
