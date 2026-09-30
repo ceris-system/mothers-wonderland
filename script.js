@@ -1,3 +1,39 @@
+// ==========================================
+// PERF HELPERS (added)
+// 1) Cache module HTML files so re-opening a form doesn't re-download it.
+// 2) Pause the 4K background video whenever the welcome/dashboard view is
+//    hidden (i.e. a module or form is open) so the browser isn't decoding
+//    video behind the form.
+// ==========================================
+(function () {
+    const origFetch = window.fetch.bind(window);
+    const moduleCache = new Map();
+    window.fetch = function (input, init) {
+        if (typeof input === 'string' && input.startsWith('modules/') && !init) {
+            if (!moduleCache.has(input)) {
+                moduleCache.set(input, origFetch(input).then(r => {
+                    if (!r.ok) { moduleCache.delete(input); throw new Error('HTTP ' + r.status); }
+                    return r.text();
+                }).catch(e => { moduleCache.delete(input); throw e; }));
+            }
+            return moduleCache.get(input).then(t => new Response(t, { status: 200, headers: { 'Content-Type': 'text/html' } }));
+        }
+        return origFetch(input, init);
+    };
+
+    document.addEventListener('DOMContentLoaded', function () {
+        const video = document.getElementById('bg-video');
+        const welcome = document.getElementById('defaultWelcomeView');
+        if (!video || !welcome) return;
+        const sync = () => {
+            const hidden = getComputedStyle(welcome).display === 'none';
+            if (hidden) { if (!video.paused) video.pause(); }
+            else if (video.paused) { video.play().catch(() => {}); }
+        };
+        new MutationObserver(sync).observe(welcome, { attributes: true, attributeFilter: ['style', 'class'] });
+    });
+})();
+
 const API_URL = window.API;
 
 // ==========================================
@@ -98,13 +134,11 @@ function injectIcon3dStyles() {
             text-shadow:
                 1px 1px 0 rgba(0, 0, 0, 0.15),
                 2px 2px 3px rgba(0, 0, 0, 0.18);
-            filter: drop-shadow(1px 2px 1px rgba(0, 0, 0, 0.30)) drop-shadow(0 -1px 0 rgba(255, 255, 255, 0.35));
-            transition: transform 0.18s ease, filter 0.18s ease;
+            transition: transform 0.18s ease;
             display: inline-block;
         }
         i.fa-solid:hover, i.fa-regular:hover {
             transform: translateY(-1px) scale(1.06);
-            filter: drop-shadow(2px 4px 2px rgba(0, 0, 0, 0.35)) drop-shadow(0 -1px 0 rgba(255, 255, 255, 0.4));
         }
 
         /* Uniform close (X) button — matches the item drawer's close
@@ -1704,7 +1738,7 @@ function buildInventoryFormModal() {
     if (modal) return modal;
 
     const modalHTML = `
-        <div id="inventoryFormModal" style="display: none; position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; background: rgba(0, 0, 0, 0.85); -webkit-backdrop-filter: blur(8px); backdrop-filter: blur(8px); z-index: 9999; justify-content: center; align-items: center;">
+        <div id="inventoryFormModal" style="display: none; position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; background: rgba(0, 0, 0, 0.85); z-index: 9999; justify-content: center; align-items: center;">
             <div id="inventoryFormPrintableArea" style="background: rgba(18, 24, 38, 0.98); border: 1.5px solid rgba(0, 219, 255, 0.4); box-shadow: 0 0 25px rgba(0, 219, 255, 0.2); padding: 25px; width: 96vw; max-width: 1400px; height: 90vh; color: #fff; font-family: 'Roboto Mono', monospace; display: flex; flex-direction: column; box-sizing: border-box; border-radius: 8px;">
                 <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid rgba(0, 219, 255, 0.3); padding-bottom: 12px; margin-bottom: 15px;">
                     <div style="display: flex; align-items: baseline; gap: 14px;">
@@ -2626,7 +2660,7 @@ function openSummaryReportModal() {
                 #srPrintableArea .sr-table tbody tr.sr-section td { border-top: 2px solid #000 !important; }
             }
         </style>
-        <div id="summaryReportModal" style="display: none; position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; background: rgba(8, 4, 24, 0.84); -webkit-backdrop-filter: blur(8px); backdrop-filter: blur(8px); z-index: 9999; justify-content: center; align-items: center;">
+        <div id="summaryReportModal" style="display: none; position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; background: rgba(8, 4, 24, 0.84); z-index: 9999; justify-content: center; align-items: center;">
             <div id="srPrintableArea">
 
                 <div class="no-print sr-header">
@@ -4302,7 +4336,7 @@ window.openInventoryModal = function() {
     
     if (!modal) {
         const modalHTML = `
-            <div id="inventoryModal" style="display: flex; position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; background: rgba(0, 0, 0, 0.85); -webkit-backdrop-filter: blur(8px); backdrop-filter: blur(8px); z-index: 9999; justify-content: center; align-items: center;">
+            <div id="inventoryModal" style="display: flex; position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; background: rgba(0, 0, 0, 0.85); z-index: 9999; justify-content: center; align-items: center;">
                 <div style="background: rgba(18, 24, 38, 0.98); border: 1.5px solid rgba(0, 219, 255, 0.4); box-shadow: 0 0 25px rgba(0, 219, 255, 0.2); border-radius: 0; padding: 30px; width: 100vw; height: 100vh; color: #fff; text-align: left; font-family: 'Roboto Mono', monospace; position: relative; display: flex; flex-direction: column; box-sizing: border-box;">
                     
                     <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid rgba(0, 219, 255, 0.3); padding-bottom: 15px; margin-bottom: 20px;">
@@ -4359,7 +4393,7 @@ window.openInventoryModal = function() {
 
                 </div>
 
-            <div id="reloadProgressModal" style="display: none; position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; background: rgba(0, 0, 0, 0.7); -webkit-backdrop-filter: blur(5px); backdrop-filter: blur(5px); z-index: 10002; justify-content: center; align-items: center;">
+            <div id="reloadProgressModal" style="display: none; position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; background: rgba(0, 0, 0, 0.7); z-index: 10002; justify-content: center; align-items: center;">
                 <div style="background: #0c101a; border: 1.5px solid #00dbff; border-radius: 8px; padding: 25px 30px; width: 320px; text-align: center; color: #fff; font-family: 'Roboto Mono', monospace;">
                     <i class="fa-solid fa-spinner fa-spin" style="font-size: 2rem; color: #00dbff; margin-bottom: 15px;"></i>
                     <div style="font-size: 0.9rem; font-weight: bold; color: #00dbff; margin-bottom: 10px;">RELOADING TABLE DATA...</div>
@@ -4490,7 +4524,7 @@ function viewItemDetails(skuCode, rowIdx) {
     let overlay = document.getElementById('drawerOverlay');
 
     if (!drawer) {
-        const overlayHTML = `<div id="drawerOverlay" style="display: none; position: fixed; top: 20px; left: 0; bottom: 20px; width: 100vw; max-height: calc(100vh - 40px); overflow-y: auto; height: auto; background: rgba(0, 0, 0, 0.65); -webkit-backdrop-filter: blur(5px); backdrop-filter: blur(5px); z-index: 10000; transition: opacity 0.3s ease;"></div>`;
+        const overlayHTML = `<div id="drawerOverlay" style="display: none; position: fixed; top: 20px; left: 0; bottom: 20px; width: 100vw; max-height: calc(100vh - 40px); overflow-y: auto; height: auto; background: rgba(0, 0, 0, 0.65); z-index: 10000; transition: opacity 0.3s ease;"></div>`;
 
         const drawerStyles = `
         <style id="itemDrawerStyles">
@@ -5492,7 +5526,7 @@ async function loadRequestAndReleasedFormModuleCode(container) {
         );
         
         container.innerHTML = `
-            <div style="position: fixed; top: 0; left: 0; width: 100vw; height: 98%; background: rgba(0, 0, 0, 0.75); -webkit-backdrop-filter: blur(8px); backdrop-filter: blur(8px); display: flex; justify-content: center; align-items: center; z-index: 3000; box-sizing: border-box; padding: 20px 50px 20px 20px;">
+            <div style="position: fixed; top: 0; left: 0; width: 100vw; height: 98%; background: rgba(0, 0, 0, 0.75); display: flex; justify-content: center; align-items: center; z-index: 3000; box-sizing: border-box; padding: 20px 50px 20px 20px;">
                 <div class="glass-card" style="position: relative; width: 100%; height:100%; max-width: none; max-height: none; overflow-y: auto; background: rgba(20, 20, 25, 0.95); border: 1px solid rgba(255, 255, 255, 0.2); border-radius: 16px; padding: 60px; box-sizing: border-box; display: flex; flex-direction: column; align-items: stretch; box-shadow: 0 30px 60px rgba(0,0,0,0.7);">
                     <div style="position: absolute; top: 18px; right: 25px; z-index: 10; display: flex; gap: 12px; align-items: center;">
                         <button class="app-close-btn" onclick="closeRequestAndReleasedFormModal()" title="Close">
@@ -5536,7 +5570,7 @@ async function loadTransferFormModuleCode(container) {
         );
         
         container.innerHTML = `
-            <div style="position: fixed; top: 0; left: 0; width: 100vw; height: 98%; background: rgba(0, 0, 0, 0.75); -webkit-backdrop-filter: blur(8px); backdrop-filter: blur(8px); display: flex; justify-content: center; align-items: center; z-index: 3000; box-sizing: border-box; padding: 20px 50px 20px 20px;">
+            <div style="position: fixed; top: 0; left: 0; width: 100vw; height: 98%; background: rgba(0, 0, 0, 0.75); display: flex; justify-content: center; align-items: center; z-index: 3000; box-sizing: border-box; padding: 20px 50px 20px 20px;">
                 <div class="glass-card" style="position: relative; width: 100%; height:100%; max-width: none; max-height: none; overflow-y: auto; background: rgba(20, 20, 25, 0.95); border: 1px solid rgba(255, 255, 255, 0.2); border-radius: 16px; padding: 60px; box-sizing: border-box; display: flex; flex-direction: column; align-items: stretch; box-shadow: 0 30px 60px rgba(0,0,0,0.7);">
                     <div style="position: absolute; top: 18px; right: 25px; z-index: 10; display: flex; gap: 12px; align-items: center;">
                         <button class="app-close-btn" onclick="closeTransferModal()" title="Close">
@@ -5580,7 +5614,7 @@ async function loadPulloutFormModuleCode(container) {
         );
         
         container.innerHTML = `
-            <div style="position: fixed; top: 0; left: 0; width: 100vw; height: 98%; background: rgba(0, 0, 0, 0.75); -webkit-backdrop-filter: blur(8px); backdrop-filter: blur(8px); display: flex; justify-content: center; align-items: center; z-index: 3000; box-sizing: border-box; padding: 20px 50px 20px 20px;">
+            <div style="position: fixed; top: 0; left: 0; width: 100vw; height: 98%; background: rgba(0, 0, 0, 0.75); display: flex; justify-content: center; align-items: center; z-index: 3000; box-sizing: border-box; padding: 20px 50px 20px 20px;">
                 <div class="glass-card" style="position: relative; width: 100%; height:100%; max-width: none; max-height: none; overflow-y: auto; background: rgba(20, 20, 25, 0.95); border: 1px solid rgba(255, 255, 255, 0.2); border-radius: 16px; padding: 60px; box-sizing: border-box; display: flex; flex-direction: column; align-items: stretch; box-shadow: 0 30px 60px rgba(0,0,0,0.7);">
                     <div style="position: absolute; top: 18px; right: 25px; z-index: 10; display: flex; gap: 12px; align-items: center;">
                         <button class="app-close-btn" onclick="closePulloutModal()" title="Close">
@@ -5639,7 +5673,7 @@ async function loadPurchaseOrderFormModuleCode(container) {
         );
 
         container.innerHTML = `
-            <div style="position: fixed; top: 0; left: 0; width: 100vw; height: 98%; background: rgba(0, 0, 0, 0.75); -webkit-backdrop-filter: blur(8px); backdrop-filter: blur(8px); display: flex; justify-content: center; align-items: center; z-index: 3000; box-sizing: border-box; padding: 20px 50px 20px 20px;">
+            <div style="position: fixed; top: 0; left: 0; width: 100vw; height: 98%; background: rgba(0, 0, 0, 0.75); display: flex; justify-content: center; align-items: center; z-index: 3000; box-sizing: border-box; padding: 20px 50px 20px 20px;">
                 <div class="glass-card" style="position: relative; width: 100%; height:100%; max-width: none; max-height: none; overflow-y: auto; background: rgba(20, 20, 25, 0.95); border: 1px solid rgba(255, 255, 255, 0.2); border-radius: 16px; padding: 60px; box-sizing: border-box; display: flex; flex-direction: column; align-items: stretch; box-shadow: 0 30px 60px rgba(0,0,0,0.7);">
                     <div style="position: absolute; top: 18px; right: 25px; z-index: 10; display: flex; gap: 12px; align-items: center;">
                         <button class="app-close-btn" onclick="closePurchaseOrderFormModal()" title="Close">
@@ -5923,7 +5957,7 @@ function openHistoryModal(categoryKey) {
 
   if (!modal) {
     const modalHTML = `
-      <div id="historyModal" style="display: flex; position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; background: rgba(0, 0, 0, 0.85); -webkit-backdrop-filter: blur(8px); backdrop-filter: blur(8px); z-index: 9999; justify-content: center; align-items: center;">
+      <div id="historyModal" style="display: flex; position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; background: rgba(0, 0, 0, 0.85); z-index: 9999; justify-content: center; align-items: center;">
         <div id="historyPrintableArea" style="background: rgba(18, 24, 38, 0.98); border: 1.5px solid rgba(0, 219, 255, 0.4); box-shadow: 0 0 25px rgba(0, 219, 255, 0.2); padding: 25px; width: 95vw; height: 90vh; color: #fff; font-family: 'Roboto Mono', monospace; display: flex; flex-direction: column; box-sizing: border-box; position: relative;">
           
           <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid rgba(0, 219, 255, 0.3); padding-bottom: 12px; margin-bottom: 15px;">
@@ -5974,7 +6008,7 @@ function openHistoryModal(categoryKey) {
         </div>
       </div>
 
-      <div id="historyProgressModal" style="display: none; position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; background: rgba(0, 0, 0, 0.7); -webkit-backdrop-filter: blur(5px); backdrop-filter: blur(5px); z-index: 10002; justify-content: center; align-items: center;">
+      <div id="historyProgressModal" style="display: none; position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; background: rgba(0, 0, 0, 0.7); z-index: 10002; justify-content: center; align-items: center;">
         <div style="background: #0c101a; border: 1.5px solid #00dbff; border-radius: 8px; padding: 25px 30px; width: 320px; text-align: center; color: #fff; font-family: 'Roboto Mono', monospace;">
           <i class="fa-solid fa-spinner fa-spin" style="font-size: 2rem; color: #00dbff; margin-bottom: 15px;"></i>
           <div id="historyProgressText" style="font-size: 0.9rem; font-weight: bold; color: #00dbff; margin-bottom: 10px;">RELOADING TABLE DATA...</div>
@@ -6276,7 +6310,7 @@ function openUserLogsModal() {
 
     if (!modal) {
         const modalHTML = `
-        <div id="userLogsModal" style="display: flex; position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; background: rgba(0, 0, 0, 0.85); -webkit-backdrop-filter: blur(8px); backdrop-filter: blur(8px); z-index: 9999; justify-content: center; align-items: center;">
+        <div id="userLogsModal" style="display: flex; position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; background: rgba(0, 0, 0, 0.85); z-index: 9999; justify-content: center; align-items: center;">
             <div id="userLogsPrintableArea" style="background: rgba(18, 24, 38, 0.98); border: 1.5px solid rgba(0, 219, 255, 0.4); box-shadow: 0 0 25px rgba(0, 219, 255, 0.2); padding: 25px; width: 95vw; height: 90vh; color: #fff; font-family: 'Roboto Mono', monospace; display: flex; flex-direction: column; box-sizing: border-box; position: relative;">
 
                 <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid rgba(0, 219, 255, 0.3); padding-bottom: 12px; margin-bottom: 15px;">
@@ -6442,7 +6476,7 @@ function checkAndShowNearExpiryModal() {
                 }
                 #nearExpiryModal .blink-alert { animation: nearExpiryBlink 1.1s ease-in-out infinite; }
             </style>
-            <div id="nearExpiryModal" style="display: none; position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; background: rgba(0, 0, 0, 0.75); -webkit-backdrop-filter: blur(6px); backdrop-filter: blur(6px); z-index: 10500; justify-content: center; align-items: center;">
+            <div id="nearExpiryModal" style="display: none; position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; background: rgba(0, 0, 0, 0.75); z-index: 10500; justify-content: center; align-items: center;">
                 <div style="background: linear-gradient(180deg, #1a0d0d 0%, #120a0a 100%); border: 1px solid rgba(255, 77, 77, 0.35); box-shadow: 0 20px 50px rgba(0,0,0,0.6); border-radius: 10px; padding: 24px; width: 92vw; max-width: 760px; max-height: 80vh; color: #fff; font-family: 'Roboto Mono', monospace; display: flex; flex-direction: column; box-sizing: border-box;">
                     <div style="display: flex; justify-content: space-between; align-items: flex-start; border-bottom: 1px solid rgba(255, 77, 77, 0.25); padding-bottom: 14px; margin-bottom: 16px;">
                         <div>
@@ -6536,7 +6570,7 @@ function checkAndShowStockAvailabilityModal() {
 
     if (!modal) {
         const modalHTML = `
-            <div id="stockAvailabilityModal" style="display: none; position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; background: rgba(0, 0, 0, 0.75); -webkit-backdrop-filter: blur(6px); backdrop-filter: blur(6px); z-index: 10500; justify-content: center; align-items: center;">
+            <div id="stockAvailabilityModal" style="display: none; position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; background: rgba(0, 0, 0, 0.75); z-index: 10500; justify-content: center; align-items: center;">
                 <div style="background: linear-gradient(180deg, #12161f 0%, #0a0e17 100%); border: 1px solid rgba(0, 219, 255, 0.25); box-shadow: 0 20px 50px rgba(0,0,0,0.6); border-radius: 10px; padding: 24px; width: 92vw; max-width: 900px; max-height: 82vh; color: #fff; font-family: 'Roboto Mono', monospace; display: flex; flex-direction: column; box-sizing: border-box;">
                     <div style="display: flex; justify-content: space-between; align-items: flex-start; border-bottom: 1px solid rgba(0, 219, 255, 0.2); padding-bottom: 14px; margin-bottom: 16px;">
                         <div>
@@ -6725,7 +6759,7 @@ function showExpiredPopup(expiredItems) {
                 }
                 #expiredAlertModal .blink-alert { animation: expiredAlertBlink 1.1s ease-in-out infinite; }
             </style>
-            <div id="expiredAlertModal" style="display: flex; position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; background: rgba(0, 0, 0, 0.85); -webkit-backdrop-filter: blur(6px); backdrop-filter: blur(6px); z-index: 10005; justify-content: center; align-items: center;">
+            <div id="expiredAlertModal" style="display: flex; position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; background: rgba(0, 0, 0, 0.85); z-index: 10005; justify-content: center; align-items: center;">
                 <div style="background: #121826; border: 1.5px solid #ff4d4d; box-shadow: 0 0 30px rgba(255, 77, 77, 0.35); border-radius: 10px; padding: 25px; width: 90%; max-width: 650px; max-height: 80vh; color: #fff; font-family: 'Roboto Mono', monospace; display: flex; flex-direction: column; box-sizing: border-box;">
                     
                     <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid rgba(255, 77, 77, 0.3); padding-bottom: 12px; margin-bottom: 15px;">
@@ -8572,7 +8606,7 @@ function openBarcodeGeneratorModal() {
                     @page { size: 40mm 30mm; margin: 0; }
                 }
             </style>
-            <div id="barcodeGenModal" class="modal-overlay" style="display: none; position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; background: rgba(0, 0, 0, 0.75); -webkit-backdrop-filter: blur(6px); backdrop-filter: blur(6px); z-index: 10500; justify-content: center; align-items: center;">
+            <div id="barcodeGenModal" class="modal-overlay" style="display: none; position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; background: rgba(0, 0, 0, 0.75); z-index: 10500; justify-content: center; align-items: center;">
                 <div class="bg-container">
                     <button type="button" class="app-close-btn" onclick="closeBarcodeGeneratorModal()" title="Close" style="position: absolute; top: 12px; right: 12px; z-index: 2;"><i class="fa-solid fa-xmark"></i></button>
                     <div class="bg-brand-strip">

@@ -293,10 +293,10 @@
 
         .icon-3d-anim {
             display: inline-block;
-            animation: icon3dFloat 2.2s ease-in-out infinite;
             text-shadow: 0 6px 8px rgba(0,0,0,0.35);
             transform-style: preserve-3d;
         }
+        button:hover .icon-3d-anim { animation: icon3dFloat 1.2s ease-in-out infinite; }
         @keyframes icon3dFloat {
             0%, 100% { transform: translateY(0) rotateX(0deg) rotateY(0deg); }
             50%      { transform: translateY(-5px) rotateX(10deg) rotateY(-8deg); }
@@ -326,7 +326,7 @@
 </head>
 <body class="has-video-bg">
 
-    <video autoplay muted loop id="bg-video"><source src="bg.mp4" type="video/mp4"></video>
+    <video autoplay muted loop playsinline preload="metadata" id="bg-video"><source src="bg.mp4" type="video/mp4"></video>
 
     <div id="loadingOverlay">
         <div class="sci-fi-loader">
