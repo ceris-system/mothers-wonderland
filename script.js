@@ -1354,7 +1354,7 @@ async function triggerPrintTransferForm() {
     try {
         const response = await fetch(window.API, {
             method: "POST",
-            body: JSON.stringify({ action: "saveTransferData", sheetName: "TRANSFER", formKey: "TRANSFER", rows: rowsToSave, token: window.API_TOKEN })
+            body: JSON.stringify({ action: "saveTransferData", sheetName: "REQUEST", formKey: "TRANSFER", rows: rowsToSave, token: window.API_TOKEN })
         });
 
         const result = await response.json();
@@ -1547,7 +1547,7 @@ async function triggerPrintRequestAndReleasedForm() {
     try {
         const response = await fetch(window.API, {
             method: "POST",
-            body: JSON.stringify({ action: "saveRequestData", sheetName: "REQUEST", formKey: "REQUEST_RELEASED", rows: rowsToSave, token: window.API_TOKEN })
+            body: JSON.stringify({ action: "saveRequestData", sheetName: "TRANSFER", formKey: "REQUEST_RELEASED", rows: rowsToSave, token: window.API_TOKEN })
         });
 
         const result = await response.json();
@@ -2816,7 +2816,7 @@ async function srRefreshAll(showSpinner) {
 async function srFetchSalesAll() {
     const username = window.sessionUser || localStorage.getItem('activeUser') || '';
     try {
-        const url = `${window.API}?action=getFilteredHistory&sheet=REQUEST&department=&user=${encodeURIComponent(username)}&token=${encodeURIComponent(window.API_TOKEN)}`;
+        const url = `${window.API}?action=getFilteredHistory&sheet=TRANSFER&department=&user=${encodeURIComponent(username)}&token=${encodeURIComponent(window.API_TOKEN)}`;
         const res = await fetch(url);
         const json = await res.json();
         srState.salesRows = (json.success && json.data) ? json.data : [];
@@ -5879,25 +5879,33 @@ const HISTORY_CONFIGS = {
     ],
     // Same always-empty columns as PULL_OUT below (both read the RTV
     // sheet) — kept in `headers` for index alignment, just not rendered.
-    hiddenColumns: [10, 11, 12, 13, 18]
+    hiddenColumns: [10, 11, 12, 13, 18],
+    // date columns shown as "SEPTEMBER 26, 2026"
+    dateColumns: [4, 10, 14, 20]
   },
   REQUEST_RELEASED: {
     title: 'REQUEST AND RELEASED HISTORY',
-    sheet: 'REQUEST',
+    // Reads the TRANSFERED sheet (RR_ARCHIVE in the Apps Script). The backend
+    // maps these TRANSFERED columns into the row shape below, in this order:
+    //   V serial | A outgoing dept | B sku | C description | D uom | E exp date |
+    //   F onhand | G total onhand | H cost | I srp | J transfer qty |
+    //   O exp date | P received qty | R remarks | S incoming dept | T date received
+    sheet: 'TRANSFERED',
     headers: [
-      'DEPARTMENT', 'SKU CODE', 'PRODUCT DESCRIPTION', 'UOM', 'EXP. DATE', 'ON HAND',
-      'TOTAL ON HAND', 'COST', 'SRP', 'TRANSFER QTY', 'EXP. DATE', 'QTY RELEASED', 'UOM',
-      'REMARKS', 'EXPIRATION DATE', 'QTY RECEIVED', 'UOM', 'REMARKS',
-      'OUTGOING REMARKS', 'INCOMING DEPARTMENT', 'DATE'
+      'SERIAL NO.', 'OUTGOING DEPARTMENT', 'SKU CODE', 'DESCRIPTION', 'UOM', 'EXPIRATION DATE',
+      'ONHAND', 'TOTAL ONHAND', 'COST', 'SRP', 'TRANSFER QTY',
+      'EXPIRATION DATE', 'RECEIVED QTY', 'REMARKS', 'INCOMING DEPARTMENT', 'DATE RECEIVED'
     ],
-    // The 2nd EXP. DATE/QTY RELEASED/UOM/REMARKS block and OUTGOING
-    // REMARKS are never populated for request & released transactions —
-    // kept in `headers` for index alignment, just not rendered.
-    hiddenColumns: [10, 11, 12, 13, 18]
+    hiddenColumns: [],
+    // OUTGOING / INCOMING DEPARTMENT positions (used by the department filters)
+    outgoingIdx: 1,
+    incomingIdx: 14,
+    // date columns shown as "SEPTEMBER 20, 2026"
+    dateColumns: [5, 11, 15]
   },
   TRANSFER: {
     title: 'TRANSFER HISTORY',
-    sheet: 'TRANSFER',
+    sheet: 'REQUEST',    // sheet the Transfer form saves to (must match TF_SHEET in the Apps Script)
     headers: [
       'DEPARTMENT', 'SKU CODE', 'PRODUCT DESCRIPTION', 'UOM', 'EXP. DATE', 'ON HAND',
       'TOTAL ON HAND', 'COST', 'SRP', 'TRANSFER QTY', 'EXP. DATE', 'QTY RELEASED', 'UOM',
@@ -5905,7 +5913,9 @@ const HISTORY_CONFIGS = {
     ],
     // Only OUTGOING REMARKS is never populated here — the rest of this
     // shape (unlike RTV/REQUEST/PULL_OUT) is actually used for transfers.
-    hiddenColumns: [14]
+    hiddenColumns: [14],
+    // date columns shown as "SEPTEMBER 26, 2026"
+    dateColumns: [4, 10, 16]
   },
   PULL_OUT: {
     title: 'PULLOUT HISTORY',
@@ -5922,7 +5932,9 @@ const HISTORY_CONFIGS = {
     // `headers` so row[i] lookups elsewhere (filtering, etc.) still line
     // up with the real sheet columns — only rendering skips them, via
     // renderHistoryRows/openHistoryModal checking this list.
-    hiddenColumns: [10, 11, 12, 13, 18]
+    hiddenColumns: [10, 11, 12, 13, 18],
+    // date columns shown as "SEPTEMBER 26, 2026"
+    dateColumns: [4, 10, 14, 20]
   },
   PURCHASE_ORDER: {
     title: 'PURCHASE ORDER HISTORY',
@@ -5947,12 +5959,12 @@ const HISTORY_CONFIGS = {
     ],
     hiddenColumns: [13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23],
     columnRemap: { 4: 18, 5: 19 },
-    // EXP. DATE (4), DATE REQUEST (10), DATE RECEIVED (25) -> "September 26, 2026"
+    // EXP. DATE (4), DATE REQUEST (10), DATE RECEIVED (25) -> "SEPTEMBER 26, 2026"
     dateColumns: [4, 10, 25]
   }
 };
 
-// Formats a sheet display value as "September 26, 2026". Handles
+// Formats a sheet display value as "SEPTEMBER 26, 2026" (same style as the form header date). Handles
 // "9/26/2026", "26/9/2026" (first part > 12), "2026-09-26",
 // "September 26, 2026 9:30 AM", "26-Sep-2026", etc. Blank or unparseable
 // values are returned unchanged so nothing is ever lost.
@@ -5973,7 +5985,7 @@ function formatHistoryDate(val) {
     }
   }
   if (!d || isNaN(d.getTime())) return raw;
-  return d.toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' });
+  return d.toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' }).toUpperCase();
 }
 
 function applyHistoryDateFormat(row, dateColumns) {
@@ -6107,7 +6119,7 @@ function openHistoryModal(categoryKey) {
   const hidden = config.hiddenColumns || [];
   const headerHTML = `<tr>${config.headers.map((h, i) => {
     if (hidden.includes(i)) return '';
-    const align = (h === 'DEPARTMENT' || h === 'SKU CODE' || h === 'PRODUCT DESCRIPTION' || h === 'INCOMING DEPARTMENT') ? 'left' : 'center';
+    const align = (h === 'DEPARTMENT' || h === 'OUTGOING DEPARTMENT' || h === 'SKU CODE' || h === 'PRODUCT DESCRIPTION' || h === 'DESCRIPTION' || h === 'INCOMING DEPARTMENT') ? 'left' : 'center';
     return `<th style="padding: 10px; border: 1px solid rgba(0,219,255,0.2); text-align: ${align};">${h}</th>`;
   }).join('')}</tr>`;
   
@@ -6305,8 +6317,10 @@ function filterHistoryByInput() {
   const filtered = cachedHistoryRows.filter(row => {
     if (!searchTerm) return true;
 
-    const outgoingDept = row[0] ? String(row[0]).trim().toLowerCase() : '';
-    const incomingDept = row[row.length - 2] ? String(row[row.length - 2]).trim().toLowerCase() : '';
+    const oi = config.outgoingIdx !== undefined ? config.outgoingIdx : 0;
+    const ii = config.incomingIdx !== undefined ? config.incomingIdx : row.length - 2;
+    const outgoingDept = row[oi] ? String(row[oi]).trim().toLowerCase() : '';
+    const incomingDept = row[ii] ? String(row[ii]).trim().toLowerCase() : '';
 
     // Exact client matching. A transfer/history record is visible when the
     // user's client is either the outgoing OR incoming department.
@@ -6333,8 +6347,10 @@ function filterHistoryBySearchInput() {
     // Backend already scopes non-admins. Keep a second client check here so
     // cached data cannot be widened by frontend manipulation.
     if (!scope.isAdmin) {
-      const outgoingDept = row[0] ? String(row[0]).trim().toLowerCase() : '';
-      const incomingDept = row[row.length - 2] ? String(row[row.length - 2]).trim().toLowerCase() : '';
+      const oi = config.outgoingIdx !== undefined ? config.outgoingIdx : 0;
+      const ii = config.incomingIdx !== undefined ? config.incomingIdx : row.length - 2;
+      const outgoingDept = row[oi] ? String(row[oi]).trim().toLowerCase() : '';
+      const incomingDept = row[ii] ? String(row[ii]).trim().toLowerCase() : '';
       if (!client || (outgoingDept !== client && incomingDept !== client)) return false;
     }
     return row.some(cell => String(cell || '').toLowerCase().includes(query));
@@ -6360,7 +6376,7 @@ function renderHistoryRows(rows, headers, hiddenColumns) {
       ${headers.map((h, i) => {
         if (hidden.includes(i)) return '';
         const val = row[i] !== undefined && row[i] !== null ? row[i] : '';
-        const align = (h === 'DEPARTMENT' || h === 'SKU CODE' || h === 'PRODUCT DESCRIPTION' || h === 'INCOMING DEPARTMENT') ? 'left' : 'center';
+        const align = (h === 'DEPARTMENT' || h === 'OUTGOING DEPARTMENT' || h === 'SKU CODE' || h === 'PRODUCT DESCRIPTION' || h === 'DESCRIPTION' || h === 'INCOMING DEPARTMENT') ? 'left' : 'center';
         return `<td style="padding: 8px 10px; border-right: 1px solid rgba(255,255,255,0.05); text-align: ${align};">${escapeHtml(val)}</td>`;
       }).join('')}
     </tr>`;
@@ -7319,22 +7335,22 @@ async function loadIncomingModuleCode(container) {
 
                 <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; width: 100%; gap: 20px; margin: auto 0;">
                     <div style="display: flex; justify-content: center; gap: 20px; width: 100%; max-width: 900px; flex-wrap: wrap;">
-                        <button class="nav-icon-btn btn-3d" onclick="selectIncomingCategory('REQUEST')" style="flex: 1 1 0px; min-width: 220px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; padding: 15px 10px; height: 130px; border-radius: 12px; cursor: pointer; background: rgba(144, 168, 168, 0.35); border: 1.5px solid rgba(0, 0, 0, 0.4); color: #111; -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px);">
+                        <button class="nav-icon-btn btn-3d" onclick="selectIncomingCategory('REQUEST')" style="flex: 0 0 calc((100% - 40px) / 3); min-width: 220px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; padding: 15px 10px; height: 130px; border-radius: 12px; cursor: pointer; background: rgba(144, 168, 168, 0.35); border: 1.5px solid rgba(0, 0, 0, 0.4); color: #111; -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px);">
                             <i class="fa-solid fa-file-invoice icon-3d-anim" style="font-size: 1.8rem; color: #111;"></i>
                             <span style="font-family: 'Roboto Mono', monospace; font-size: 0.8rem; font-weight: 700; text-align: center; letter-spacing: 1px;">INCOMING REQUEST &amp; RELEASED FORM</span>
                         </button>
 
-                        <button class="nav-icon-btn btn-3d" onclick="selectIncomingCategory('TRANSFER')" style="flex: 1 1 0px; min-width: 220px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; padding: 15px 10px; height: 130px; border-radius: 12px; cursor: pointer; background: rgba(144, 168, 168, 0.35); border: 1.5px solid rgba(0, 0, 0, 0.4); color: #111; -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px);">
+                        <button class="nav-icon-btn btn-3d" onclick="selectIncomingCategory('TRANSFER')" style="flex: 0 0 calc((100% - 40px) / 3); min-width: 220px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; padding: 15px 10px; height: 130px; border-radius: 12px; cursor: pointer; background: rgba(144, 168, 168, 0.35); border: 1.5px solid rgba(0, 0, 0, 0.4); color: #111; -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px);">
                             <i class="fa-solid fa-right-left icon-3d-anim" style="font-size: 1.8rem; color: #111;"></i>
                             <span style="font-family: 'Roboto Mono', monospace; font-size: 0.8rem; font-weight: 700; text-align: center; letter-spacing: 1px;">INCOMING TRANSFER FORM</span>
                         </button>
 
-                        <button class="nav-icon-btn btn-3d" onclick="selectIncomingCategory('PULLOUT')" style="flex: 1 1 0px; min-width: 220px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; padding: 15px 10px; height: 130px; border-radius: 12px; cursor: pointer; background: rgba(144, 168, 168, 0.35); border: 1.5px solid rgba(0, 0, 0, 0.4); color: #111; -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px);">
+                        <button class="nav-icon-btn btn-3d" onclick="selectIncomingCategory('PULLOUT')" style="flex: 0 0 calc((100% - 40px) / 3); min-width: 220px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; padding: 15px 10px; height: 130px; border-radius: 12px; cursor: pointer; background: rgba(144, 168, 168, 0.35); border: 1.5px solid rgba(0, 0, 0, 0.4); color: #111; -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px);">
                             <i class="fa-solid fa-file-arrow-down icon-3d-anim" style="font-size: 1.8rem; color: #111;"></i>
                             <span style="font-family: 'Roboto Mono', monospace; font-size: 0.8rem; font-weight: 700; text-align: center; letter-spacing: 1px;">INCOMING PULL OUT / GATE PASS FORM</span>
                         </button>
 
-                        <button class="nav-icon-btn btn-3d" onclick="selectIncomingCategory('PURCHASE_ORDER')" style="flex: 1 1 0px; min-width: 220px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; padding: 15px 10px; height: 130px; border-radius: 12px; cursor: pointer; background: rgba(144, 168, 168, 0.35); border: 1.5px solid rgba(0, 0, 0, 0.4); color: #111; -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px);">
+                        <button class="nav-icon-btn btn-3d" onclick="selectIncomingCategory('PURCHASE_ORDER')" style="flex: 0 0 calc((100% - 40px) / 3); min-width: 220px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; padding: 15px 10px; height: 130px; border-radius: 12px; cursor: pointer; background: rgba(144, 168, 168, 0.35); border: 1.5px solid rgba(0, 0, 0, 0.4); color: #111; -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px);">
                             <i class="fa-solid fa-cart-shopping icon-3d-anim" style="font-size: 1.8rem; color: #111;"></i>
                             <span style="font-family: 'Roboto Mono', monospace; font-size: 0.8rem; font-weight: 700; text-align: center; letter-spacing: 1px;">INCOMING PURCHASE ORDER</span>
                         </button>

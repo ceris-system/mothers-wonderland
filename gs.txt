@@ -32,17 +32,33 @@ const BARCODE_STORE_NAME = "Mother's Wonderland";
 // of the column the serial lives in on that sheet — chosen to land
 // right after the existing "RECEIVED status" column (U for REQUEST
 // and RTV, Q for TRANSFER — see INCOMING_SHEET_LAYOUT.statusCol below).
+// ------------------------------------------------------------------
+// WHICH SHEET EACH OUTGOING FORM SAVES TO / ARCHIVES TO
+// (edit ONLY these four lines to re-point a form to another sheet)
+//   REQUEST AND RELEASED form -> saves to RR_SHEET, received copy -> RR_ARCHIVE
+//   TRANSFER form             -> saves to TF_SHEET, received copy -> TF_ARCHIVE
+// Column layout follows the FORM, not the sheet name: RR_SHEET must have
+// the old REQUEST column layout (serial V, status Y..AA, received O:R)
+// and RR_ARCHIVE the old RECEIVED layout; TF_SHEET must have the old
+// TRANSFER layout (serial R, status U..W, received K:N) and TF_ARCHIVE
+// the old TRANSFERED layout.
+// ------------------------------------------------------------------
+const RR_SHEET   = 'TRANSFER';
+const RR_ARCHIVE = 'TRANSFERED';
+const TF_SHEET   = 'REQUEST';
+const TF_ARCHIVE = 'RECEIVED';
+
 const SERIAL_CONFIG = {
-  REQUEST_RELEASED: { sheet: 'REQUEST',  prefix: 'MWRRF-', column: 'V' },
-  TRANSFER:          { sheet: 'TRANSFER', prefix: 'MWTF-',  column: 'R' },
+  REQUEST_RELEASED: { sheet: RR_SHEET, prefix: 'MWRRF-', column: 'V' },
+  TRANSFER:          { sheet: TF_SHEET, prefix: 'MWTF-',  column: 'R' },
   PULLOUT:           { sheet: 'RTV',      prefix: 'MWPF-',  column: 'V' },
 
   // Issued when an item is marked RECEIVED via the Incoming module.
   // Stamped on the ARCHIVE sheet (RECEIVED/TRANSFERED/RETURN), one column
   // to the right of that sheet's status column — never on the original
   // REQUEST/TRANSFER/RTV row.
-  INCOMING_RECEIVED:   { sheet: 'RECEIVED',   prefix: 'MWRCV-', column: 'V' },
-  INCOMING_TRANSFERED: { sheet: 'TRANSFERED', prefix: 'MWTRD-', column: 'R' },
+  INCOMING_RECEIVED:   { sheet: RR_ARCHIVE, prefix: 'MWRCV-', column: 'V' },
+  INCOMING_TRANSFERED: { sheet: TF_ARCHIVE, prefix: 'MWTRD-', column: 'R' },
   INCOMING_RETURN:     { sheet: 'RETURN',     prefix: 'MWRTN-', column: 'V' },
 
   // PURCHASE ORDER FORM — replicates REQUEST_RELEASED's save/print/serial
@@ -370,9 +386,9 @@ function doGet(e) {
         // TRANSFER HISTORY has INCOMING DEPARTMENT in column 13 (index 12).
         // REQUEST / RELEASED HISTORY has INCOMING DEPARTMENT in column 17 (index 16).
         let incomingDepartment = "";
-        if (sheetName.toUpperCase() === "TRANSFER") {
+        if (sheetName.toUpperCase() === TF_SHEET) {
           incomingDepartment = row[12] ? String(row[12]).trim().toLowerCase() : "";
-        } else if (sheetName.toUpperCase() === "REQUEST") {
+        } else if (sheetName.toUpperCase() === RR_SHEET) {
           incomingDepartment = row[16] ? String(row[16]).trim().toLowerCase() : "";
         }
 
@@ -395,7 +411,7 @@ function doGet(e) {
           while (out.length < 26) out.push("");
           return out;
         }
-        if (sheetName === "TRANSFER") {
+        if (sheetName === TF_SHEET) {
           // A..N (14) + OUTGOING REMARKS (S, idx 18) + INCOMING DEPT (O) + DATE (P)
           return row.slice(0, 14).concat([row[18] || "", row[14], row[15]]);
         } else {
@@ -1225,9 +1241,9 @@ function handleSavePulloutData(data, user, client) {
 
 function handleSaveTransferData(data, user, client) {
   const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
-  const sheet = ss.getSheetByName("TRANSFER");
+  const sheet = ss.getSheetByName(TF_SHEET);
   
-  if (!sheet) return createJsonResponse({ success: false, error: "'TRANSFER' sheet not found." });
+  if (!sheet) return createJsonResponse({ success: false, error: "'" + TF_SHEET + "' sheet not found." });
   
   const rows = data.rows;
   let serial = null;
@@ -1244,9 +1260,9 @@ function handleSaveTransferData(data, user, client) {
 
 function handleSaveRequestData(data, user, client) {
   const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
-  const sheet = ss.getSheetByName("REQUEST");
+  const sheet = ss.getSheetByName(RR_SHEET);
   
-  if (!sheet) return createJsonResponse({ success: false, error: "'REQUEST' sheet not found." });
+  if (!sheet) return createJsonResponse({ success: false, error: "'" + RR_SHEET + "' sheet not found." });
   
   const rows = data.rows;
   let serial = null;
@@ -1347,8 +1363,8 @@ function upsertPurchaseOrderReceived_(ss, sourceSheet, sourceRow, flagStatus) {
 //                              for the outgoing department to print
 
 const WORKFLOW_CONFIG = {
-  REQUEST_RELEASED: { sheet: 'REQUEST', serialCol: 'V', statusCol: 'Y', approvedByCol: 'Z', approvedDateCol: 'AA', qtyCol: 'J' },
-  TRANSFER:          { sheet: 'TRANSFER', serialCol: 'R', statusCol: 'U', approvedByCol: 'V', approvedDateCol: 'W', qtyCol: 'J' },
+  REQUEST_RELEASED: { sheet: RR_SHEET, serialCol: 'V', statusCol: 'Y', approvedByCol: 'Z', approvedDateCol: 'AA', qtyCol: 'J' },
+  TRANSFER:          { sheet: TF_SHEET, serialCol: 'R', statusCol: 'U', approvedByCol: 'V', approvedDateCol: 'W', qtyCol: 'J' },
   PULLOUT:           { sheet: 'RTV',      serialCol: 'V', statusCol: 'Y', approvedByCol: 'Z', approvedDateCol: 'AA', qtyCol: 'J' },
   PURCHASE_ORDER:    { sheet: 'P.O REQUEST', serialCol: 'L', statusCol: 'O', approvedByCol: 'P', approvedDateCol: 'Q', qtyCol: 'J', receivedCol: 'R' }
 };
@@ -1422,8 +1438,8 @@ function handleGetFormDepartments(e) {
     const formKey = String(e.parameter.form || "").trim();
     const serial = String(e.parameter.serial || "").trim();
     const map = {
-      REQUEST_RELEASED: { sheet: "REQUEST",  serialCol: "V", incomingCol: "S" },
-      TRANSFER:         { sheet: "TRANSFER", serialCol: "R", incomingCol: "O" },
+      REQUEST_RELEASED: { sheet: RR_SHEET,  serialCol: "V", incomingCol: "S" },
+      TRANSFER:         { sheet: TF_SHEET, serialCol: "R", incomingCol: "O" },
       PULLOUT:          { sheet: "RTV",      serialCol: "V", incomingCol: "S" }
     };
     const cfg = map[formKey];
@@ -1692,6 +1708,7 @@ function handleMarkWorkflowNotificationsRead(data) {
 //   RTV sheet:       column W (one past the MWPF- serial in column V)
 const INCOMING_SHEET_LAYOUT = {
   REQUEST: {
+    sheet: RR_SHEET,   // real sheet the REQUEST AND RELEASED form saves to
     deptCol: 1,        // A - outgoing/requesting dept
     skuCol: 2,          // B
     descCol: 3,         // C
@@ -1703,6 +1720,7 @@ const INCOMING_SHEET_LAYOUT = {
     statusCol: 21          // U
   },
   TRANSFER: {
+    sheet: TF_SHEET,   // real sheet the TRANSFER form saves to
     deptCol: 1,
     skuCol: 2,
     descCol: 3,
@@ -1972,8 +1990,8 @@ function handleGetIncomingPendingCount(e) {
 // now carries the row's ORIGINAL serial (from the source sheet) forward
 // onto the archive row instead of issuing a new one.
 const INCOMING_RECEIVE_CONFIG = {
-  REQUEST:  { destSheet: 'RECEIVED',   serialFormKey: 'INCOMING_RECEIVED' },
-  TRANSFER: { destSheet: 'TRANSFERED', serialFormKey: 'INCOMING_TRANSFERED' },
+  REQUEST:  { destSheet: RR_ARCHIVE, serialFormKey: 'INCOMING_RECEIVED' },
+  TRANSFER: { destSheet: TF_ARCHIVE, serialFormKey: 'INCOMING_TRANSFERED' },
   RTV:      { destSheet: 'RETURN',     serialFormKey: 'INCOMING_RETURN' },
   PURCHASE_ORDER: { destSheet: null, serialFormKey: 'PURCHASE_ORDER' }
 };
@@ -2127,8 +2145,8 @@ function handleMarkIncomingReceived(data, user, client) {
 // TRANSFER FROM ...").
 const INCOMING_MESSAGE_CATEGORIES = {
   PURCHASE_ORDER: { sheet: 'P.O REQUEST', label: 'PURCHASE ORDER' },
-  REQUEST:  { sheet: 'REQUEST',  label: 'REQUEST AND RELEASED' },
-  TRANSFER: { sheet: 'TRANSFER', label: 'TRANSFER' },
+  REQUEST:  { sheet: RR_SHEET, label: 'REQUEST AND RELEASED' },
+  TRANSFER: { sheet: TF_SHEET, label: 'TRANSFER' },
   RTV:      { sheet: 'RTV',      label: 'PULL OUT' }
 };
 
