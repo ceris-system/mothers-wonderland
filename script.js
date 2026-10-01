@@ -5905,17 +5905,23 @@ const HISTORY_CONFIGS = {
   },
   TRANSFER: {
     title: 'TRANSFER HISTORY',
-    sheet: 'REQUEST',    // sheet the Transfer form saves to (must match TF_SHEET in the Apps Script)
+    // Reads the RECEIVED sheet (TF_ARCHIVE in the Apps Script). The backend
+    // maps these RECEIVED columns into the row shape below, in this order:
+    //   R serial | A outgoing dept | B sku | C description | D uom | E exp date |
+    //   F onhand | G total onhand | H cost | I srp | J transfer qty |
+    //   K exp date | L received qty | N remarks | O incoming dept | P date received
+    sheet: 'RECEIVED',
     headers: [
-      'DEPARTMENT', 'SKU CODE', 'PRODUCT DESCRIPTION', 'UOM', 'EXP. DATE', 'ON HAND',
-      'TOTAL ON HAND', 'COST', 'SRP', 'TRANSFER QTY', 'EXP. DATE', 'QTY RELEASED', 'UOM',
-      'REMARKS', 'OUTGOING REMARKS', 'INCOMING DEPARTMENT', 'DATE'
+      'SERIAL NO.', 'OUTGOING DEPARTMENT', 'SKU CODE', 'DESCRIPTION', 'UOM', 'EXPIRATION DATE',
+      'ONHAND', 'TOTAL ONHAND', 'COST', 'SRP', 'TRANSFER QTY',
+      'EXPIRATION DATE', 'RECEIVED QTY', 'REMARKS', 'INCOMING DEPARTMENT', 'DATE RECEIVED'
     ],
-    // Only OUTGOING REMARKS is never populated here — the rest of this
-    // shape (unlike RTV/REQUEST/PULL_OUT) is actually used for transfers.
-    hiddenColumns: [14],
-    // date columns shown as "SEPTEMBER 26, 2026"
-    dateColumns: [4, 10, 16]
+    hiddenColumns: [],
+    // OUTGOING / INCOMING DEPARTMENT positions (used by the department filters)
+    outgoingIdx: 1,
+    incomingIdx: 14,
+    // date columns shown as "SEPTEMBER 20, 2026"
+    dateColumns: [5, 11, 15]
   },
   PULL_OUT: {
     title: 'PULLOUT HISTORY',
