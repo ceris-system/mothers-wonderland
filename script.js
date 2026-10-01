@@ -5934,15 +5934,67 @@ const HISTORY_CONFIGS = {
     // N..X (indices 13-23) not shown | Y (24) P.O status | Z (25) date received.
     // Indices 13-23 stay in `headers` so row[i] lookups line up with the
     // real sheet columns; they are skipped when rendering via hiddenColumns.
+    //
+    // EXP. DATE / ON HAND are NOT taken from E / F (those are only the
+    // values copied at request time). The actual received values live in
+    // S (idx 18, RECEIVED EXP. DATE) and T (idx 19, RECEIVED QTY), so
+    // `columnRemap` copies S -> EXP. DATE (idx 4) and T -> ON HAND (idx 5).
     headers: [
       'DEPARTMENT', 'SKU CODE', 'PRODUCT DESCRIPTION', 'UOM', 'EXP. DATE', 'ON HAND',
       'TOTAL ON HAND', 'COST', 'SRP', 'P.O QTY', 'DATE REQUEST', 'SERIAL NO.', 'REQUESTED BY',
       '', '', '', '', '', '', '', '', '', '', '',
       'P.O STATUS', 'DATE RECEIVED'
     ],
-    hiddenColumns: [13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23]
+    hiddenColumns: [13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23],
+    columnRemap: { 4: 18, 5: 19 },
+    // EXP. DATE (4), DATE REQUEST (10), DATE RECEIVED (25) -> "September 26, 2026"
+    dateColumns: [4, 10, 25]
   }
 };
+
+// Formats a sheet display value as "September 26, 2026". Handles
+// "9/26/2026", "26/9/2026" (first part > 12), "2026-09-26",
+// "September 26, 2026 9:30 AM", "26-Sep-2026", etc. Blank or unparseable
+// values are returned unchanged so nothing is ever lost.
+function formatHistoryDate(val) {
+  const raw = String(val === undefined || val === null ? '' : val).trim();
+  if (!raw) return '';
+  let d = null;
+  let m = raw.match(/^(\d{1,2})[\/.-](\d{1,2})[\/.-](\d{4})(?!\d)/);
+  if (m) {
+    const a = Number(m[1]), b = Number(m[2]), y = Number(m[3]);
+    d = a > 12 ? new Date(y, b - 1, a) : new Date(y, a - 1, b);
+  } else {
+    m = raw.match(/^(\d{4})[\/.-](\d{1,2})[\/.-](\d{1,2})/);
+    if (m) d = new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
+    else {
+      const t = new Date(raw);
+      if (!isNaN(t.getTime())) d = t;
+    }
+  }
+  if (!d || isNaN(d.getTime())) return raw;
+  return d.toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' });
+}
+
+function applyHistoryDateFormat(row, dateColumns) {
+  if (!dateColumns || !Array.isArray(row)) return row;
+  const out = row.slice();
+  dateColumns.forEach(i => { if (out[i] !== undefined) out[i] = formatHistoryDate(out[i]); });
+  return out;
+}
+
+// Applies a config's `columnRemap` ({ targetIndex: sourceIndex }) to a row so
+// a displayed column can be fed from a different sheet column. Copies the
+// row (never mutates the server response). No-op when no remap is defined.
+function applyHistoryColumnRemap(row, columnRemap) {
+  if (!columnRemap || !Array.isArray(row)) return row;
+  const out = row.slice();
+  Object.keys(columnRemap).forEach(target => {
+    const src = columnRemap[target];
+    out[Number(target)] = row[src] !== undefined && row[src] !== null ? row[src] : '';
+  });
+  return out;
+}
 
 let currentActiveCategory = '';
 let cachedHistoryRows = [];
@@ -6221,7 +6273,7 @@ async function fetchHistoryData(forceRefresh = false) {
       return;
     }
 
-    cachedHistoryRows = result.data;
+    cachedHistoryRows = result.data.map(row => applyHistoryDateFormat(applyHistoryColumnRemap(row, config.columnRemap), config.dateColumns));
     renderHistoryRows(cachedHistoryRows, config.headers, config.hiddenColumns);
 
   } catch (err) {
