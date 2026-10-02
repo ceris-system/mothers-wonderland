@@ -5931,13 +5931,17 @@ const HISTORY_CONFIGS = {
       'DEPARTMENT', 'SKU CODE', 'PRODUCT DESCRIPTION', 'UOM', 'EXP. DATE', 'ON HAND',
       'TOTAL ON HAND', 'COST', 'SRP', 'TRANSFER QTY', 'EXP. DATE', 'QTY RELEASED', 'UOM',
       'REMARKS', 'EXPIRATION DATE', 'QTY RETURNED', 'UOM', 'REMARKS',
-      'OUTGOING REMARKS', 'INCOMING DEPARTMENT', 'DATE'
+      'OUTGOING REMARKS', 'INCOMING DEPARTMENT', 'DATE', 'DATE REQUEST'
     ],
     // Same always-empty columns as PULL_OUT below (both read the RTV
     // sheet) — kept in `headers` for index alignment, just not rendered.
     hiddenColumns: [10, 11, 12, 13, 18],
-    // date columns shown as "SEPTEMBER 26, 2026"
-    dateColumns: [4, 10, 14, 20]
+    // INCOMING DEPARTMENT is now NOT the second-to-last column (DATE REQUEST
+    // was appended), so its position is given explicitly for the filters.
+    outgoingIdx: 0,
+    incomingIdx: 19,
+    // date columns shown as "SEPTEMBER 26, 2026" (21 = DATE REQUEST)
+    dateColumns: [4, 10, 14, 20, 21]
   },
   REQUEST_RELEASED: {
     title: 'REQUEST AND RELEASED HISTORY',
@@ -5950,14 +5954,15 @@ const HISTORY_CONFIGS = {
     headers: [
       'SERIAL NO.', 'OUTGOING DEPARTMENT', 'SKU CODE', 'DESCRIPTION', 'UOM', 'EXPIRATION DATE',
       'ONHAND', 'TOTAL ONHAND', 'COST', 'SRP', 'TRANSFER QTY',
-      'EXPIRATION DATE', 'RECEIVED QTY', 'REMARKS', 'INCOMING DEPARTMENT', 'DATE RECEIVED'
+      'EXPIRATION DATE', 'RECEIVED QTY', 'REMARKS', 'INCOMING DEPARTMENT', 'DATE RECEIVED',
+      'DATE REQUEST'
     ],
     hiddenColumns: [],
     // OUTGOING / INCOMING DEPARTMENT positions (used by the department filters)
     outgoingIdx: 1,
     incomingIdx: 14,
-    // date columns shown as "SEPTEMBER 20, 2026"
-    dateColumns: [5, 11, 15]
+    // date columns shown as "SEPTEMBER 20, 2026" (16 = DATE REQUEST)
+    dateColumns: [5, 11, 15, 16]
   },
   TRANSFER: {
     title: 'TRANSFER HISTORY',
@@ -5970,14 +5975,15 @@ const HISTORY_CONFIGS = {
     headers: [
       'SERIAL NO.', 'OUTGOING DEPARTMENT', 'SKU CODE', 'DESCRIPTION', 'UOM', 'EXPIRATION DATE',
       'ONHAND', 'TOTAL ONHAND', 'COST', 'SRP', 'TRANSFER QTY',
-      'EXPIRATION DATE', 'RECEIVED QTY', 'REMARKS', 'INCOMING DEPARTMENT', 'DATE RECEIVED'
+      'EXPIRATION DATE', 'RECEIVED QTY', 'REMARKS', 'INCOMING DEPARTMENT', 'DATE RECEIVED',
+      'DATE REQUEST'
     ],
     hiddenColumns: [],
     // OUTGOING / INCOMING DEPARTMENT positions (used by the department filters)
     outgoingIdx: 1,
     incomingIdx: 14,
-    // date columns shown as "SEPTEMBER 20, 2026"
-    dateColumns: [5, 11, 15]
+    // date columns shown as "SEPTEMBER 20, 2026" (16 = DATE REQUEST)
+    dateColumns: [5, 11, 15, 16]
   },
   PULL_OUT: {
     title: 'PULLOUT HISTORY',
@@ -5986,7 +5992,7 @@ const HISTORY_CONFIGS = {
       'DEPARTMENT', 'SKU CODE', 'PRODUCT DESCRIPTION', 'UOM', 'EXP. DATE', 'ON HAND',
       'TOTAL ON HAND', 'COST', 'SRP', 'TRANSFER QTY', 'EXP. DATE', 'QTY RELEASED', 'UOM',
       'REMARKS', 'EXPIRATION DATE', 'QTY RETURNED', 'UOM', 'REMARKS',
-      'OUTGOING REMARKS', 'INCOMING DEPARTMENT', 'DATE'
+      'OUTGOING REMARKS', 'INCOMING DEPARTMENT', 'DATE', 'DATE REQUEST'
     ],
     // These columns are carried over from the shared RTV sheet layout but
     // are never populated for actual PULL OUT transactions (they belong to
@@ -5995,8 +6001,12 @@ const HISTORY_CONFIGS = {
     // up with the real sheet columns — only rendering skips them, via
     // renderHistoryRows/openHistoryModal checking this list.
     hiddenColumns: [10, 11, 12, 13, 18],
-    // date columns shown as "SEPTEMBER 26, 2026"
-    dateColumns: [4, 10, 14, 20]
+    // INCOMING DEPARTMENT is now NOT the second-to-last column (DATE REQUEST
+    // was appended), so its position is given explicitly for the filters.
+    outgoingIdx: 0,
+    incomingIdx: 19,
+    // date columns shown as "SEPTEMBER 26, 2026" (21 = DATE REQUEST)
+    dateColumns: [4, 10, 14, 20, 21]
   },
   PURCHASE_ORDER: {
     title: 'PURCHASE ORDER HISTORY',
