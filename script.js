@@ -7623,10 +7623,13 @@ function selectIncomingCategory(categoryKey) {
     // blank / freely editable). Non-admins are locked to their own client,
     // matching the pattern used in the History and Inventory modules.
     const scope = getSessionScope();
-    const automaticIncomingDept = categoryKey === 'PULLOUT'
-        ? 'PULL OUT'
-        : (scope.isAdmin ? '' : scope.client);
-    const incomingDeptReadonly = categoryKey === 'PULLOUT' || !scope.isAdmin;
+    // Admin: the INCOMING DEPARTMENT box is free on all 4 incoming forms
+    // (blank = ALL departments; a department = ONLY that department's
+    // items, the same list that department's own user would get).
+    const automaticIncomingDept = scope.isAdmin
+        ? ''
+        : (categoryKey === 'PULLOUT' ? 'PULL OUT' : scope.client);
+    const incomingDeptReadonly = !scope.isAdmin;
 
     container.innerHTML = `
         <div style="width: 100%; height: 100%; padding: 25px; box-sizing: border-box; display: flex; flex-direction: column; align-items: stretch;">
@@ -7652,7 +7655,7 @@ function selectIncomingCategory(categoryKey) {
                     <div style="display: flex; align-items: center; gap: 8px; flex: 1; min-width: 240px;">
                         <span style="font-weight: bold; color: #111; text-transform: uppercase; white-space: nowrap;">INCOMING DEPARTMENT:</span>
                         <input type="text" id="incIncomingDept"
-                            placeholder="${categoryKey === 'PULLOUT' ? '' : (scope.isAdmin ? 'Leave blank to view ALL departments' : (scope.client ? '' : 'No client on this account'))}"
+                            placeholder="${scope.isAdmin ? 'Leave blank to view ALL departments' : (categoryKey === 'PULLOUT' ? '' : (scope.client ? '' : 'No client on this account'))}"
                             value="${escapeHtml(automaticIncomingDept)}"
                             ${incomingDeptReadonly ? 'readonly' : ''}
                             style="padding: 6px 10px; background: ${incomingDeptReadonly ? '#f4f4f4' : '#fff'}; border: 1px solid #000; border-radius: 4px; color: #000; font-family: inherit; outline: none; flex: 1; cursor: ${incomingDeptReadonly ? 'not-allowed' : 'text'}; opacity: ${incomingDeptReadonly ? '0.85' : '1'};"
@@ -7716,6 +7719,20 @@ function selectIncomingCategory(categoryKey) {
 
     if (typeof loadOutletFilterFromConfig === 'function') loadOutletFilterFromConfig();
     if (typeof setTransferDate === 'function') setTransferDate();
+
+    // Admin: every time the INCOMING DEPARTMENT changes (typed or picked
+    // from the list) reload so the table only shows THAT department.
+    const incDeptField = container.querySelector('#incIncomingDept');
+    if (incDeptField && scope.isAdmin) {
+        let incDeptTimer = null;
+        const refetchForDept = () => {
+            clearTimeout(incDeptTimer);
+            incDeptTimer = setTimeout(fetchIncomingRowsAutomatically, 350);
+        };
+        incDeptField.addEventListener('input', refetchForDept);
+        incDeptField.addEventListener('change', refetchForDept);
+    }
+
     fetchIncomingRowsAutomatically();
 }
 
@@ -7808,7 +7825,10 @@ function renderIncomingRows(rows, cfg) {
     });
 }
 
+let incomingFetchSeq = 0;
 async function fetchIncomingRowsAutomatically() {
+    const seq = ++incomingFetchSeq;
+    const keyAtStart = activeIncomingKey;
     const cfg = INCOMING_CONFIGS[activeIncomingKey];
     const scope = getSessionScope();
     const tableBody = document.getElementById('incomingTableBody');
@@ -7824,8 +7844,12 @@ async function fetchIncomingRowsAutomatically() {
             + `&token=${encodeURIComponent(window.API_TOKEN)}`;
         const response = await fetch(url);
         const result = await response.json();
+        // A newer department/category was picked while this was loading.
+        if (seq !== incomingFetchSeq || keyAtStart !== activeIncomingKey) return;
         if (!result.success) throw new Error(result.error || 'Automatic incoming loading is not enabled in the backend.');
         incomingFetchedRows = Array.isArray(result.data) ? result.data : [];
+        const selAll = document.getElementById('incSelectAll');
+        if (selAll) selAll.checked = false;
         const banner = document.getElementById('incomingViewerBanner');
         if (banner && result.viewer) {
             banner.textContent = 'VIEWING AS: ' + (result.viewer.username || '?') + ' | DEPARTMENT: ' + (result.viewer.client || '(none)') + (result.viewer.isAdmin ? ' | ADMIN - SEES ALL DEPARTMENTS' : '');
@@ -7833,6 +7857,7 @@ async function fetchIncomingRowsAutomatically() {
         renderIncomingRows(incomingFetchedRows, cfg);
     } catch (error) {
         console.error('Automatic Incoming Fetch Error:', error);
+        if (seq !== incomingFetchSeq || keyAtStart !== activeIncomingKey) return;
         if (tableBody) tableBody.innerHTML = `<tr><td colspan="9" style="padding: 20px; text-align: center; color: #d9534f;">${escapeHtml(error.message)}</td></tr>`;
     }
 }
