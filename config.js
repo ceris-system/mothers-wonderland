@@ -6,7 +6,7 @@
  * ONLY here — index.html, script.js, and every module HTML file all read
  * it from window.API automatically.
  */
-window.API = "https://script.google.com/macros/s/AKfycbyOq4dAqlof6BbCYOQKBsLYASiQN_ZPsFmL1H-xcsHwioiS9M909B2FdCvTJdlcLopb/exec";
+window.API = "https://script.google.com/macros/s/AKfycbzu2MPTXJ71aK3ZGXLpOnCae0mQPKd26Wc7oFi1hGMyaYvAx0oLPG02jT2Gqf1qJxPQ/exec";
 
 /**
  * Shared secret sent with every request so the Apps Script backend can

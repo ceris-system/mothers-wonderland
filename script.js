@@ -7678,6 +7678,8 @@ function selectIncomingCategory(categoryKey) {
                 <span style="font-size: 0.72rem; font-weight: 700; color: #2e7d32; text-transform: uppercase;">AUTO-LOADED FROM OUTGOING FORMS</span>
             </div>
 
+            <div id="incomingViewerBanner" style="font-size: 0.72rem; color: #555; margin: -10px 0 10px; font-weight: 600;"></div>
+
             <!-- Results Table -->
             <div style="flex: 1; display: flex; flex-direction: column; gap: 10px; margin-top: 10px; min-height: 0;">
                 <div style="max-height: 480px; overflow-y: auto; border: 1px solid #e0e0e0; border-radius: 6px; box-shadow: 0 2px 6px rgba(0,0,0,0.03);">
@@ -7690,13 +7692,15 @@ function selectIncomingCategory(categoryKey) {
                                 <th style="padding: 10px 8px; font-weight: 600; width: 110px;">SKU CODE</th>
                                 <th style="padding: 10px 8px; font-weight: 600;">PRODUCT DESCRIPTION</th>
                                 <th style="padding: 10px 8px; font-weight: 600; text-align: center; width: 60px;">UOM</th>
+                                <th style="padding: 10px 8px; font-weight: 600; width: 150px;">SOURCE DEPT</th>
+                                <th style="padding: 10px 8px; font-weight: 600; width: 150px;">INCOMING DEPT</th>
                                 <th style="padding: 10px 8px; font-weight: 600; text-align: center; width: 160px;">EXP. DATE</th>
                                 <th style="padding: 10px 8px; font-weight: 600; text-align: center; width: 110px;">${escapeHtml(cfg.qtyLabel)}</th>
                                 <th style="padding: 10px 8px; font-weight: 600; text-align: center; width: 180px;">REMARKS</th>
                             </tr>
                         </thead>
                         <tbody id="incomingTableBody">
-                            <tr><td colspan="7" style="padding: 20px; text-align: center; color: #888;">Select departments and click UPLOAD to load pending items.</td></tr>
+                            <tr><td colspan="9" style="padding: 20px; text-align: center; color: #888;">Select departments and click UPLOAD to load pending items.</td></tr>
                         </tbody>
                     </table>
                 </div>
@@ -7744,7 +7748,7 @@ async function fetchIncomingRows() {
     // Admins may leave INCOMING DEPARTMENT blank to view items across ALL departments.
     if (!scope.isAdmin && !incomingDept) return showCustomAlert('No client is associated with your account. Contact an admin.');
 
-    if (tableBody) tableBody.innerHTML = `<tr><td colspan="7" style="padding: 20px; text-align: center; color: #888;">Loading...</td></tr>`;
+    if (tableBody) tableBody.innerHTML = `<tr><td colspan="9" style="padding: 20px; text-align: center; color: #888;">Loading...</td></tr>`;
     if (typeof showSeaWaveLoader === 'function') showSeaWaveLoader("UPLOADING...");
 
     try {
@@ -7764,7 +7768,7 @@ async function fetchIncomingRows() {
         renderIncomingRows(incomingFetchedRows, cfg);
     } catch (error) {
         console.error("Fetch Incoming Error:", error);
-        if (tableBody) tableBody.innerHTML = `<tr><td colspan="7" style="padding: 20px; text-align: center; color: #d9534f;">Error: ${escapeHtml(error.message)}</td></tr>`;
+        if (tableBody) tableBody.innerHTML = `<tr><td colspan="9" style="padding: 20px; text-align: center; color: #d9534f;">Error: ${escapeHtml(error.message)}</td></tr>`;
     } finally {
         if (typeof hideSeaWaveLoader === 'function') hideSeaWaveLoader();
     }
@@ -7775,7 +7779,7 @@ function renderIncomingRows(rows, cfg) {
     if (!tableBody) return;
 
     if (!rows || rows.length === 0) {
-        tableBody.innerHTML = `<tr><td colspan="7" style="padding: 20px; text-align: center; color: #888;">No pending items found for that selection.</td></tr>`;
+        tableBody.innerHTML = `<tr><td colspan="9" style="padding: 20px; text-align: center; color: #888;">No pending items found for that selection.</td></tr>`;
         return;
     }
 
@@ -7790,6 +7794,8 @@ function renderIncomingRows(rows, cfg) {
             <td style="padding: 6px 8px; border-bottom: 1px solid #e9ecef; font-weight: 600; color: #212529;">${escapeHtml(item.sku)}</td>
             <td style="padding: 6px 8px; border-bottom: 1px solid #e9ecef;">${escapeHtml(item.description)}</td>
             <td style="padding: 6px 8px; border-bottom: 1px solid #e9ecef; text-align: center; color: #495057;">${escapeHtml(item.uom)}</td>
+            <td style="padding: 6px 8px; border-bottom: 1px solid #e9ecef;">${escapeHtml(item.department || '')}</td>
+            <td style="padding: 6px 8px; border-bottom: 1px solid #e9ecef;">${escapeHtml(item.incomingDepartment || '')}</td>
             <td style="padding: 6px 8px; border-bottom: 1px solid #e9ecef; text-align: center;">
                 <input type="date" class="incoming-exp-date" style="width: 100%; border: 1px solid #ccc; border-radius: 6px; padding: 4px 6px; font-family: inherit; font-size: 0.78rem; outline: none; box-sizing: border-box;">
             </td>
@@ -7810,7 +7816,7 @@ async function fetchIncomingRowsAutomatically() {
 
     const incomingDept = document.getElementById('incIncomingDept')?.value.trim() || '';
 
-    if (tableBody) tableBody.innerHTML = '<tr><td colspan="7" style="padding: 20px; text-align: center; color: #888;">Checking incoming forms...</td></tr>';
+    if (tableBody) tableBody.innerHTML = '<tr><td colspan="9" style="padding: 20px; text-align: center; color: #888;">Checking incoming forms...</td></tr>';
     try {
         const url = `${window.API}?action=getIncomingPendingForDepartment&sheet=${encodeURIComponent(cfg.sheet)}`
             + `&incomingDept=${encodeURIComponent(incomingDept)}`
@@ -7820,10 +7826,14 @@ async function fetchIncomingRowsAutomatically() {
         const result = await response.json();
         if (!result.success) throw new Error(result.error || 'Automatic incoming loading is not enabled in the backend.');
         incomingFetchedRows = Array.isArray(result.data) ? result.data : [];
+        const banner = document.getElementById('incomingViewerBanner');
+        if (banner && result.viewer) {
+            banner.textContent = 'VIEWING AS: ' + (result.viewer.username || '?') + ' | DEPARTMENT: ' + (result.viewer.client || '(none)') + (result.viewer.isAdmin ? ' | ADMIN - SEES ALL DEPARTMENTS' : '');
+        }
         renderIncomingRows(incomingFetchedRows, cfg);
     } catch (error) {
         console.error('Automatic Incoming Fetch Error:', error);
-        if (tableBody) tableBody.innerHTML = `<tr><td colspan="7" style="padding: 20px; text-align: center; color: #d9534f;">${escapeHtml(error.message)}</td></tr>`;
+        if (tableBody) tableBody.innerHTML = `<tr><td colspan="9" style="padding: 20px; text-align: center; color: #d9534f;">${escapeHtml(error.message)}</td></tr>`;
     }
 }
 
@@ -7908,7 +7918,7 @@ function clearIncomingForm() {
     incomingFetchedRows = [];
     const tableBody = document.getElementById('incomingTableBody');
     if (tableBody) {
-        tableBody.innerHTML = `<tr><td colspan="7" style="padding: 20px; text-align: center; color: #888;">Select departments and click UPLOAD to load pending items.</td></tr>`;
+        tableBody.innerHTML = `<tr><td colspan="9" style="padding: 20px; text-align: center; color: #888;">Select departments and click UPLOAD to load pending items.</td></tr>`;
     }
 }
 
