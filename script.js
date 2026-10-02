@@ -7731,6 +7731,7 @@ function selectIncomingCategory(categoryKey) {
         };
         incDeptField.addEventListener('input', refetchForDept);
         incDeptField.addEventListener('change', refetchForDept);
+        incDeptField.addEventListener('keydown', (e) => { if (e.key === 'Enter') refetchForDept(); });
     }
 
     fetchIncomingRowsAutomatically();
@@ -7848,6 +7849,15 @@ async function fetchIncomingRowsAutomatically() {
         if (seq !== incomingFetchSeq || keyAtStart !== activeIncomingKey) return;
         if (!result.success) throw new Error(result.error || 'Automatic incoming loading is not enabled in the backend.');
         incomingFetchedRows = Array.isArray(result.data) ? result.data : [];
+        // Safety net for admins: whatever is typed in INCOMING DEPARTMENT is
+        // the only department shown, even if an older backend sent more.
+        // (Pull Out is excluded: its incoming column is just the tag
+        // "PULL OUT"; the backend applies the department rule for it.)
+        if (scope.isAdmin && incomingDept && cfg.sheet !== 'PULLOUT') {
+            const norm = (v) => String(v || '').replace(/[\u2010-\u2015\u2212]/g, '-').replace(/\s+/g, ' ').trim().toLowerCase();
+            const want = norm(incomingDept);
+            incomingFetchedRows = incomingFetchedRows.filter(r => r.incomingDepartment === undefined || norm(r.incomingDepartment) === want);
+        }
         const selAll = document.getElementById('incSelectAll');
         if (selAll) selAll.checked = false;
         const banner = document.getElementById('incomingViewerBanner');

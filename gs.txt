@@ -91,6 +91,14 @@ function isAuthorized(token) {
  * see" — callers must NEVER trust a client-supplied client/department name
  * for a non-admin user; always resolve it from here instead.
  */
+// Single place that decides who is an admin: the username OR the client
+// name containing "ADMIN" (e.g. "MW ADMIN", "ADMIN - HQ").
+function isAdminAccount_(username, client) {
+  const u = String(username || "").trim().toUpperCase();
+  const c = String(client || "").trim().toUpperCase();
+  return u.indexOf("ADMIN") !== -1 || c.indexOf("ADMIN") !== -1;
+}
+
 function getUserAccount(username) {
   if (!username) return null;
 
@@ -104,7 +112,7 @@ function getUserAccount(username) {
       const uname = data[i][0].toString().trim();
       const status = data[i][2] ? data[i][2].toString().trim().toUpperCase() : "";
       const client = data[i][3] ? data[i][3].toString().trim() : "";
-      const isAdmin = uname.toUpperCase().includes("ADMIN") || client.toUpperCase().includes("ADMIN");
+      const isAdmin = isAdminAccount_(uname, client);
       return { username: uname, status: status, client: client, isAdmin: isAdmin };
     }
   }
@@ -782,7 +790,7 @@ function processLogin(username, password) {
   const accountStatus = userData[2].toString().trim().toUpperCase();
   const clientName = userData[3] ? userData[3].toString().trim() : "";
 
-  const isAdmin = username.toUpperCase().includes("ADMIN") || clientName.toUpperCase().includes("ADMIN");
+  const isAdmin = isAdminAccount_(username, clientName);
 
   // Supports a one-time migration: if a row still has a plaintext password
   // (shorter than a hash, or doesn't match hash format), compare directly
@@ -1112,7 +1120,7 @@ function updateUserCredentials(rowIndex, newUsername, newPassword) {
     sheet.getRange(row, 3).setValue("ACTIVE");
 
     const existingClient = sheet.getRange(row, 4).getDisplayValue().trim();
-    const isAdmin = newUsername.toUpperCase().includes("ADMIN") || existingClient.toUpperCase().includes("ADMIN");
+    const isAdmin = isAdminAccount_(newUsername, existingClient);
 
     recordLoginLog(ss, newUsername, "N/A", "SUCCESS", "UPDATED_CREDENTIALS");
 
@@ -1750,6 +1758,12 @@ function handleMarkWorkflowNotificationsRead(data) {
 //   TRANSFER sheet: column S (one past the MWTF- serial in column R)
 //   REQUEST sheet:  column W (one past the MWRRF- serial in column V)
 //   RTV sheet:       column W (one past the MWPF- serial in column V)
+// WHICH COLUMN DECIDES WHO MAY SEE / RECEIVE A ROW (non-admins only: the
+// value must equal the logged-in user's client; admins see everything):
+//   INCOMING REQUEST AND RELEASED FORM -> "TRANSFER" sheet (RR_SHEET), col S
+//   INCOMING TRANSFER FORM             -> "REQUEST" sheet (TF_SHEET), col O (see note below)
+//   INCOMING PULL OUT / GATE PASS FORM -> "RTV" sheet, col S
+//   INCOMING PURCHASE ORDER            -> "P.O REQUEST" sheet, col M
 const INCOMING_SHEET_LAYOUT = {
   REQUEST: {
     sheet: RR_SHEET,   // real sheet the REQUEST AND RELEASED form saves to
@@ -1759,7 +1773,7 @@ const INCOMING_SHEET_LAYOUT = {
     uomCol: 4,           // D
     qtyCol: 10,           // J - requested/transfer qty
     writeBackStartCol: 15, // O - RECEIVED INFORMATION block (EXP, QTY, UOM, REMARKS)
-    incomingCol: 19,      // S
+    incomingCol: 19,      // S - INCOMING DEPARTMENT (on the "TRANSFER" sheet)
     dateCol: 20,          // T
     statusCol: 21          // U
   },
@@ -1771,7 +1785,7 @@ const INCOMING_SHEET_LAYOUT = {
     uomCol: 4,
     qtyCol: 10,
     writeBackStartCol: 11, // K - RECEIVED INFORMATION block (only extra block on TRANSFER)
-    incomingCol: 15,       // O
+    incomingCol: 15,       // O - INCOMING DEPARTMENT (on the "REQUEST" sheet; S there is OUTGOING REMARKS)
     dateCol: 16,           // P
     statusCol: 17          // Q
   },
@@ -1782,7 +1796,7 @@ const INCOMING_SHEET_LAYOUT = {
     uomCol: 4,
     qtyCol: 10,
     writeBackStartCol: 15, // O - RETURN INFORMATION block
-    incomingCol: 19,       // S
+    incomingCol: 19,       // S - INCOMING DEPARTMENT (on the "RTV" sheet)
     dateCol: 20,           // T
     statusCol: 21,         // U
     workflowStatusCol: 25  // Y - admin approval status (only RELEASED_TO_OUTGOING rows go to Incoming)
@@ -1794,7 +1808,7 @@ const INCOMING_SHEET_LAYOUT = {
     descCol: 3,
     uomCol: 4,
     qtyCol: 10,
-    incomingCol: 1,
+    incomingCol: 13,       // M - INCOMING DEPARTMENT (on the "P.O REQUEST" sheet)
     dateCol: 11,
     workflowStatusCol: 15, // O - approval status
     statusCol: 18,         // R - received status
@@ -1871,17 +1885,32 @@ function makeIncomingCreatorCheck_(ss, sheetName, account) {
 //   - rows addressed to their own client, AND
 //   - rows tagged "PULL OUT" that THEY sent (outgoing dept = their client).
 // Every other sheet, and admins, keep the exact old rule.
+// Department names compared loosely: case, extra spaces and the different
+// dash characters (-, en dash, em dash) no longer cause a false mismatch.
+function normDept_(v) {
+  return String(v === null || v === undefined ? "" : v)
+    .replace(/[\u2010-\u2015\u2212]/g, "-")
+    .replace(/\s+/g, " ")
+    .trim()
+    .toLowerCase();
+}
+
 function incomingRowMatches_(sheetName, row, layout, account, incomingDept) {
-  const rowIncoming = row[layout.incomingCol - 1] ? String(row[layout.incomingCol - 1]).trim().toLowerCase() : "";
-  if (sheetName === "RTV" && account && account.isAdmin) {
-    // The PULL OUT / GATE PASS screen locks INCOMING DEPARTMENT to the tag
-    // "PULL OUT", so an admin would otherwise only see rows saved with that
-    // exact tag. Admins see every approved pull-out.
-    return true;
-  }
-  if (sheetName === "RTV" && account && !account.isAdmin) {
-    const own = String(account.client || "").trim().toLowerCase();
-    const rowDept = row[layout.deptCol - 1] ? String(row[layout.deptCol - 1]).trim().toLowerCase() : "";
+  const rowIncoming = normDept_(row[layout.incomingCol - 1]);
+  incomingDept = normDept_(incomingDept);
+  if (sheetName === "RTV" && account) {
+    // PULL OUT forms are saved with the tag "PULL OUT" in INCOMING
+    // DEPARTMENT. A department therefore sees rows addressed to it AND
+    // pull-outs it sent itself (outgoing dept = that department).
+    // Admin with the INCOMING DEPARTMENT box blank = every pull-out.
+    // Admin who typed/picked a department = exactly what that
+    // department's own user would see (same rule as a non-admin).
+    const adminAll = account.isAdmin && !incomingDept;
+    if (adminAll) return true;
+    const own = account.isAdmin
+      ? incomingDept
+      : normDept_(account.client);
+    const rowDept = normDept_(row[layout.deptCol - 1]);
     return !!own && (rowIncoming === own || (rowIncoming === "pull out" && rowDept === own));
   }
   return !incomingDept || rowIncoming === incomingDept;
@@ -2031,13 +2060,20 @@ function handleGetIncomingPendingForDepartment(e) {
         serial: row[serialCol - 1] || "",
         sku: row[layout.skuCol - 1] || "",
         department: row[layout.deptCol - 1] || "",
+        incomingDepartment: row[layout.incomingCol - 1] || "",
         description: row[layout.descCol - 1] || "",
         uom: row[layout.uomCol - 1] || "",
         qty: row[layout.qtyCol - 1] || ""
       });
     });
 
-    return createJsonResponse({ success: true, data: pending });
+    // "viewer" lets the Incoming screen show who the backend thinks is logged
+    // in (and whether that account counts as admin), for troubleshooting.
+    return createJsonResponse({
+      success: true,
+      data: pending,
+      viewer: { username: account.username, client: account.client, isAdmin: account.isAdmin }
+    });
   } catch (err) {
     return createJsonResponse({ success: false, error: err.toString() });
   }
@@ -2148,7 +2184,7 @@ function handleMarkIncomingReceived(data, user, client) {
       if (!account) return createJsonResponse({ success: false, error: "Unknown user." });
       const accountDepartment = String(account.client || "").trim().toLowerCase();
       const rowDepartment = rowIndex >= 2 && rowIndex <= lastRow
-        ? String(sourceSheet.getRange(rowIndex, layout.deptCol).getDisplayValue() || "").trim().toLowerCase()
+        ? String(sourceSheet.getRange(rowIndex, layout.incomingCol).getDisplayValue() || "").trim().toLowerCase()
         : "";
       const rowSerial = rowIndex >= 2 && rowIndex <= lastRow
         ? String(sourceSheet.getRange(rowIndex, columnLetterToIndex_("L")).getDisplayValue() || "").trim()
@@ -2165,7 +2201,7 @@ function handleMarkIncomingReceived(data, user, client) {
       if (!rowMatchesRequest && expectedSerial && expectedSku && lastRow >= 2) {
         const values = sourceSheet.getRange(2, 1, lastRow - 1, columnLetterToIndex_("L")).getDisplayValues();
         const matchIndex = values.findIndex(function(row) {
-          return (account.isAdmin || String(row[layout.deptCol - 1] || "").trim().toLowerCase() === accountDepartment) &&
+          return (account.isAdmin || String(row[layout.incomingCol - 1] || "").trim().toLowerCase() === accountDepartment) &&
             String(row[layout.skuCol - 1] || "").trim() === expectedSku &&
             String(row[columnLetterToIndex_("L") - 1] || "").trim() === expectedSerial;
         });
@@ -2175,8 +2211,8 @@ function handleMarkIncomingReceived(data, user, client) {
       if (!rowIndex || rowIndex < 2 || rowIndex > lastRow) {
         return createJsonResponse({ success: false, error: "The purchase order row is no longer available. Refresh Incoming Purchase Order and try again." });
       }
-      if (!account.isAdmin && String(sourceSheet.getRange(rowIndex, layout.deptCol).getDisplayValue() || "").trim().toLowerCase() !== accountDepartment) {
-        return createJsonResponse({ success: false, error: "You can only receive purchase orders for your own department." });
+      if (!account.isAdmin && String(sourceSheet.getRange(rowIndex, layout.incomingCol).getDisplayValue() || "").trim().toLowerCase() !== accountDepartment) {
+        return createJsonResponse({ success: false, error: "You can only receive purchase orders addressed to your own department (INCOMING DEPARTMENT)." });
       }
       const resolvedSerial = String(sourceSheet.getRange(rowIndex, columnLetterToIndex_("L")).getDisplayValue() || "").trim();
       const resolvedSku = String(sourceSheet.getRange(rowIndex, layout.skuCol).getDisplayValue() || "").trim();
