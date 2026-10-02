@@ -390,6 +390,12 @@ function doGet(e) {
           incomingDepartment = row[12] ? String(row[12]).trim().toLowerCase() : "";
         } else if (sheetName.toUpperCase() === RR_SHEET) {
           incomingDepartment = row[16] ? String(row[16]).trim().toLowerCase() : "";
+        } else if (sheetName.toUpperCase() === RR_ARCHIVE) {
+          // TRANSFERED sheet: INCOMING DEPARTMENT is column S (index 18).
+          incomingDepartment = row[18] ? String(row[18]).trim().toLowerCase() : "";
+        } else if (sheetName.toUpperCase() === TF_ARCHIVE) {
+          // RECEIVED sheet (transfer layout): INCOMING DEPARTMENT is column O (index 14).
+          incomingDepartment = row[14] ? String(row[14]).trim().toLowerCase() : "";
         }
 
         // Normal users see only their exact client.
@@ -410,6 +416,26 @@ function doGet(e) {
           const out = row.slice(0, 26);
           while (out.length < 26) out.push("");
           return out;
+        }
+        if (sheetName.toUpperCase() === TF_ARCHIVE) {
+          // TRANSFER HISTORY reads the RECEIVED sheet (transfer layout).
+          // Output order: R SERIAL NO. | A OUTGOING DEPT | B SKU | C DESCRIPTION |
+          // D UOM | E EXP DATE | F ONHAND | G TOTAL ONHAND | H COST | I SRP |
+          // J TRANSFER QTY | K EXP DATE | L RECEIVED QTY | N REMARKS |
+          // O INCOMING DEPT | P DATE RECEIVED
+          return [17, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 13, 14, 15].map(function (i) {
+            return row[i] === undefined || row[i] === null ? "" : row[i];
+          });
+        }
+        if (sheetName.toUpperCase() === RR_ARCHIVE) {
+          // REQUEST AND RELEASED HISTORY reads the TRANSFERED sheet.
+          // Output order: V SERIAL NO. | A OUTGOING DEPT | B SKU | C DESCRIPTION |
+          // D UOM | E EXP DATE | F ONHAND | G TOTAL ONHAND | H COST | I SRP |
+          // J TRANSFER QTY | O EXP DATE | P RECEIVED QTY | R REMARKS |
+          // S INCOMING DEPT | T DATE RECEIVED
+          return [21, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 14, 15, 17, 18, 19].map(function (i) {
+            return row[i] === undefined || row[i] === null ? "" : row[i];
+          });
         }
         if (sheetName === TF_SHEET) {
           // A..N (14) + OUTGOING REMARKS (S, idx 18) + INCOMING DEPT (O) + DATE (P)
@@ -1740,7 +1766,8 @@ const INCOMING_SHEET_LAYOUT = {
     writeBackStartCol: 15, // O - RETURN INFORMATION block
     incomingCol: 19,       // S
     dateCol: 20,           // T
-    statusCol: 21          // U
+    statusCol: 21,         // U
+    workflowStatusCol: 25  // Y - admin approval status (only RELEASED_TO_OUTGOING rows go to Incoming)
   },
   PURCHASE_ORDER: {
     sheet: 'P.O REQUEST',
@@ -1770,6 +1797,30 @@ function isSameCalendarDate(a, b) {
   return da.getFullYear() === db.getFullYear() &&
          da.getMonth() === db.getMonth() &&
          da.getDate() === db.getDate();
+}
+
+// Decides whether a source-sheet row is "incoming" for the caller.
+// PULL OUT forms are saved with the literal tag "PULL OUT" in INCOMING
+// DEPARTMENT (never the user's own client), so the normal
+// "rowIncoming === caller's client" test can never match them for a
+// non-admin. For RTV, a non-admin therefore sees:
+//   - rows addressed to their own client, AND
+//   - rows tagged "PULL OUT" that THEY sent (outgoing dept = their client).
+// Every other sheet, and admins, keep the exact old rule.
+function incomingRowMatches_(sheetName, row, layout, account, incomingDept) {
+  const rowIncoming = row[layout.incomingCol - 1] ? String(row[layout.incomingCol - 1]).trim().toLowerCase() : "";
+  if (sheetName === "RTV" && account && account.isAdmin) {
+    // The PULL OUT / GATE PASS screen locks INCOMING DEPARTMENT to the tag
+    // "PULL OUT", so an admin would otherwise only see rows saved with that
+    // exact tag. Admins see every approved pull-out.
+    return true;
+  }
+  if (sheetName === "RTV" && account && !account.isAdmin) {
+    const own = String(account.client || "").trim().toLowerCase();
+    const rowDept = row[layout.deptCol - 1] ? String(row[layout.deptCol - 1]).trim().toLowerCase() : "";
+    return !!own && (rowIncoming === own || (rowIncoming === "pull out" && rowDept === own));
+  }
+  return !incomingDept || rowIncoming === incomingDept;
 }
 
 function handleGetIncomingPending(e) {
@@ -1832,7 +1883,7 @@ function handleGetIncomingPending(e) {
 
       if (layout.workflowStatusCol && String(row[layout.workflowStatusCol - 1] || "").trim() !== "RELEASED_TO_OUTGOING") return;
       if (rowDept !== selectDept) return;
-      if (incomingDept && rowIncoming !== incomingDept) return; // blank = ALL (admins only)
+      if (!incomingRowMatches_(sheetName, row, layout, account, incomingDept)) return; // blank = ALL (admins only)
       if (formDate && !isSameCalendarDate(rowDate, formDate)) return;
       if (rowStatus !== "") return; // already RECEIVED / not blank
 
@@ -1903,7 +1954,7 @@ function handleGetIncomingPendingForDepartment(e) {
 
       if (approvalStatus !== "RELEASED_TO_OUTGOING") return;
       if (receivedStatus !== "") return;
-      if (incomingDept && rowIncoming !== incomingDept) return;
+      if (!incomingRowMatches_(sheetName, row, layout, account, incomingDept)) return;
 
       pending.push({
         rowIndex: index + 2,
@@ -1972,7 +2023,7 @@ function handleGetIncomingPendingCount(e) {
       const rowStatus = row[layout.statusCol - 1] ? String(row[layout.statusCol - 1]).trim() : "";
       if (layout.workflowStatusCol && String(row[layout.workflowStatusCol - 1] || "").trim() !== "RELEASED_TO_OUTGOING") return;
       if (rowStatus !== "") return; // already processed
-      if (incomingDept && rowIncoming !== incomingDept) return; // blank = ALL (admins only)
+      if (!incomingRowMatches_(sheetName, row, layout, account, incomingDept)) return; // blank = ALL (admins only)
       count++;
     });
 
@@ -2220,8 +2271,7 @@ function handleGetIncomingMessages(e) {
             if (rowStatus !== "") return; // already RECEIVED / processed
             if (layout.workflowStatusCol && String(row[layout.workflowStatusCol - 1] || "").trim() !== "RELEASED_TO_OUTGOING") return;
 
-            const rowIncoming = row[layout.incomingCol - 1] ? String(row[layout.incomingCol - 1]).trim().toLowerCase() : "";
-            if (incomingDept && rowIncoming !== incomingDept) return; // blank = ALL (admins only)
+            if (!incomingRowMatches_(key, row, layout, account, incomingDept)) return; // blank = ALL (admins only)
 
             const rowSender = key === "PURCHASE_ORDER"
               ? "COMMISSARY"

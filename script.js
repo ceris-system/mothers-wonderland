@@ -2730,6 +2730,9 @@ function openSummaryReportModal() {
 
     modal.style.display = 'flex';
     srHighlightActiveTab();
+    // Re-opening: show the last data we already hold right away while the
+    // fresh read runs in the background, instead of an empty panel.
+    if (srState.lastUpdated) srRenderActiveTab();
     srRefreshAll(true);
 
     if (srState.refreshTimer) clearInterval(srState.refreshTimer);
@@ -2758,8 +2761,31 @@ function srHighlightActiveTab() {
 
 // ---- data fetching ----
 
+// fetch() for the Summary Report reads: never served from the browser cache,
+// and gives up after 60s instead of hanging forever. A request that never
+// answered used to leave srState.loading stuck on true, which made the
+// REFRESH button (and the 60s auto-refresh) silently do nothing.
+function srFetch(url) {
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), 60000);
+    return fetch(url, { cache: 'no-store', signal: ctrl.signal }).finally(() => clearTimeout(timer));
+}
+
 async function srRefreshAll(showSpinner) {
-    if (srState.loading) return;
+    if (srState.loading) {
+        // A background (silent) refresh or a stuck one must never swallow a
+        // click on REFRESH: a manual click takes over once the running
+        // refresh is a few seconds old; younger than that, just say so.
+        const age = Date.now() - (srState.loadingSince || 0);
+        if (!showSpinner || age < 5000) {
+            const st = document.getElementById('srLastUpdated');
+            if (showSpinner && st) st.textContent = 'Already refreshing...';
+            return;
+        }
+    }
+    const runId = (srState.runId || 0) + 1;
+    srState.runId = runId;
+    srState.loadingSince = Date.now();
     srState.loading = true;
     const icon = document.getElementById('srRefreshIcon');
     if (icon && showSpinner) icon.classList.add('fa-spin');
@@ -2773,8 +2799,27 @@ async function srRefreshAll(showSpinner) {
     const progressWrap = document.getElementById('srRefreshProgressWrap');
     const progressFill = document.getElementById('srRefreshProgressFill');
     const progressLabel = document.getElementById('srRefreshProgressLabel');
-    const steps = [srFetchSalesAll, srFetchDailySalesAll, srFetchTopRankRanked, srFetchStockAll, srFetchHistoryList];
-    const totalSteps = steps.length + 1; // +1 for srSyncRecentHistory below
+    // The old TRANSFER-sheet fetch (srFetchSalesAll) re-read the ENTIRE request
+    // log on every open/refresh, but it is only a fallback for when the "sales"
+    // sheet has no rows, so it no longer runs up front (see below). The history
+    // list + last-month download are one chained step instead of running after
+    // everything else, so they overlap with the other reads.
+    const steps = [
+        { key: 'daily',   fn: srFetchDailySalesAll },
+        { key: 'topRank', fn: srFetchTopRankRanked },
+        { key: 'stock',   fn: srFetchStockAll },
+        { key: 'history', fn: srFetchHistoryAndRecent }
+    ];
+    const totalSteps = steps.length;
+    // Which reads each tab actually draws from — used to paint the active tab
+    // as soon as ITS data arrives instead of waiting for every read to finish.
+    const stockUses = ['stock'];
+    const tabUses = {
+        DAILY_SALES: ['daily', 'history'], TOP_RANK: ['topRank', 'daily', 'history'],
+        MONTH_COMPARE: ['daily', 'history'], HISTORICAL_DATA: ['daily', 'history'],
+        CRITICAL_STOCK: stockUses, OUT_OF_STOCK: stockUses, STOCK_AVAILABILITY: stockUses,
+        NEAR_EXPIRATION: stockUses, EXPIRATION_MONITORING: stockUses, AGING: stockUses
+    };
     let completedSteps = 0;
     const bumpProgress = () => {
         completedSteps++;
@@ -2794,9 +2839,15 @@ async function srRefreshAll(showSpinner) {
         // Each fetch reports in via bumpProgress() as soon as IT resolves,
         // while they all still run concurrently \u2014 so the bar reflects how
         // many of the 6 refresh steps are actually done, not a fake timer.
-        await Promise.all(steps.map(fn => fn().then(bumpProgress)));
-        await srSyncRecentHistory();
-        bumpProgress();
+        await Promise.all(steps.map(st => st.fn().then(() => {
+            bumpProgress();
+            // Foreground refresh only: paint the active tab as soon as one of
+            // its own reads lands. The silent 60s refresh renders once at the
+            // end so the table doesn't jump while someone is scrolling it.
+            if (showSpinner && (tabUses[srState.activeTab] || []).includes(st.key)) srRenderActiveTab();
+        })));
+        // Fallback only: if the "sales" sheet gave no rows, read the request log.
+        if (!srState.dailySalesRows.length) await srFetchSalesAll();
         srState.lastUpdated = new Date();
         if (statusEl) statusEl.textContent = srState.lastUpdated.toLocaleTimeString();
         srRenderActiveTab();
@@ -2804,20 +2855,25 @@ async function srRefreshAll(showSpinner) {
         console.error('[Summary Report] refresh failed:', err);
         if (statusEl) statusEl.textContent = 'Failed to refresh \u2014 showing last known data.';
     } finally {
-        srState.loading = false;
-        if (icon) icon.classList.remove('fa-spin');
-        if (showSpinner && progressWrap) {
+        if (srState.runId === runId) srState.loading = false;
+        if (icon && srState.runId === runId) icon.classList.remove('fa-spin');
+        if (showSpinner && progressWrap && srState.runId === runId) {
             // Brief pause at 100% so the bar doesn't just vanish mid-fill.
             setTimeout(() => { progressWrap.style.display = 'none'; }, 450);
         }
     }
 }
 
+async function srFetchHistoryAndRecent() {
+    await srFetchHistoryList();
+    await srSyncRecentHistory();
+}
+
 async function srFetchSalesAll() {
     const username = window.sessionUser || localStorage.getItem('activeUser') || '';
     try {
         const url = `${window.API}?action=getFilteredHistory&sheet=TRANSFER&department=&user=${encodeURIComponent(username)}&token=${encodeURIComponent(window.API_TOKEN)}`;
-        const res = await fetch(url);
+        const res = await srFetch(url);
         const json = await res.json();
         srState.salesRows = (json.success && json.data) ? json.data : [];
     } catch (e) {
@@ -2928,20 +2984,20 @@ function srDailySalesErrorNote() {
 async function srFetchDailySalesAll() {
     try {
         const url = `${window.API}?sheet=${encodeURIComponent(SR_DS_SHEET_NAME)}&range=${encodeURIComponent(SR_DS_RANGE)}&token=${encodeURIComponent(window.API_TOKEN)}`;
-        const res = await fetch(url);
+        // Optional: the department names in DF3:DF (helps find the department
+        // column). Requested at the same time as the main grid, not after it.
+        const lurl = `${window.API}?sheet=${encodeURIComponent(SR_DS_SHEET_NAME)}&range=${encodeURIComponent(SR_DS_DEPT_LIST_RANGE)}&token=${encodeURIComponent(window.API_TOKEN)}`;
+        const listPromise = Number.isInteger(SR_DS.DEPT)
+            ? Promise.resolve([])   // department column is forced, the list isn't needed
+            : srFetch(lurl).then(r => r.json()).then(lj => (lj.success && Array.isArray(lj.values)) ? lj.values : []).catch(() => []);
+        const res = await srFetch(url);
         const json = await res.json();
         if (!json.success || !Array.isArray(json.values)) {
             srState.dailySalesRows = [];
             srState.dailySalesError = json.error || json.message || `Could not read the "${SR_DS_SHEET_NAME}" sheet.`;
             return;
         }
-        // Optional: the department names in DF3:DF (helps find the department column).
-        let listValues = [];
-        try {
-            const lurl = `${window.API}?sheet=${encodeURIComponent(SR_DS_SHEET_NAME)}&range=${encodeURIComponent(SR_DS_DEPT_LIST_RANGE)}&token=${encodeURIComponent(window.API_TOKEN)}`;
-            const lj = await (await fetch(lurl)).json();
-            if (lj.success && Array.isArray(lj.values)) listValues = lj.values;
-        } catch (e) { /* optional, ignore */ }
+        const listValues = await listPromise;
         srState.dailySalesRows = srParseDailySalesSheet(json.values, listValues);
         srState.dailySalesError = null;
     } catch (e) {
@@ -2957,7 +3013,7 @@ async function srFetchDailySalesAll() {
 async function srFetchTopRankRanked() {
     try {
         const url = `${window.API}?sheet=${encodeURIComponent(SR_DS_SHEET_NAME)}&range=${encodeURIComponent(SR_TR_RANGE)}&token=${encodeURIComponent(window.API_TOKEN)}`;
-        const json = await (await fetch(url)).json();
+        const json = await (await srFetch(url)).json();
         if (!json.success || !Array.isArray(json.values)) {
             srState.topRankDeptRows = [];
             srState.topRankProductRows = [];
@@ -2989,7 +3045,7 @@ async function srFetchTopRankRanked() {
 async function srFetchStockAll() {
     try {
         const url = `${window.API}?sheet=${encodeURIComponent(SR_STOCK_SHEET_NAME)}&range=${encodeURIComponent(SR_STOCK_RANGE)}&token=${encodeURIComponent(window.API_TOKEN)}`;
-        const json = await (await fetch(url)).json();
+        const json = await (await srFetch(url)).json();
         if (!json.success || !Array.isArray(json.values)) {
             srState.stockRows = [];
             srState.stockError = json.error || json.message || `Could not read the "${SR_STOCK_SHEET_NAME}" sheet.`;
@@ -3856,7 +3912,7 @@ function srHistRowsFromServer(rows) {
 async function srFetchHistoryList() {
     try {
         const url = `${window.API}?action=historyList&token=${encodeURIComponent(window.API_TOKEN)}`;
-        const json = await (await fetch(url)).json();
+        const json = await (await srFetch(url)).json();
         if (!json.success || !Array.isArray(json.months)) {
             srState.historyError = json.error || 'The server did not return the saved months.';
             return;
@@ -3878,7 +3934,7 @@ async function srLoadHistoryMonth(key, force) {
     srState.historyLoading[key] = true;
     try {
         const url = `${window.API}?action=historyGet&month=${encodeURIComponent(key)}&token=${encodeURIComponent(window.API_TOKEN)}`;
-        const json = await (await fetch(url)).json();
+        const json = await (await srFetch(url)).json();
         if (!json.success) { srState.historyError = json.error || `Could not load ${key}.`; return false; }
         srState.historyByMonth[key] = srHistRowsFromServer(json.rows);
         srState.historySavedAt[key] = meta.savedAt;
@@ -6091,6 +6147,10 @@ function openHistoryModal(categoryKey) {
             <button id="historyRefreshBtn" style="padding: 10px 20px; background: rgba(0, 219, 255, 0.15); border: 1px solid #00dbff; color: #00dbff; font-weight: bold; border-radius: 4px; cursor: pointer; display: flex; align-items: center; gap: 6px; height: 40px;">
               <i class="fa-solid fa-rotate-right"></i> REFRESH
             </button>
+
+            <button id="historyPendingBtn" onclick="openPendingPoModal()" style="display: none; padding: 10px 20px; background: rgba(255, 176, 32, 0.15); border: 1px solid #ffb020; color: #ffb020; font-weight: bold; border-radius: 4px; cursor: pointer; align-items: center; gap: 6px; height: 40px;">
+              <i class="fa-solid fa-hourglass-half"></i> PENDING
+            </button>
             
             <button id="historyPrintBtn" onclick="printOnly('historyPrintableArea')" style="padding: 10px 20px; background: rgba(0, 255, 136, 0.2); border: 1px solid #00ff88; color: #00ff88; font-weight: bold; border-radius: 4px; cursor: pointer; display: flex; align-items: center; gap: 6px; height: 40px;">
               <i class="fa-solid fa-print"></i> PRINT
@@ -6199,6 +6259,9 @@ function openHistoryModal(categoryKey) {
       fetchHistoryData(true);
     };
   }
+
+  const pendingBtn = document.getElementById('historyPendingBtn');
+  if (pendingBtn) pendingBtn.style.display = categoryKey === 'PURCHASE_ORDER' ? 'flex' : 'none';
 
   modal.style.display = 'flex';
   
@@ -6387,6 +6450,153 @@ function renderHistoryRows(rows, headers, hiddenColumns) {
       }).join('')}
     </tr>`;
   }).join('');
+}
+
+// ==========================================
+// PURCHASE ORDER — PENDING MODAL
+// Opened by the PENDING button next to REFRESH in PURCHASE ORDER HISTORY.
+// Reads the "P.O REQUEST" sheet through getFilteredHistory; the backend
+// returns the 12 columns below already ordered (and scoped to the user's
+// client for non-admins), so row[i] here matches PENDING_PO_HEADERS[i]:
+//   L P.O NUMBER | A OUTGOING DEPT | B SKU | C DESCRIPTION | D UOM |
+//   G TOTAL ONHAND | H COST | I SRP | J P.O QTY | M INCOMING DEPT |
+//   Q P.O DATE | O STATUS
+// ==========================================
+let cachedPendingPoRows = [];
+
+const PENDING_PO_HEADERS = [
+  'P.O NUMBER', 'OUTGOING DEPARTMENT', 'SKU CODE', 'PRODUCT DESCRIPTION', 'UOM',
+  'TOTAL ONHAND', 'COST', 'SRP', 'P.O QTY', 'INCOMING DEPARTMENT', 'P.O DATE', 'STATUS'
+];
+const PENDING_PO_LEFT_ALIGNED = ['OUTGOING DEPARTMENT', 'SKU CODE', 'PRODUCT DESCRIPTION', 'INCOMING DEPARTMENT'];
+const PENDING_PO_DATE_IDX = 10;
+
+function openPendingPoModal() {
+  let modal = document.getElementById('pendingPoModal');
+
+  if (!modal) {
+    const modalHTML = `
+      <div id="pendingPoModal" style="display: flex; position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; background: rgba(0, 0, 0, 0.85); z-index: 10003; justify-content: center; align-items: center;">
+        <div id="pendingPoPrintableArea" style="background: rgba(18, 24, 38, 0.98); border: 1.5px solid rgba(255, 176, 32, 0.45); box-shadow: 0 0 25px rgba(255, 176, 32, 0.2); padding: 25px; width: 95vw; height: 90vh; color: #fff; font-family: 'Roboto Mono', monospace; display: flex; flex-direction: column; box-sizing: border-box; position: relative;">
+
+          <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid rgba(255, 176, 32, 0.3); padding-bottom: 12px; margin-bottom: 15px;">
+            <h2 style="color: #ffb020; margin: 0; font-size: 1.3rem; letter-spacing: 1px;">PENDING PURCHASE ORDERS</h2>
+            <button class="app-close-btn no-print" onclick="document.getElementById('pendingPoModal').style.display='none'" title="Close"><i class="fa-solid fa-xmark"></i></button>
+          </div>
+
+          <div class="no-print" style="display: flex; gap: 15px; margin-bottom: 15px; align-items: flex-end;">
+            <div style="display: flex; flex-direction: column; flex: 1; gap: 6px;">
+              <label for="pendingPoSearchInput" style="color: #ffb020; font-size: 0.75rem; font-weight: bold; letter-spacing: 1px; text-transform: uppercase;">SEARCH TABLE</label>
+              <input type="text" id="pendingPoSearchInput" oninput="filterPendingPoRows()" placeholder="Search any column..." style="width: 100%; padding: 10px 14px; border-radius: 4px; border: 1px solid rgba(255, 176, 32, 0.4); background: #0c101a; color: #fff; outline: none; box-sizing: border-box; font-family: inherit; font-size: 0.85rem;" autocomplete="off">
+            </div>
+
+            <button id="pendingPoRefreshBtn" onclick="fetchPendingPoData()" style="padding: 10px 20px; background: rgba(0, 219, 255, 0.15); border: 1px solid #00dbff; color: #00dbff; font-weight: bold; border-radius: 4px; cursor: pointer; display: flex; align-items: center; gap: 6px; height: 40px;">
+              <i class="fa-solid fa-rotate-right"></i> REFRESH
+            </button>
+
+            <button onclick="printOnly('pendingPoPrintableArea')" style="padding: 10px 20px; background: rgba(0, 255, 136, 0.2); border: 1px solid #00ff88; color: #00ff88; font-weight: bold; border-radius: 4px; cursor: pointer; display: flex; align-items: center; gap: 6px; height: 40px;">
+              <i class="fa-solid fa-print"></i> PRINT
+            </button>
+          </div>
+
+          <div style="flex: 1; overflow: auto; border: 1px solid rgba(255, 255, 255, 0.1); background: rgba(0, 0, 0, 0.4);">
+            <table style="width: 100%; border-collapse: collapse; font-size: 0.8rem; white-space: nowrap;">
+              <thead style="position: sticky; top: 0; background: rgba(18, 24, 38, 1); color: #ffb020;">
+                <tr>${PENDING_PO_HEADERS.map(h => `<th style="padding: 10px; border: 1px solid rgba(255,176,32,0.25); text-align: ${PENDING_PO_LEFT_ALIGNED.includes(h) ? 'left' : 'center'};">${h}</th>`).join('')}</tr>
+              </thead>
+              <tbody id="pendingPoTableBody"></tbody>
+            </table>
+          </div>
+
+        </div>
+      </div>`;
+    document.body.insertAdjacentHTML('beforeend', modalHTML);
+    modal = document.getElementById('pendingPoModal');
+  }
+
+  const searchInput = document.getElementById('pendingPoSearchInput');
+  if (searchInput) searchInput.value = '';
+
+  modal.style.display = 'flex';
+  fetchPendingPoData();
+}
+
+async function fetchPendingPoData() {
+  const tableBody = document.getElementById('pendingPoTableBody');
+  const colCount = PENDING_PO_HEADERS.length;
+  const scope = getSessionScope();
+
+  if (tableBody) {
+    tableBody.innerHTML = `<tr><td colspan="${colCount}" style="text-align: center; padding: 30px; color: #ffb020;"><i class="fa-solid fa-spinner fa-spin"></i> Loading pending purchase orders...</td></tr>`;
+  }
+
+  try {
+    const username = window.sessionUser || localStorage.getItem('activeUser') || '';
+    // Non-admins: the backend overrides this with their own client anyway.
+    const dept = scope.isAdmin ? '' : (scope.client || '');
+    const url = `${window.API}?action=getFilteredHistory&sheet=${encodeURIComponent('P.O REQUEST')}&department=${encodeURIComponent(dept)}&user=${encodeURIComponent(username)}&token=${encodeURIComponent(window.API_TOKEN)}`;
+    const response = await fetch(url);
+    const result = await response.json();
+
+    if (!result.success || !result.data || result.data.length === 0) {
+      cachedPendingPoRows = [];
+      if (tableBody) {
+        tableBody.innerHTML = `<tr><td colspan="${colCount}" style="text-align: center; padding: 30px; color: #ff4d4d;">No pending purchase orders found.</td></tr>`;
+      }
+      return;
+    }
+
+    cachedPendingPoRows = result.data
+      .filter(row => Array.isArray(row) && row.some(c => String(c || '').trim() !== ''))
+      .map(row => {
+        const out = row.slice();
+        out[PENDING_PO_DATE_IDX] = formatHistoryDate(out[PENDING_PO_DATE_IDX]);
+        return out;
+      });
+    filterPendingPoRows();
+  } catch (err) {
+    console.error('Error fetching pending purchase orders:', err);
+    if (tableBody) {
+      tableBody.innerHTML = `<tr><td colspan="${colCount}" style="text-align: center; padding: 30px; color: #ff4d4d;">Failed to retrieve pending purchase orders.</td></tr>`;
+    }
+  }
+}
+
+function filterPendingPoRows() {
+  const query = document.getElementById('pendingPoSearchInput')?.value.trim().toLowerCase() || '';
+  const scope = getSessionScope();
+  const client = (scope.client || '').toLowerCase();
+
+  const filtered = cachedPendingPoRows.filter(row => {
+    // Backend already scopes non-admins; second check so cached data
+    // can't be widened from the browser.
+    if (!scope.isAdmin) {
+      const outgoing = String(row[1] || '').trim().toLowerCase();
+      const incoming = String(row[9] || '').trim().toLowerCase();
+      if (!client || (outgoing !== client && incoming !== client)) return false;
+    }
+    return !query || row.some(cell => String(cell || '').toLowerCase().includes(query));
+  });
+
+  renderPendingPoRows(filtered);
+}
+
+function renderPendingPoRows(rows) {
+  const tableBody = document.getElementById('pendingPoTableBody');
+  if (!tableBody) return;
+
+  if (!rows || rows.length === 0) {
+    tableBody.innerHTML = `<tr><td colspan="${PENDING_PO_HEADERS.length}" style="text-align: center; padding: 30px; color: #ff4d4d;">No matching records found.</td></tr>`;
+    return;
+  }
+
+  tableBody.innerHTML = rows.map(row => `<tr style="border-bottom: 1px solid rgba(255, 255, 255, 0.05);">
+    ${PENDING_PO_HEADERS.map((h, i) => {
+      const val = row[i] !== undefined && row[i] !== null ? row[i] : '';
+      const align = PENDING_PO_LEFT_ALIGNED.includes(h) ? 'left' : 'center';
+      return `<td style="padding: 8px 10px; border-right: 1px solid rgba(255,255,255,0.05); text-align: ${align};">${escapeHtml(val)}</td>`;
+    }).join('')}
+  </tr>`).join('');
 }
 
 // ==========================================
