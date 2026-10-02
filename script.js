@@ -6460,7 +6460,7 @@ function renderHistoryRows(rows, headers, hiddenColumns) {
 // client for non-admins), so row[i] here matches PENDING_PO_HEADERS[i]:
 //   L P.O NUMBER | A OUTGOING DEPT | B SKU | C DESCRIPTION | D UOM |
 //   G TOTAL ONHAND | H COST | I SRP | J P.O QTY | M INCOMING DEPT |
-//   Q P.O DATE | O STATUS
+//   K P.O DATE | O STATUS
 // ==========================================
 let cachedPendingPoRows = [];
 
@@ -6470,6 +6470,8 @@ const PENDING_PO_HEADERS = [
 ];
 const PENDING_PO_LEFT_ALIGNED = ['OUTGOING DEPARTMENT', 'SKU CODE', 'PRODUCT DESCRIPTION', 'INCOMING DEPARTMENT'];
 const PENDING_PO_DATE_IDX = 10;
+const PENDING_PO_STATUS_IDX = 11;
+const PENDING_PO_STATUS_VALUE = 'PENDING_ADMIN_APPROVAL';
 
 function openPendingPoModal() {
   let modal = document.getElementById('pendingPoModal');
@@ -6541,18 +6543,25 @@ async function fetchPendingPoData() {
     if (!result.success || !result.data || result.data.length === 0) {
       cachedPendingPoRows = [];
       if (tableBody) {
-        tableBody.innerHTML = `<tr><td colspan="${colCount}" style="text-align: center; padding: 30px; color: #ff4d4d;">No pending purchase orders found.</td></tr>`;
+        tableBody.innerHTML = `<tr><td colspan="${colCount}" style="text-align: center; padding: 30px; color: #ff4d4d;">No purchase orders pending admin approval.</td></tr>`;
       }
       return;
     }
 
+    // Only rows whose STATUS (col O, last entry of the mapped row) contains PENDING_ADMIN_APPROVAL.
     cachedPendingPoRows = result.data
-      .filter(row => Array.isArray(row) && row.some(c => String(c || '').trim() !== ''))
+      .filter(row => Array.isArray(row) && String(row[PENDING_PO_STATUS_IDX] || '').toUpperCase().includes(PENDING_PO_STATUS_VALUE))
       .map(row => {
         const out = row.slice();
         out[PENDING_PO_DATE_IDX] = formatHistoryDate(out[PENDING_PO_DATE_IDX]);
         return out;
       });
+    if (cachedPendingPoRows.length === 0) {
+      if (tableBody) {
+        tableBody.innerHTML = `<tr><td colspan="${colCount}" style="text-align: center; padding: 30px; color: #ff4d4d;">No purchase orders pending admin approval.</td></tr>`;
+      }
+      return;
+    }
     filterPendingPoRows();
   } catch (err) {
     console.error('Error fetching pending purchase orders:', err);
