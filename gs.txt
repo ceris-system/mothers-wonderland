@@ -396,6 +396,9 @@ function doGet(e) {
         } else if (sheetName.toUpperCase() === TF_ARCHIVE) {
           // RECEIVED sheet (transfer layout): INCOMING DEPARTMENT is column O (index 14).
           incomingDepartment = row[14] ? String(row[14]).trim().toLowerCase() : "";
+        } else if (sheetName.toUpperCase() === "P.O REQUEST") {
+          // P.O REQUEST: INCOMING DEPARTMENT is column M (index 12).
+          incomingDepartment = row[12] ? String(row[12]).trim().toLowerCase() : "";
         }
 
         // Normal users see only their exact client.
@@ -409,7 +412,22 @@ function doGet(e) {
       // appended at the end, so INCOMING DEPARTMENT / DATE stay the LAST
       // two entries of the mapped row — several front-end functions
       // (row[row.length-2] / row[row.length-1]) depend on that position.
-      const mappedData = filteredRows.map(row => {
+      // P.O REQUEST (PENDING modal): only rows whose STATUS (col O, idx 14)
+      // contains PENDING_ADMIN_APPROVAL.
+      const rowsToMap = sheetName.toUpperCase() === "P.O REQUEST"
+        ? filteredRows.filter(function (r) { return String(r[14] || "").toUpperCase().indexOf("PENDING_ADMIN_APPROVAL") !== -1; })
+        : filteredRows;
+
+      const mappedData = rowsToMap.map(row => {
+        if (sheetName.toUpperCase() === "P.O REQUEST") {
+          // PENDING P.O modal. Output order:
+          // L P.O NUMBER | A OUTGOING DEPT | B SKU | C DESCRIPTION | D UOM |
+          // G TOTAL ONHAND | H COST | I SRP | J P.O QTY | M INCOMING DEPT |
+          // K P.O DATE | O STATUS
+          return [11, 0, 1, 2, 3, 6, 7, 8, 9, 12, 10, 14].map(function (i) {
+            return row[i] === undefined || row[i] === null ? "" : row[i];
+          });
+        }
         if (sheetName.toUpperCase() === "P.O RECEIVED") {
           // Keep the sheet's real column positions: A..M (0-12), Y = P.O STATUS
           // (idx 24), Z = DATE RECEIVED (idx 25). Pad to 26 so indices line up.
@@ -2112,6 +2130,24 @@ function handleMarkIncomingReceived(data, user, client) {
       }
     } else if (rowIndex > lastRow) {
       return createJsonResponse({ success: false, error: "Row is out of range." });
+    } else {
+      // OWNERSHIP GUARD (REQUEST / TRANSFER / RTV): a department can only
+      // receive items addressed to ITS OWN client. Only admins may receive
+      // for any department. The fetch (getIncomingPending) already scopes
+      // the table, but this closes the gap where a row number could be
+      // posted directly for someone else's item.
+      const receiver = getUserAccount(user);
+      if (!receiver) return createJsonResponse({ success: false, error: "Unknown user." });
+      if (!receiver.isAdmin) {
+        const ownClient = String(receiver.client || "").trim().toLowerCase();
+        if (!ownClient) {
+          return createJsonResponse({ success: false, error: "No client is associated with your account." });
+        }
+        const targetRow = sourceSheet.getRange(rowIndex, 1, 1, layout.statusCol).getDisplayValues()[0];
+        if (!incomingRowMatches_(sheetName, targetRow, layout, receiver, ownClient)) {
+          return createJsonResponse({ success: false, error: "You can only receive items addressed to your own department." });
+        }
+      }
     }
 
     const destSheet = receiveCfg.destSheet ? ss.getSheetByName(receiveCfg.destSheet) : null;
