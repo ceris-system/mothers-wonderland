@@ -449,7 +449,8 @@ function doGet(e) {
           // D UOM | E EXP DATE | F ONHAND | G TOTAL ONHAND | H COST | I SRP |
           // J TRANSFER QTY | K EXP DATE | L RECEIVED QTY | N REMARKS |
           // O INCOMING DEPT | P DATE RECEIVED
-          return [17, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 13, 14, 15].map(function (i) {
+          // + P (idx 15) again at the end as DATE REQUEST.
+          return [17, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 13, 14, 15, 15].map(function (i) {
             return row[i] === undefined || row[i] === null ? "" : row[i];
           });
         }
@@ -459,7 +460,8 @@ function doGet(e) {
           // D UOM | E EXP DATE | F ONHAND | G TOTAL ONHAND | H COST | I SRP |
           // J TRANSFER QTY | O EXP DATE | P RECEIVED QTY | R REMARKS |
           // S INCOMING DEPT | T DATE RECEIVED
-          return [21, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 14, 15, 17, 18, 19].map(function (i) {
+          // + T (idx 19) again at the end as DATE REQUEST.
+          return [21, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 14, 15, 17, 18, 19, 19].map(function (i) {
             return row[i] === undefined || row[i] === null ? "" : row[i];
           });
         }
@@ -468,7 +470,9 @@ function doGet(e) {
           return row.slice(0, 14).concat([row[18] || "", row[14], row[15]]);
         } else {
           // A..R (18) + OUTGOING REMARKS (W, idx 22) + INCOMING DEPT (S) + DATE (T)
-          return row.slice(0, 18).concat([row[22] || "", row[18], row[19]]);
+          const base = row.slice(0, 18).concat([row[22] || "", row[18], row[19]]);
+          // RTV (pull out / RTV history): DATE REQUEST = column T (idx 19).
+          return sheetName.toUpperCase() === "RTV" ? base.concat([row[19] || ""]) : base;
         }
       });
 
@@ -1846,12 +1850,16 @@ function incomingSerialIdx_(sheetName) {
   return key ? columnLetterToIndex_(WORKFLOW_CONFIG[key].serialCol) : 0;
 }
 
+// Set to false if forms created by an ADMIN account should NOT be visible
+// to the department they are addressed to.
+const INCOMING_ALLOW_ADMIN_CREATED_ = true;
+
 function makeIncomingCreatorCheck_(ss, sheetName, account) {
   if (!account || account.isAdmin || sheetName === "PURCHASE_ORDER") {
     return function () { return true; };
   }
   const formKey = { REQUEST: "REQUEST_RELEASED", TRANSFER: "TRANSFER", RTV: "PULLOUT" }[sheetName];
-  const own = String(account.client || "").trim().toLowerCase();
+  const own = normDept_(account.client);
   const me = String(account.username || "").trim().toLowerCase();
   const creators = {}; // serial (lowercase) -> submitting username
   const notif = ss.getSheetByName(WORKFLOW_NOTIF_SHEET);
@@ -1863,17 +1871,25 @@ function makeIncomingCreatorCheck_(ss, sheetName, account) {
       if (s && !(s in creators)) creators[s] = String(r[7] || "").trim();
     });
   }
-  const deptCache = {};
-  return function (serial) {
+  const acctCache = {};
+  // outgoingDept = the row's source/outgoing department. The row is already
+  // known to be addressed to this user's department (incomingRowMatches_),
+  // so the creator may legitimately be:
+  //   - the user themself or anyone in their department (REQUEST forms),
+  //   - anyone in the row's OUTGOING department (TRANSFER / PULL OUT forms:
+  //     the sender creates the form, the incoming department receives it),
+  //   - an admin account, if INCOMING_ALLOW_ADMIN_CREATED_ is true.
+  return function (serial, outgoingDept) {
     const s = String(serial || "").trim().toLowerCase();
     if (!own || !s || !creators[s]) return false;
     const actor = creators[s];
     if (actor.toLowerCase() === me) return true;
-    if (!(actor in deptCache)) {
-      const acc = getUserAccount(actor);
-      deptCache[actor] = acc ? String(acc.client || "").trim().toLowerCase() : "";
-    }
-    return deptCache[actor] === own;
+    if (!(actor in acctCache)) acctCache[actor] = getUserAccount(actor);
+    const acc = acctCache[actor];
+    if (!acc) return false;
+    if (acc.isAdmin) return INCOMING_ALLOW_ADMIN_CREATED_;
+    const actorDept = normDept_(acc.client);
+    return actorDept === own || (!!outgoingDept && actorDept === normDept_(outgoingDept));
   };
 }
 
@@ -1979,7 +1995,7 @@ function handleGetIncomingPending(e) {
       if (layout.workflowStatusCol && String(row[layout.workflowStatusCol - 1] || "").trim() !== "RELEASED_TO_OUTGOING") return;
       if (rowDept !== selectDept) return;
       if (!incomingRowMatches_(sheetName, row, layout, account, incomingDept)) return; // blank = ALL (admins only)
-      if (!creatorOk(row[serialIdx - 1])) return; // non-admins: only forms their own department created
+      if (!creatorOk(row[serialIdx - 1], row[layout.deptCol - 1])) return; // non-admins: only forms their own department created
       if (formDate && !isSameCalendarDate(rowDate, formDate)) return;
       if (rowStatus !== "") return; // already RECEIVED / not blank
 
@@ -2053,7 +2069,7 @@ function handleGetIncomingPendingForDepartment(e) {
       if (approvalStatus !== "RELEASED_TO_OUTGOING") return;
       if (receivedStatus !== "") return;
       if (!incomingRowMatches_(sheetName, row, layout, account, incomingDept)) return;
-      if (!creatorOk(row[serialIdx - 1])) return; // non-admins: only forms their own department created
+      if (!creatorOk(row[serialIdx - 1], row[layout.deptCol - 1])) return; // non-admins: only forms their own department created
 
       pending.push({
         rowIndex: index + 2,
@@ -2132,7 +2148,7 @@ function handleGetIncomingPendingCount(e) {
       if (layout.workflowStatusCol && String(row[layout.workflowStatusCol - 1] || "").trim() !== "RELEASED_TO_OUTGOING") return;
       if (rowStatus !== "") return; // already processed
       if (!incomingRowMatches_(sheetName, row, layout, account, incomingDept)) return; // blank = ALL (admins only)
-      if (!creatorOk(row[serialIdx - 1])) return; // non-admins: only forms their own department created
+      if (!creatorOk(row[serialIdx - 1], row[layout.deptCol - 1])) return; // non-admins: only forms their own department created
       count++;
     });
 
@@ -2239,7 +2255,7 @@ function handleMarkIncomingReceived(data, user, client) {
         if (!incomingRowMatches_(sheetName, targetRow, layout, receiver, ownClient)) {
           return createJsonResponse({ success: false, error: "You can only receive items addressed to your own department." });
         }
-        if (!makeIncomingCreatorCheck_(ss, sheetName, receiver)(targetRow[serialIdx - 1])) {
+        if (!makeIncomingCreatorCheck_(ss, sheetName, receiver)(targetRow[serialIdx - 1], targetRow[layout.deptCol - 1])) {
           return createJsonResponse({ success: false, error: "You can only receive forms created by your own department." });
         }
       }
@@ -2405,7 +2421,7 @@ function handleGetIncomingMessages(e) {
             if (layout.workflowStatusCol && String(row[layout.workflowStatusCol - 1] || "").trim() !== "RELEASED_TO_OUTGOING") return;
 
             if (!incomingRowMatches_(key, row, layout, account, incomingDept)) return; // blank = ALL (admins only)
-            if (!creatorOk(row[serialIdx - 1])) return; // non-admins: only forms their own department created
+            if (!creatorOk(row[serialIdx - 1], row[layout.deptCol - 1])) return; // non-admins: only forms their own department created
 
             const rowSender = key === "PURCHASE_ORDER"
               ? "COMMISSARY"
