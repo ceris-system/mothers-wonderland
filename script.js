@@ -5248,6 +5248,55 @@ function renderProductTable(products) {
     });
 }
 
+// ==========================================
+// PURCHASE ORDER — SUPPLIER dropdown (DD sheet, column B1:B)
+// ==========================================
+let poSupplierCache = null;
+let poSupplierPromise = null;
+
+function loadPoSuppliers() {
+    if (poSupplierCache) return Promise.resolve(poSupplierCache);
+    if (poSupplierPromise) return poSupplierPromise;
+    if (!window.API) return Promise.resolve([]);
+    poSupplierPromise = fetch(`${window.API}?action=getSupplierList&token=${encodeURIComponent(window.API_TOKEN)}`)
+        .then(r => r.json())
+        .then(res => {
+            if (res && res.success && Array.isArray(res.data)) {
+                poSupplierCache = res.data;
+                return poSupplierCache;
+            }
+            throw new Error((res && (res.error || res.message)) || 'Failed to load suppliers.');
+        })
+        .catch(err => {
+            console.error('Supplier list error:', err);
+            return [];
+        })
+        .finally(() => { poSupplierPromise = null; });
+    return poSupplierPromise;
+}
+
+function buildSupplierOptions(selected) {
+    const list = (poSupplierCache || []).slice();
+    if (selected && list.indexOf(selected) === -1) list.unshift(selected);
+    return '<option value=""></option>' + list.map(n =>
+        `<option value="${escapeHtml(n)}"${n === selected ? ' selected' : ''}>${escapeHtml(n)}</option>`
+    ).join('');
+}
+
+// Fills every supplier dropdown currently on the page once the list arrives.
+async function refreshPoSupplierSelects() {
+    await loadPoSuppliers();
+    document.querySelectorAll('select.po-supplier').forEach(sel => {
+        sel.innerHTML = buildSupplierOptions(sel.value || sel.getAttribute('data-selected') || '');
+    });
+}
+
+function poSupplierCellHtml(tdStyle, selected) {
+    return `<td style="${tdStyle}">
+                <select class="po-supplier" data-selected="${escapeHtml(selected || '')}" aria-label="Supplier" style="width: 100%; border: none; border-radius: 6px; padding: 4px 6px; font-family: inherit; font-size: 0.78rem; outline: none; box-sizing: border-box; background: #fff;">${buildSupplierOptions(selected || '')}</select>
+            </td>`;
+}
+
 function addSelectedProducts() {
     const selectedCheckboxes = document.querySelectorAll('.product-row-checkbox:checked');
     if (selectedCheckboxes.length === 0) {
@@ -5304,11 +5353,13 @@ function addSelectedProducts() {
                     <button type="button" class="no-print" onclick="removeTransferRow('${rowId}')" title="Remove Row" aria-label="Remove ${escapeHtml(item.description)}" style="flex: 0 0 auto; background: transparent; border: none; color: #ff4d4d; cursor: pointer; font-size: 1.1rem; line-height: 1; padding: 2px 5px;">✕</button>
                 </div>
             </td>
+            ${tableBody.id === 'poTableBody' ? poSupplierCellHtml(tdStyle, '') : ''}
         `;
 
         tableBody.appendChild(tr);
     });
 
+    if (tableBody.id === 'poTableBody') refreshPoSupplierSelects();
     closeProductListModal();
 }
 
@@ -5787,6 +5838,7 @@ async function loadPurchaseOrderFormModuleCode(container) {
             });
         }
         loadNextSerialPreview('mod-PURCHASE_ORDER_FORM', 'PURCHASE_ORDER');
+        loadPoSuppliers();
         initFormWorkflow('mod-PURCHASE_ORDER_FORM');
 
     } catch (error) {
@@ -5827,10 +5879,12 @@ async function triggerPrintPurchaseOrderForm() {
         };
 
         const itemRemarks = getInputValue(9);
+        const supplierSel = cells[10] ? cells[10].querySelector('select.po-supplier') : null;
+        const supplierValue = supplierSel ? supplierSel.value.trim() : '';
 
         // A dept | B,C,D sku/desc/uom | E exp | F,G onhand/total |
         // H,I cost/srp | J qty | K date | L serial (stamped by backend) |
-        // M requested by | N item remarks
+        // M requested by | N item remarks | (15th) supplier -> column W
         rowsToSave.push([
             deptValue,
             getCellText(0), getCellText(1), getCellText(2),
@@ -5841,7 +5895,8 @@ async function triggerPrintPurchaseOrderForm() {
             formDate,
             '',
             requestedBy,
-            itemRemarks
+            itemRemarks,
+            supplierValue
         ]);
     });
 
@@ -8286,7 +8341,7 @@ function hideFormNotification(container) {
 
 // ---- Lock everything except PRINT once released --------------------
 function setFormLocked(container, locked) {
-    container.querySelectorAll('input, textarea').forEach(el => {
+    container.querySelectorAll('input, textarea, select').forEach(el => {
         const allowOutgoingRemarks = locked
             && !getSessionScope().isAdmin
             && el.classList.contains('row-remarks');
@@ -8356,10 +8411,12 @@ async function submitFormForApproval(container, map) {
                 '', '', '', '', incomingValue, formDate, '', '', remarksValue, itemRemarks
             ]);
         } else if (map.isPurchaseOrder) {
+            const supplierSel = cells[10] ? cells[10].querySelector('select.po-supplier') : null;
             rowsToSave.push([
                 outgoingValue, getCellText(0), getCellText(1), getCellText(2), getCellText(3),
                 getCellText(4), getCellText(5), getCellText(6), getCellText(7), getInputValue(8),
-                formDate, '', remarksValue, itemRemarks
+                formDate, '', remarksValue, itemRemarks,
+                supplierSel ? supplierSel.value.trim() : ''
             ]);
         } else {
             // A..J base cols, K-N + O-R blank, S incoming, T date, U status,
@@ -8418,7 +8475,12 @@ async function adminApproveAndRelease(container, map) {
     rows.forEach(row => {
         const rowNum = row.dataset.sheetRow;
         const qtyInput = row.querySelectorAll('td')[8] ? row.querySelectorAll('td')[8].querySelector('input') : null;
-        if (rowNum && qtyInput) items.push({ rowNum: Number(rowNum), qty: qtyInput.value.trim() });
+        const supplierSel = row.querySelector('select.po-supplier');
+        if (rowNum && qtyInput) {
+            const item = { rowNum: Number(rowNum), qty: qtyInput.value.trim() };
+            if (supplierSel) item.supplier = supplierSel.value.trim();
+            items.push(item);
+        }
     });
 
     if (items.length === 0) return showCustomAlert('Nothing to approve — open a pending submission from PENDING APPROVALS first.');
@@ -8671,9 +8733,15 @@ function loadGroupIntoTable(container, map, group, status, department, editableQ
             <td style="${tdStyle}">${editableQty || (status === 'RELEASED_TO_OUTGOING' && !getSessionScope().isAdmin)
                 ? `<input type="text" class="row-remarks" value="${escapeHtml(item.remarks || '')}" aria-label="Remarks for ${escapeHtml(item.description)}" style="width:100%; border:1px solid #ccc; border-radius:4px; padding:4px 6px; box-sizing:border-box;">`
                 : escapeHtml(item.remarks || '')}</td>
+            ${map.isPurchaseOrder
+                ? (editableQty
+                    ? poSupplierCellHtml(tdStyle, item.supplier || '')
+                    : `<td style="${tdStyle}">${escapeHtml(item.supplier || '')}</td>`)
+                : ''}
         `;
         tableBody.appendChild(tr);
     });
+    if (map.isPurchaseOrder && editableQty) refreshPoSupplierSelects();
 
     container.dataset.workflowStatus = status;
     container.dataset.workflowSerial = group.serial;
