@@ -2909,3 +2909,156 @@ function installClearAdjustmentsTrigger() {
   });
   ScriptApp.newTrigger("clearAdjustmentColumns").timeBased().everyDays(1).atHour(0).nearMinute(5).create();
 }
+
+// ==========================================
+// SMS REMINDER TO THE APPROVER (every 10 minutes while forms are pending)
+// ==========================================
+// HOW IT WORKS
+//   - USERDB column E holds each approver's mobile number (E2:E).
+//   - A time-driven trigger runs checkPendingApprovalsAndSendSms() every
+//     10 minutes. If ANY form is still PENDING_ADMIN_APPROVAL (REQUEST,
+//     TRANSFER, PULLOUT or PURCHASE ORDER), every approver with a number in
+//     column E gets a text. Once everything is approved, the texts stop.
+//   - Approvers = USERDB accounts that count as admin (isAdminAccount_) or
+//     whose username equals ADMIN_APPROVER_NAME, with a number in column E.
+//
+// ONE-TIME SETUP
+//   1) Apps Script -> Project Settings -> Script Properties -> add
+//        SMS_API_KEY = <your Semaphore API key>
+//   2) Run setupPendingApprovalSmsTrigger() ONCE from the editor and accept
+//      the permission prompt (it needs to call an outside web service).
+//   3) Deploy a new version of the web app.
+//   To stop the texts: run removePendingApprovalSmsTrigger().
+//   To test right now: run testSendApproverSms().
+
+const SMS_BRAND = "MOTHERS WONDERLAND FORM";   // shown at the start of every text
+const SMS_SENDER_NAME = "MWFORM";               // Semaphore sender name (max 11 chars, must be registered with Semaphore)
+const SMS_PHONE_COL_INDEX = 4;                  // USERDB column E (0-based index)
+const SMS_INTERVAL_MINUTES = 10;
+const SMS_ACTIVE_FROM_HOUR = 0;                 // only send between these hours (Manila time). 0 and 24 = all day.
+const SMS_ACTIVE_TO_HOUR = 24;                  // e.g. 6 and 22 = no texts from 10 PM to 6 AM
+
+function setupPendingApprovalSmsTrigger() {
+  removePendingApprovalSmsTrigger();
+  ScriptApp.newTrigger("checkPendingApprovalsAndSendSms")
+    .timeBased()
+    .everyMinutes(SMS_INTERVAL_MINUTES)
+    .create();
+}
+
+function removePendingApprovalSmsTrigger() {
+  ScriptApp.getProjectTriggers().forEach(function (t) {
+    if (t.getHandlerFunction() === "checkPendingApprovalsAndSendSms") ScriptApp.deleteTrigger(t);
+  });
+}
+
+function checkPendingApprovalsAndSendSms() {
+  const lock = LockService.getScriptLock();
+  if (!lock.tryLock(5000)) return; // another run is still going
+  try {
+    const hour = Number(Utilities.formatDate(new Date(), "Asia/Manila", "H"));
+    if (hour < SMS_ACTIVE_FROM_HOUR || hour >= SMS_ACTIVE_TO_HOUR) return;
+
+    const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
+    const pending = countPendingApprovals_(ss);
+    if (!pending.total) return; // nothing waiting -> no text
+
+    const numbers = getApproverPhoneNumbers_(ss);
+    if (!numbers.length) { Logger.log("SMS: no approver number found in USERDB column E."); return; }
+
+    const labels = { REQUEST_RELEASED: "REQUEST", TRANSFER: "TRANSFER", PULLOUT: "PULLOUT", PURCHASE_ORDER: "PURCHASE ORDER" };
+    const parts = Object.keys(pending.byForm).map(function (k) { return (labels[k] || k) + " " + pending.byForm[k]; });
+    const message = SMS_BRAND + ": You have " + pending.total + " form" + (pending.total > 1 ? "s" : "") +
+      " waiting for your approval (" + parts.join(", ") + "). Please log in and approve.";
+
+    numbers.forEach(function (n) { sendSms_(n, message); });
+  } catch (err) {
+    Logger.log("checkPendingApprovalsAndSendSms error: " + err);
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+// Counts forms (by distinct serial) still PENDING_ADMIN_APPROVAL on every workflow sheet.
+function countPendingApprovals_(ss) {
+  const byForm = {};
+  let total = 0;
+  Object.keys(WORKFLOW_CONFIG).forEach(function (key) {
+    const cfg = WORKFLOW_CONFIG[key];
+    const sheet = ss.getSheetByName(cfg.sheet);
+    if (!sheet || sheet.getLastRow() < 2) return;
+    const statusIdx = columnLetterToIndex_(cfg.statusCol) - 1;
+    const serialIdx = columnLetterToIndex_(cfg.serialCol) - 1;
+    const width = Math.max(statusIdx, serialIdx) + 1;
+    const rows = sheet.getRange(2, 1, sheet.getLastRow() - 1, width).getDisplayValues();
+    const seen = {};
+    let count = 0;
+    rows.forEach(function (r, i) {
+      if (String(r[statusIdx]).trim().toUpperCase() !== "PENDING_ADMIN_APPROVAL") return;
+      const s = String(r[serialIdx] || "").trim() || ("row" + i); // rows without a serial count individually
+      if (seen[s]) return;
+      seen[s] = true;
+      count++;
+    });
+    if (count) { byForm[key] = count; total += count; }
+  });
+  return { total: total, byForm: byForm };
+}
+
+// Mobile numbers (USERDB column E) of the approver accounts, de-duplicated.
+function getApproverPhoneNumbers_(ss) {
+  const sheet = ss.getSheetByName(SHEET_NAME);
+  if (!sheet || sheet.getLastRow() < 2) return [];
+  const data = sheet.getRange(2, 1, sheet.getLastRow() - 1, SMS_PHONE_COL_INDEX + 1).getDisplayValues();
+  const out = [];
+  data.forEach(function (r) {
+    const username = String(r[0] || "").trim();
+    const status = String(r[2] || "").trim().toUpperCase();
+    const client = String(r[3] || "").trim();
+    if (!username || (status && status !== "ACTIVE")) return;
+    const isApprover = isAdminAccount_(username, client) ||
+      username.toUpperCase() === String(ADMIN_APPROVER_NAME).toUpperCase();
+    if (!isApprover) return;
+    const num = normalizePhNumber_(r[SMS_PHONE_COL_INDEX]);
+    if (num && out.indexOf(num) === -1) out.push(num);
+  });
+  return out;
+}
+
+// 09171234567 / 9171234567 / +63 917 123 4567 -> 639171234567
+function normalizePhNumber_(raw) {
+  let d = String(raw || "").replace(/\D/g, "");
+  if (!d) return "";
+  if (d.indexOf("63") === 0 && d.length === 12) return d;
+  if (d.indexOf("0") === 0 && d.length === 11) return "63" + d.substring(1);
+  if (d.indexOf("9") === 0 && d.length === 10) return "63" + d;
+  return "";
+}
+
+// Semaphore (Philippines) SMS API. API key lives in Script Properties, never in the code.
+function sendSms_(number, message) {
+  const apiKey = PropertiesService.getScriptProperties().getProperty("SMS_API_KEY");
+  if (!apiKey) { Logger.log("SMS: SMS_API_KEY is not set in Script Properties."); return false; }
+  try {
+    const res = UrlFetchApp.fetch("https://api.semaphore.co/api/v4/messages", {
+      method: "post",
+      payload: { apikey: apiKey, number: number, message: message, sendername: SMS_SENDER_NAME },
+      muteHttpExceptions: true
+    });
+    const code = res.getResponseCode();
+    // Always log what Semaphore answered so a missing text can be diagnosed.
+    Logger.log("SMS to " + number + " -> HTTP " + code + ": " + res.getContentText());
+    return code >= 200 && code < 300;
+  } catch (err) {
+    Logger.log("SMS error: " + err);
+    return false;
+  }
+}
+
+// Run manually from the editor to confirm the numbers + API key work.
+function testSendApproverSms() {
+  const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
+  const numbers = getApproverPhoneNumbers_(ss);
+  Logger.log("Approver numbers found: " + JSON.stringify(numbers));
+  numbers.forEach(function (n) { sendSms_(n, SMS_BRAND + ": test message. SMS reminders are working."); });
+}
